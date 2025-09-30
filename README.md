@@ -56,7 +56,7 @@ git clone https://github.com/guqiong96/Lvllm.git
 python use_existing_torch.py
 
 # 安装构建依赖
-MAX_JOBS=32 NVCC_THREADS=1 pip install -r requirements/build.txt
+pip install -r requirements/build.txt
 ```
 
 ### 4. 克隆第三方依赖库(可选,github网络好可以直接第5步)
@@ -83,15 +83,15 @@ pip install flashinfer-python
 
 ```bash
 cd ~/Downloads/Lvllm
-pip install -e . --no-build-isolation -vvv
+MAX_JOBS=32 NVCC_THREADS=1 pip install -e . --no-build-isolation -MAX_JOBS=32 NVCC_THREADS=1 vv
 ```
 
 ## 启动命令
 
-使用以下命令启动Lvllm服务:
+使用以下命令启动Lvllm服务(需要去修改config.yaml里面配置参数）:
 
 ```bash
-LK_THREADS="88" OMP_NUM_THREADS="88" VLLM_ATTENTION_BACKEND="FLASHINFER" vllm serve --config ~/Downloads/Lvllm/config.yaml
+LK_THREADS="88" OMP_NUM_THREADS="88"  vllm serve --config ~/Downloads/Lvllm/config.yaml
 ```
 # 使用flashinfer-python(可选)
 ```bash 
