@@ -1,5 +1,5 @@
-model: "/home/guqiong/Downloads/Qwen3-Next-80B-A3B-Instruct"
-host: "::"
+model: "/Downloads/Qwen3-Next-80B-A3B-Instruct"
+host: "0.0.0.0"
 port: 8070
 tensor-parallel-size: 1
 max-model-len: 10000
