@@ -77,7 +77,7 @@ LK_THREADS="88" OMP_NUM_THREADS="88" VLLM_ATTENTION_BACKEND="FLASHINFER" TORCH_C
 配置文件 `config.yaml` 包含以下主要参数：
 
 - `model`: 模型路径 (`/Downloads/Qwen3-Next-80B-A3B-Instruct`)
-- `host`: 主机地址 (`::`，表示监听所有IPv4和IPv6地址)
+- `host`: 主机地址 (`0.0.0.0`，表示监听所有IPv4地址)
 - `port`: 服务端口 (`8070`)
 - `tensor-parallel-size`: 张量并行大小 (`1`)
 - `max-model-len`: 最大模型序列长度 (`10000`)
