@@ -83,7 +83,7 @@ pip install flashinfer-python
 
 ```bash
 cd ~/Downloads/Lvllm
-MAX_JOBS=32 NVCC_THREADS=1 pip install -e . --no-build-isolation -MAX_JOBS=32 NVCC_THREADS=1 vv
+MAX_JOBS=32 NVCC_THREADS=1 pip install -e . --no-build-isolation --vvv
 ```
 
 ## 启动命令
