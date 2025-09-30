@@ -1,4 +1,4 @@
-## LvLLM 2025-09-30 vllm使用numa加速moe模型！！！ 
+## LvLLM 2025-09-30 Lvllm使用numa加速moe模型！！！ 
 
 当前限制：
 1、仅支持dtype: "bfloat16"
@@ -23,15 +23,15 @@ sudo sh cuda_12.8.1_570.124.06_linux.run
 ### 2. 创建并激活Python环境
 
 ```bash
-conda create -n vllm python==3.12.11
-conda activate vllm
+conda create -n Lvllm python==3.12.11
+conda activate Lvllm
 ```
 
 ### 3. 克隆仓库并安装依赖
 
 ```bash
-# 克隆vLLM仓库
-git clone https://github.com/vllm-project/vllm.git
+# 克隆Lvllm仓库
+git clone https://github.com/guqiong96/Lvllm.git
 
 # 使用现有PyTorch
 python use_existing_torch.py
@@ -43,7 +43,7 @@ pip install -r requirements/build.txt
 ### 4. 克隆第三方依赖库(可选,github网络好可以直接第5步)
 
 ```bash
-cd ~/Downloads/vllm/.deps
+cd ~/Downloads/Lvllm/.deps
 
 git clone https://github.com/NVIDIA/cutlass.git cutlass-src
 git clone https://github.com/oneapi-src/oneDNN.git oneDNN-src
@@ -57,19 +57,19 @@ git checkout a94e6ff8774b7c9f950d9545baf0ce35e8d1ed2f
 cd ..
 ```
 
-### 5. 安装vLLM
+### 5. 安装Lvllm
 
 ```bash
-cd ~/Downloads/vllm
+cd ~/Downloads/Lvllm
 pip install -e . --no-build-isolation -vvv
 ```
 
 ## 启动命令
 
-使用以下命令启动vLLM服务:
+使用以下命令启动Lvllm服务:
 
 ```bash
-LK_THREADS="88" OMP_NUM_THREADS="88" VLLM_ATTENTION_BACKEND="FLASHINFER" TORCH_COMPILE_DISABLE="1" vllm serve --config ~/Downloads/vllm/config.yaml
+LK_THREADS="88" OMP_NUM_THREADS="88" VLLM_ATTENTION_BACKEND="FLASHINFER" TORCH_COMPILE_DISABLE="1" vllm serve --config ~/Downloads/Lvllm/config.yaml
 ```
 
 ### 配置说明
