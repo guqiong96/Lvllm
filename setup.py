@@ -594,6 +594,7 @@ if _is_cuda():
 if _build_custom_ops():
     ext_modules.append(CMakeExtension(name="vllm._C"))
 
+ext_modules.append(CMakeExtension(name="vllm._lk_C"))
 package_data = {
     "vllm": [
         "py.typed",

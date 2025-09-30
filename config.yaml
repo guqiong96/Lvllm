@@ -1,0 +1,18 @@
+model: "/home/guqiong/Downloads/Qwen3-Next-80B-A3B-Instruct"
+host: "::"
+port: 8070
+tensor-parallel-size: 1
+max-model-len: 10000
+gpu-memory-utilization: 0.8
+max-num-seqs: 4
+trust-remote-code: true
+tokenizer-mode: "auto"
+swap-space: 4
+served-model-name: "Qwen3-Next-80B-A3B-Instruct"
+dtype: "bfloat16"
+compilation_config.cudagraph_mode: "NONE"
+enable_prefix_caching: true
+enable-chunked-prefill: true
+max_num_batched_tokens: 1024
+
+#async-scheduling: true

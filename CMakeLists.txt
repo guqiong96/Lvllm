@@ -212,7 +212,35 @@ endif()
 
 #
 # Define other extension targets
-#
+# 
+
+# Set LLAMA_CPP_REVISION. Used for FetchContent.
+set(LLAMA_CPP_REVISION "a94e6ff8774b7c9f950d9545baf0ce35e8d1ed2f" CACHE STRING "llama.cpp revision to use")
+
+set(LLAMA_BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared library")
+set(CMAKE_POSITION_INDEPENDENT_CODE ON CACHE BOOL "Position independent code")
+
+# Use the specified LLAMA_CPP source directory for compilation if VLLM_LLAMA_CPP_SRC_DIR is provided
+if (DEFINED ENV{VLLM_LLAMA_CPP_SRC_DIR})
+  set(VLLM_LLAMA_CPP_SRC_DIR $ENV{VLLM_LLAMA_CPP_SRC_DIR})
+endif()
+
+if(VLLM_LLAMA_CPP_SRC_DIR)
+  if(NOT IS_ABSOLUTE VLLM_LLAMA_CPP_SRC_DIR)
+    get_filename_component(VLLM_LLAMA_CPP_SRC_DIR "${VLLM_LLAMA_CPP_SRC_DIR}" ABSOLUTE)
+  endif()
+  message(STATUS "The VLLM_LLAMA_CPP_SRC_DIR is set, using ${VLLM_LLAMA_CPP_SRC_DIR} for compilation")
+  FetchContent_Declare(llama_cpp SOURCE_DIR ${VLLM_LLAMA_CPP_SRC_DIR})
+else()
+  FetchContent_Declare(
+      llama_cpp
+      GIT_REPOSITORY https://github.com/ggerganov/llama.cpp.git
+      GIT_TAG ${LLAMA_CPP_REVISION}
+      GIT_PROGRESS TRUE 
+      GIT_SHALLOW FALSE
+  )
+endif()
+FetchContent_MakeAvailable(llama_cpp)
 
 #
 # cumem_allocator extension
@@ -967,3 +995,158 @@ if (VLLM_GPU_LANG STREQUAL "CUDA")
     # vllm-flash-attn should be last as it overwrites some CMake functions
     include(cmake/external_projects/vllm_flash_attn.cmake)
 endif ()
+ 
+append_cmake_prefix_path("pybind11" "pybind11.get_cmake_dir()")
+find_package(pybind11 REQUIRED)
+
+include(cmake/cpu_flags_detection.cmake)
+ 
+set(LLAMAFILE_BASE_FILES
+  "csrc/lk/llamafile/sgemm.h"
+  "csrc/lk/llamafile/sgemm.cpp"
+  "csrc/lk/llamafile/tinyblas_cpu.h"
+  "csrc/lk/llamafile/flags.h"
+  "csrc/lk/llamafile/flags.cpp"
+  "csrc/lk/llamafile/macros.h"
+  "csrc/lk/llamafile/micros.h"
+  "csrc/lk/llamafile/numba.h"
+  "csrc/lk/llamafile/bench.h"
+)
+ 
+set(LLAMAFILE_INC_FILES
+  "csrc/lk/llamafile/iqk_mul_mat.inc"
+  "csrc/lk/llamafile/tinyblas_cpu_mixmul.inc"
+  "csrc/lk/llamafile/tinyblas_cpu_sgemm.inc"
+)
+ 
+set(LLAMAFILE_ARCH_FILES)
+ 
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64") 
+  list(APPEND LLAMAFILE_ARCH_FILES
+    "csrc/lk/llamafile/tinyblas_cpu_sgemm_amd_avx.cpp"
+    "csrc/lk/llamafile/tinyblas_cpu_mixmul_amd_avx.cpp"
+  )
+   
+  if(AVX2_FOUND)
+    list(APPEND LLAMAFILE_ARCH_FILES
+      "csrc/lk/llamafile/iqk_mul_mat_amd_avx2.cpp"
+      "csrc/lk/llamafile/tinyblas_cpu_sgemm_amd_avx2.cpp"
+      "csrc/lk/llamafile/tinyblas_cpu_mixmul_amd_avx2.cpp"
+    )
+  endif()
+   
+  if(AVX512_FOUND AND NOT AVX512_DISABLED)
+    list(APPEND LLAMAFILE_ARCH_FILES
+      "csrc/lk/llamafile/tinyblas_cpu_sgemm_amd_avx512f.cpp"
+      "csrc/lk/llamafile/tinyblas_cpu_mixmul_amd_avx512f.cpp"
+    )
+     
+    if(AVX512VNNI_FOUND OR ENABLE_AVX512VNNI)
+      list(APPEND LLAMAFILE_ARCH_FILES
+        "csrc/lk/llamafile/tinyblas_cpu_sgemm_amd_avxvnni.cpp"
+        "csrc/lk/llamafile/tinyblas_cpu_mixmul_amd_avxvnni.cpp"
+      )
+    endif()
+  endif()
+   
+  list(APPEND LLAMAFILE_ARCH_FILES
+    "csrc/lk/llamafile/tinyblas_cpu_sgemm_amd_fma.cpp"
+    "csrc/lk/llamafile/tinyblas_cpu_mixmul_amd_fma.cpp"
+  )
+   
+  list(APPEND LLAMAFILE_ARCH_FILES
+    "csrc/lk/llamafile/iqk_mul_mat_amd_zen4.cpp"
+    "csrc/lk/llamafile/tinyblas_cpu_sgemm_amd_zen4.cpp"
+    "csrc/lk/llamafile/tinyblas_cpu_mixmul_amd_zen4.cpp"
+  )
+endif()
+ 
+if(ASIMD_FOUND) 
+  list(APPEND LLAMAFILE_ARCH_FILES
+    "csrc/lk/llamafile/tinyblas_cpu_sgemm_arm80.cpp"
+    "csrc/lk/llamafile/tinyblas_cpu_mixmul_arm80.cpp"
+  )
+   
+  if(ARM_BF16_FOUND)
+    list(APPEND LLAMAFILE_ARCH_FILES
+      "csrc/lk/llamafile/iqk_mul_mat_arm82.cpp"
+      "csrc/lk/llamafile/tinyblas_cpu_sgemm_arm82.cpp"
+      "csrc/lk/llamafile/tinyblas_cpu_mixmul_arm82.cpp"
+    )
+  endif()
+endif()
+ 
+list(APPEND LLAMAFILE_ARCH_FILES
+  "csrc/lk/llamafile/tinyblas_cpu_unsupported.cpp"
+)
+ 
+set(LK_EXT_SRC
+  "csrc/lk/amx_gemm.cpp"
+  "csrc/lk/backend_numa.cpp"
+  "csrc/lk/moe.cpp"
+  "csrc/lk/lk_bindings.cpp"
+  "csrc/lk/amx_gemm.hpp"
+  "csrc/lk/backend_numa.h"
+  "csrc/lk/conversion.h"
+  "csrc/lk/moe.h"
+   
+  ${LLAMAFILE_BASE_FILES}
+  ${LLAMAFILE_INC_FILES}
+  ${LLAMAFILE_ARCH_FILES}
+)
+ 
+pybind11_add_module(_lk_C MODULE ${LK_EXT_SRC})
+
+set_target_properties(_lk_C PROPERTIES
+  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/vllm"
+  PREFIX ""
+  SUFFIX ".abi3.so"
+)
+
+if(VLLM_GPU_LANG STREQUAL "HIP")
+  target_include_directories(_lk_C PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/csrc)
+else()
+  target_include_directories(_lk_C PRIVATE csrc)
+endif()
+
+if(VLLM_GPU_LANG STREQUAL "CUDA")
+  target_link_libraries(_lk_C PRIVATE CUDA::cudart CUDA::cuda_driver)
+endif()
+
+target_include_directories(_lk_C PRIVATE ${llama_cpp_SOURCE_DIR} )
+ 
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+  # Use minimal optimization and enable debug info for better debugging experience
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(_lk_C PRIVATE -fPIC -O0 -g3 -fno-omit-frame-pointer -fopenmp -fdebug-prefix-map=${CMAKE_SOURCE_DIR}=${CMAKE_SOURCE_DIR} ${CXX_COMPILE_FLAGS})
+  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(_lk_C PRIVATE -fPIC -O0 -g3 -fno-omit-frame-pointer -fopenmp -fdebug-prefix-map=${CMAKE_SOURCE_DIR}=${CMAKE_SOURCE_DIR} ${CXX_COMPILE_FLAGS})
+  endif()
+else()
+  # Keep original optimization settings for release builds
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(_lk_C PRIVATE -fPIC -O3 -ffast-math -fopenmp ${CXX_COMPILE_FLAGS})
+  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(_lk_C PRIVATE -fPIC -O3 -ffast-math -fopenmp ${CXX_COMPILE_FLAGS})
+  endif()
+endif()
+
+if (USE_ONEDNN)
+  target_link_libraries(_lk_C PRIVATE dnnl_ext)
+endif() 
+target_link_libraries(_lk_C PRIVATE llama)
+ 
+if(UNIX AND NOT APPLE)
+  find_library(NUMA_LIBRARY numa REQUIRED)
+  target_link_libraries(_lk_C PRIVATE ${NUMA_LIBRARY})
+endif()
+ 
+if(UNIX)
+  target_link_libraries(_lk_C PRIVATE pthread dl)
+endif()
+ 
+target_compile_features(_lk_C PRIVATE cxx_std_11)
+ 
+source_group("lk" FILES ${LK_EXT_SRC})
+ 
+install(TARGETS _lk_C LIBRARY DESTINATION vllm COMPONENT _lk_C)

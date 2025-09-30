@@ -24,6 +24,7 @@ from vllm.model_executor.models.adapters import (
 from vllm.model_executor.models.interfaces import (SupportsQuant,
                                                    supports_multimodal)
 from vllm.utils import is_pin_memory_available
+from vllm.model_executor.layers.fused_moe.layer import FusedMoE
 
 logger = init_logger(__name__)
 
@@ -110,6 +111,8 @@ def process_weights_after_loading(model: nn.Module, model_config: ModelConfig,
             # parameters onto device for processing and back off after.
             with device_loading_context(module, target_device):
                 quant_method.process_weights_after_loading(module)
+        if isinstance(module, FusedMoE):
+            module.process_weights_after_loading()
 
     # Currently only used by MLA.
     # NOTE: This intentionally happens after other modules so we can easily

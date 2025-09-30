@@ -67,7 +67,18 @@ if current_platform.is_tpu():
 else:
     fused_moe_pallas = None  # type: ignore
 
+
 logger = init_logger(__name__)
+import threading
+import ctypes
+import numpy as np
+try:
+    import vllm._lk_C
+    LK_MOE_AVAILABLE = True
+except ImportError:
+    LK_MOE_AVAILABLE = False
+    logger.warning("Failed to import vllm._lk_C module, lk::MOE implementation will not be available")
+
 
 
 class FusedMoeWeightScaleSupported(Enum):
@@ -314,12 +325,15 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
     def create_weights(self, layer: torch.nn.Module, num_experts: int,
                        hidden_size: int, intermediate_size_per_partition: int,
                        params_dtype: torch.dtype, **extra_weight_attrs):
-        # Fused gate_up_proj (column parallel)
+        device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
+        if isinstance(layer, FusedMoE) and LK_MOE_AVAILABLE:
+            device = "cpu"  
+        # Fused gate_up_proj (column parallel) 
         w13_weight = torch.nn.Parameter(torch.empty(
             num_experts,
             2 * intermediate_size_per_partition,
             hidden_size,
-            dtype=params_dtype),
+            dtype=params_dtype, device=device),
                                         requires_grad=False)
         layer.register_parameter("w13_weight", w13_weight)
         set_weight_attrs(w13_weight, extra_weight_attrs)
@@ -327,7 +341,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
             w13_bias = torch.nn.Parameter(torch.zeros(
                 num_experts,
                 2 * intermediate_size_per_partition,
-                dtype=params_dtype),
+                dtype=params_dtype, device=device),
                                           requires_grad=False)
             layer.register_parameter("w13_bias", w13_bias)
             set_weight_attrs(w13_bias, extra_weight_attrs)
@@ -336,14 +350,14 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
             num_experts,
             hidden_size,
             intermediate_size_per_partition,
-            dtype=params_dtype),
+            dtype=params_dtype, device=device),
                                        requires_grad=False)
         layer.register_parameter("w2_weight", w2_weight)
         set_weight_attrs(w2_weight, extra_weight_attrs)
         if self.moe.has_bias:
             w2_bias = torch.nn.Parameter(torch.zeros(num_experts,
                                                      hidden_size,
-                                                     dtype=params_dtype),
+                                                     dtype=params_dtype, device="cpu"),
                                          requires_grad=False)
             layer.register_parameter("w2_bias", w2_bias)
             set_weight_attrs(w2_bias, extra_weight_attrs)
@@ -839,8 +853,15 @@ class FusedMoE(CustomOp):
         num_redundant_experts: int = 0,
         has_bias: bool = False,
         is_sequence_parallel=False,
+        use_lk_moe: bool = True,
     ):
         super().__init__()
+        
+        self.use_lk_moe = use_lk_moe and LK_MOE_AVAILABLE
+        self.lk_moe = None
+        self.lk_moe_config = None
+        self._lk_moe_init_lock = threading.Lock() 
+        
         if params_dtype is None:
             params_dtype = torch.get_default_dtype()
         self.params_dtype = params_dtype
@@ -1790,29 +1811,37 @@ class FusedMoE(CustomOp):
                                                          chunk_size, :]  # type: ignore
             staged_hidden_states.copy_(hidden_states, non_blocking=True)
             staged_router_logits.copy_(router_logits, non_blocking=True)
+            
+            if self.use_lk_moe and self.lk_moe is not None:
+                try:  
+                    final_hidden_states = self.forward_lk(staged_hidden_states, staged_router_logits)
+                except Exception as e:
+                    logger.error(f"Error in lk::MOE forward with chunk size {chunk_size}: {e}") 
+                    self.use_lk_moe = False
+            if not self.use_lk_moe:
 
-            # Matrix multiply.
-            final_hidden_states = self.quant_method.apply(
-                layer=self,
-                x=staged_hidden_states,
-                router_logits=staged_router_logits,
-                top_k=self.top_k,
-                renormalize=self.renormalize,
-                use_grouped_topk=self.use_grouped_topk,
-                global_num_experts=self.global_num_experts,
-                expert_map=self.expert_map,
-                topk_group=self.topk_group,
-                num_expert_group=self.num_expert_group,
-                custom_routing_function=self.custom_routing_function,
-                scoring_func=self.scoring_func,
-                routed_scaling_factor=self.routed_scaling_factor,
-                e_score_correction_bias=self.e_score_correction_bias,
-                activation=self.activation,
-                enable_eplb=self.enable_eplb,
-                expert_load_view=self.expert_load_view,
-                logical_to_physical_map=self.logical_to_physical_map,
-                logical_replica_count=self.logical_replica_count,
-            )
+                # Matrix multiply.
+                final_hidden_states = self.quant_method.apply(
+                    layer=self,
+                    x=staged_hidden_states,
+                    router_logits=staged_router_logits,
+                    top_k=self.top_k,
+                    renormalize=self.renormalize,
+                    use_grouped_topk=self.use_grouped_topk,
+                    global_num_experts=self.global_num_experts,
+                    expert_map=self.expert_map,
+                    topk_group=self.topk_group,
+                    num_expert_group=self.num_expert_group,
+                    custom_routing_function=self.custom_routing_function,
+                    scoring_func=self.scoring_func,
+                    routed_scaling_factor=self.routed_scaling_factor,
+                    e_score_correction_bias=self.e_score_correction_bias,
+                    activation=self.activation,
+                    enable_eplb=self.enable_eplb,
+                    expert_load_view=self.expert_load_view,
+                    logical_to_physical_map=self.logical_to_physical_map,
+                    logical_replica_count=self.logical_replica_count,
+                )
 
             assert self.shared_experts is None or isinstance(
                 final_hidden_states, tuple)
@@ -1875,7 +1904,7 @@ class FusedMoE(CustomOp):
         # Route to the chunked forward path using the FlashInfer Cutlass kernel
         # only when data parallelism (DP) is enabled.
         _use_flashinfer_cutlass_kernels = (self.dp_size > 1 and
-                                           self.use_flashinfer_cutlass_kernels)
+                                           self.use_flashinfer_cutlass_kernels)  
 
         if (self.moe_parallel_config.use_pplx_kernels
                 or self.moe_parallel_config.use_deepep_ll_kernels
@@ -1900,29 +1929,36 @@ class FusedMoE(CustomOp):
             hidden_states, router_logits = get_ep_group().dispatch(
                 hidden_states, router_logits)
 
-        # Matrix multiply.
-        final_hidden_states = self.quant_method.apply(
-            layer=self,
-            x=hidden_states,
-            router_logits=router_logits,
-            top_k=self.top_k,
-            renormalize=self.renormalize,
-            use_grouped_topk=self.use_grouped_topk,
-            global_num_experts=self.global_num_experts,
-            expert_map=self.expert_map,
-            topk_group=self.topk_group,
-            num_expert_group=self.num_expert_group,
-            custom_routing_function=self.custom_routing_function,
-            scoring_func=self.scoring_func,
-            routed_scaling_factor=self.routed_scaling_factor,
-            e_score_correction_bias=self.e_score_correction_bias,
-            activation=self.activation,
-            apply_router_weight_on_input=self.apply_router_weight_on_input,
-            enable_eplb=self.enable_eplb,
-            expert_load_view=self.expert_load_view,
-            logical_to_physical_map=self.logical_to_physical_map,
-            logical_replica_count=self.logical_replica_count,
-        )
+        if self.use_lk_moe and self.lk_moe is not None:
+            try:  
+                final_hidden_states = self.forward_lk(hidden_states, router_logits)
+            except Exception as e:
+                logger.error(f"Error in lk::MOE forward: {e}") 
+                self.use_lk_moe = False
+        if not self.use_lk_moe:
+            # Matrix multiply.
+            final_hidden_states = self.quant_method.apply(
+                layer=self,
+                x=hidden_states,
+                router_logits=router_logits,
+                top_k=self.top_k,
+                renormalize=self.renormalize,
+                use_grouped_topk=self.use_grouped_topk,
+                global_num_experts=self.global_num_experts,
+                expert_map=self.expert_map,
+                topk_group=self.topk_group,
+                num_expert_group=self.num_expert_group,
+                custom_routing_function=self.custom_routing_function,
+                scoring_func=self.scoring_func,
+                routed_scaling_factor=self.routed_scaling_factor,
+                e_score_correction_bias=self.e_score_correction_bias,
+                activation=self.activation,
+                apply_router_weight_on_input=self.apply_router_weight_on_input,
+                enable_eplb=self.enable_eplb,
+                expert_load_view=self.expert_load_view,
+                logical_to_physical_map=self.logical_to_physical_map,
+                logical_replica_count=self.logical_replica_count,
+            )
 
         if shared_output is not None:
             assert not isinstance(final_hidden_states, tuple)
@@ -1950,7 +1986,385 @@ class FusedMoE(CustomOp):
                 reduce_output(final_hidden_states[0], do_combine=False),
                 reduce_output(final_hidden_states[1]),
             )
+            
+    def process_weights_after_loading(self):
+        try: 
+             
+            if not hasattr(self, 'w13_weight') or not hasattr(self, 'w2_weight'):
+                logger.error("w13_weight or w2_weight not found in layer")
+                return
+            
+            w13_weight = self.w13_weight
+            w2_weight = self.w2_weight
+              
+            if not w13_weight.device.type == 'cpu' or not w2_weight.device.type == 'cpu':
+                logger.warning("Weights are still on GPU, can't use lk moe ...")
+                return
+            
+            w13_tensor = w13_weight.clone().contiguous()   
+            w2_tensor = w2_weight.clone().contiguous()
+            
+            num_experts, total_intermediate_size, hidden_size = w13_tensor.shape
+            intermediate_size = total_intermediate_size // 2
+              
+            gate_proj_view = w13_tensor.narrow(1, 0, intermediate_size).contiguous()
+            up_proj_view = w13_tensor.narrow(1, intermediate_size, intermediate_size).contiguous()
+            
+            gate_proj_ptr = gate_proj_view.data_ptr()
+            up_proj_ptr = up_proj_view.data_ptr()
+            down_proj_ptr = w2_tensor.data.data_ptr()
+             
+            moe_config = vllm._lk_C.MOEConfig(
+                self.local_num_experts,        # expert_num
+                self.top_k,                    # routed_expert_num
+                self.hidden_size,              # hidden_size
+                intermediate_size,             # intermediate_size
+                32,                            # stride
+                10,                            # group_min_len
+                1024,                          # group_max_len
+                gate_proj_ptr,                 # gate_proj
+                up_proj_ptr,                   # up_proj
+                down_proj_ptr,                 # down_proj
+                30,                            # gate_type (BF16)
+                30,                            # up_type (BF16)
+                30,                            # down_type (BF16)
+                30                             # hidden_type (BF16)
+            )
+               
+            self.lk_moe_config = moe_config
+            self.lk_moe = vllm._lk_C.MOE(moe_config)
+            
+             
+            del gate_proj_view, up_proj_view        
+            del w13_tensor, w2_tensor
+            del w13_weight, w2_weight
+            del self.w13_weight, self.w2_weight 
+            
+            import gc
+            gc.collect()  
+            
+            self._initialize_cuda_graph_buffers()
+             
+            logger.info(f"Initialized lk::MOE with {self.local_num_experts} experts")
+        except Exception as e:
+            logger.error(f"Failed to initialize lk::MOE: {e}")
+            self.use_lk_moe = False
+            self.lk_moe = None
+            self.lk_moe_config = None
+        if not self.use_lk_moe or not LK_MOE_AVAILABLE:
+            return
+                
+    def forward_lk(self, hidden_states: torch.Tensor, router_logits: torch.Tensor) -> torch.Tensor:
+        max_num_batched_tokens = 2048
+        total_tokens = hidden_states.size(0)
+        if total_tokens <= max_num_batched_tokens: 
+            return self._process_valid_inputs(hidden_states, router_logits)
+        else: 
+            output = torch.empty_like(hidden_states)
+             
+            for start_idx in range(0, total_tokens, max_num_batched_tokens):
+                end_idx = min(start_idx + max_num_batched_tokens, total_tokens) 
+                chunk_output = self._process_valid_inputs(
+                    hidden_states[start_idx:end_idx], 
+                    router_logits[start_idx:end_idx]
+                ) 
+                output[start_idx:end_idx] = chunk_output
+            
+            return output
+    
+    def _initialize_cuda_graph_buffers(self): 
+        if not hasattr(FusedMoE, 'cuda_graphs_dict'): 
+            max_num_batched_tokens = 2048
+                
+            FusedMoE.cuda_graphs_dict = { 
+                "default": [1, 2, 4] + list(range(8, max_num_batched_tokens+1, 8)), 
+                "decode": [1, 2, 4] + list(range(8, max_num_batched_tokens+1, 8)),  
+            }
+            
+            FusedMoE.input_tensor_cpu = {}
+            FusedMoE.expert_ids_cpu = {}
+            FusedMoE.weights_cpu = {}
+            FusedMoE.output_cpu = {}
+            FusedMoE.bsz_tensor_cpu = {}
+            FusedMoE.output_gpu = {}
+            
+            num_experts_per_tok = self.top_k
+            hidden_size = self.hidden_size
+            
+            for mode, cuda_graphs in FusedMoE.cuda_graphs_dict.items():
+                FusedMoE.output_gpu[mode] = [
+                    torch.zeros((batch_size, hidden_size), device="cuda", dtype=torch.bfloat16)
+                    for batch_size in cuda_graphs
+                ]
+                
+                FusedMoE.input_tensor_cpu[mode] = [
+                    torch.zeros((batch_size, self.hidden_size), device="cpu", pin_memory=True)
+                    for batch_size in cuda_graphs
+                ]
+                FusedMoE.expert_ids_cpu[mode] = [
+                    torch.zeros((batch_size, num_experts_per_tok), device="cpu", dtype=torch.long, pin_memory=True)
+                    for batch_size in cuda_graphs
+                ]
+                FusedMoE.weights_cpu[mode] = [
+                    torch.zeros((batch_size, num_experts_per_tok), device="cpu", dtype=torch.float32, pin_memory=True)
+                    for batch_size in cuda_graphs
+                ]
+                FusedMoE.output_cpu[mode] = [
+                    torch.zeros((batch_size, hidden_size), device="cpu", pin_memory=True, dtype=torch.bfloat16)
+                    for batch_size in cuda_graphs
+                ]
+                FusedMoE.bsz_tensor_cpu[mode] = [
+                    torch.zeros((1), device="cpu", dtype=torch.int32, pin_memory=True)
+                    for _ in range(len(cuda_graphs))
+                ]
+            
+            FusedMoE.cuda_graphs = FusedMoE.cuda_graphs_dict["default"]
+        
+    def _find_best_graph_index(self, total_tokens: int, mode: str = "default") -> int: 
+        if not hasattr(FusedMoE, 'cuda_graphs_dict') or mode not in FusedMoE.cuda_graphs_dict: 
+            if hasattr(FusedMoE, 'cuda_graphs') and FusedMoE.cuda_graphs:
+                cuda_graphs = FusedMoE.cuda_graphs
+            else: 
+                raise ValueError(f"No CUDA graphs initialized for mode '{mode}'.")
+        else:
+            cuda_graphs = FusedMoE.cuda_graphs_dict[mode]
+        
+        if not cuda_graphs:
+            raise ValueError(f"CUDA graphs list is empty for mode '{mode}'.")
+         
+        low, high = 0, len(cuda_graphs) - 1
+        best_index = len(cuda_graphs) - 1  
+        
+        while low <= high:
+            mid = (low + high) // 2
+            if cuda_graphs[mid] >= total_tokens:
+                best_index = mid
+                high = mid - 1
+            else:
+                low = mid + 1
+         
+        if best_index >= len(cuda_graphs):
+            best_index = len(cuda_graphs) - 1
+             
+        if cuda_graphs[best_index] < total_tokens:
+            raise ValueError(f"No suitable CUDA graph found for {total_tokens} tokens. "
+                            f"Maximum available buffer size: {cuda_graphs[-1]}")
+        
+        return best_index
 
+    def _process_valid_inputs(self, hidden_states: torch.Tensor, router_logits: torch.Tensor) -> torch.Tensor:
+        """Process inputs that are guaranteed to be valid (non-NaN)"""
+        topk_weights, topk_ids = self.select_experts(
+            hidden_states=hidden_states,
+            router_logits=router_logits,
+            top_k=self.top_k,
+            use_grouped_topk=self.use_grouped_topk,
+            renormalize=self.renormalize,
+            topk_group=self.topk_group,
+            num_expert_group=self.num_expert_group,
+            custom_routing_function=self.custom_routing_function,
+            scoring_func=self.scoring_func,
+            routed_scaling_factor=self.routed_scaling_factor,
+            e_score_correction_bias=self.e_score_correction_bias,
+            enable_eplb=self.enable_eplb,
+            expert_map=self.expert_map,
+            expert_load_view=self.expert_load_view,
+            logical_to_physical_map=self.logical_to_physical_map,
+            logical_replica_count=self.logical_replica_count,
+        )
+         
+        from vllm.forward_context import get_forward_context
+         
+        forward_context = get_forward_context()
+          
+        attn_metadata = forward_context.attn_metadata
+        cudagraph_runtime_mode = forward_context.cudagraph_runtime_mode
+        batch_descriptor = forward_context.batch_descriptor
+        ubatch_slices = forward_context.ubatch_slices
+         
+        if hasattr(attn_metadata, 'num_prefill_tokens'):
+            num_prefill_tokens = attn_metadata.num_prefill_tokens
+             
+        device = hidden_states.device 
+         
+        
+        try:
+            from vllm.config import CUDAGraphMode
+            from vllm.compilation.monitor import cudagraph_capturing_enabled  
+              
+            is_capturing = (torch.cuda.is_available() and 
+                        torch.cuda.is_current_stream_capturing()  and 
+                        cudagraph_capturing_enabled) 
+            
+            use_cuda_graph_path = is_capturing or cudagraph_runtime_mode != CUDAGraphMode.NONE
+           
+            def _is_decode_only(attn_metadata):
+     
+                if hasattr(attn_metadata, 'num_prefill_tokens'):
+                    return attn_metadata.num_prefill_tokens == 0
+                 
+                if isinstance(attn_metadata, dict):
+                    for layer_name, layer_metadata in attn_metadata.items():
+                        if hasattr(layer_metadata, 'num_prefill_tokens') and layer_metadata.num_prefill_tokens > 0:
+                            return False
+                    return True
+                
+                if hasattr(attn_metadata, 'num_actual_tokens'):
+                    return True
+                 
+                if isinstance(attn_metadata, dict):
+                    for layer_name, layer_metadata in attn_metadata.items():
+                        if hasattr(layer_metadata, 'num_actual_tokens'):
+                            return True
+                 
+                return False
+            
+            is_decode_only = _is_decode_only(attn_metadata)
+            
+            from vllm.utils import current_stream
+            def get_cuda_stream_ptr(stream: torch.cuda.Stream) -> int:
+                """
+                Get the underlying CUDA stream pointer from a torch.cuda.Stream object.
+                """
+                if hasattr(stream, 'cuda_stream'):
+                    return stream.cuda_stream
+                elif hasattr(stream, 'stream'):
+                    return stream.stream
+                else:
+                    # Fallback to using the default stream
+                    return 0
+            
+            stream = current_stream()
+            stream_ptr = get_cuda_stream_ptr(stream)
+            
+            if use_cuda_graph_path: 
+                if is_decode_only and cudagraph_runtime_mode == CUDAGraphMode.FULL:
+                    graph_mode = "decode"
+                elif not is_decode_only and cudagraph_runtime_mode == CUDAGraphMode.PIECEWISE:
+                    graph_mode = "default"
+                 
+                if hasattr(batch_descriptor, 'num_tokens'):
+                    graph_index = self._find_best_graph_index(batch_descriptor.num_tokens, graph_mode)
+                else:
+                    graph_index = self._find_best_graph_index(hidden_states.size(0), graph_mode)
+         
+                if hasattr(FusedMoE, 'cuda_graphs_dict') and graph_mode in FusedMoE.cuda_graphs_dict:
+                    input_tensor_cpu = FusedMoE.input_tensor_cpu[graph_mode]
+                    expert_ids_cpu = FusedMoE.expert_ids_cpu[graph_mode]
+                    weights_cpu = FusedMoE.weights_cpu[graph_mode]
+                    output_cpu = FusedMoE.output_cpu[graph_mode]
+                    bsz_tensor_cpu = FusedMoE.bsz_tensor_cpu[graph_mode]
+                    output_gpu = FusedMoE.output_gpu[graph_mode]
+                    cuda_graphs = FusedMoE.cuda_graphs_dict[graph_mode]
+                else: 
+                    input_tensor_cpu = FusedMoE.input_tensor_cpu
+                    expert_ids_cpu = FusedMoE.expert_ids_cpu
+                    weights_cpu = FusedMoE.weights_cpu
+                    output_cpu = FusedMoE.output_cpu
+                    bsz_tensor_cpu = FusedMoE.bsz_tensor_cpu
+                    output_gpu = FusedMoE.output_gpu
+                    cuda_graphs = FusedMoE.cuda_graphs
+                    
+                
+                
+                assert graph_index < len(cuda_graphs), f"graph_index {graph_index} is out of bounds"
+    
+                bsz_tensor = torch.tensor([hidden_states.size(0)], device='cpu', dtype=torch.int32)
+                bsz_tensor_cpu[graph_index].copy_(bsz_tensor)
+                
+                if is_capturing: 
+                    input_tensor_cpu[graph_index][:hidden_states.size(0)].copy_(hidden_states, non_blocking=True)
+                    expert_ids_cpu[graph_index][:hidden_states.size(0)].copy_(topk_ids, non_blocking=True)
+                    weights_cpu[graph_index][:hidden_states.size(0)].copy_(topk_weights, non_blocking=True) 
+                    input_ptr = input_tensor_cpu[graph_index].data_ptr()
+                    expert_ids_ptr = expert_ids_cpu[graph_index].data_ptr()
+                    weights_ptr = weights_cpu[graph_index].data_ptr()
+                    output_ptr = output_cpu[graph_index].data_ptr()
+                else: 
+                    input_tensor_cpu[graph_index][:hidden_states.size(0)].copy_(hidden_states, non_blocking=False)
+                    expert_ids_cpu[graph_index][:hidden_states.size(0)].copy_(topk_ids, non_blocking=False)
+                    weights_cpu[graph_index][:hidden_states.size(0)].copy_(topk_weights, non_blocking=False)
+                    input_ptr = input_tensor_cpu[graph_index].data_ptr()
+                    expert_ids_ptr = expert_ids_cpu[graph_index].data_ptr()
+                    weights_ptr = weights_cpu[graph_index].data_ptr()
+                    output_ptr = output_cpu[graph_index].data_ptr()
+                self.lk_moe.submit_with_cuda_stream(
+                    stream_ptr, 
+                    hidden_states[graph_index].size(0),                                   # qlen
+                    expert_ids_cpu[graph_index].size(1),                     # k
+                    expert_ids_ptr,                  # expert_ids
+                    weights_ptr,                     # weights
+                    input_ptr,                       # input
+                    output_ptr,                      # output 
+                    bsz_tensor_cpu[graph_index].data_ptr()                   # bsz_tensor
+                )
+                self.lk_moe.sync_with_cuda_stream(stream_ptr)
+                
+                output_gpu[graph_index][:hidden_states.size(0)].copy_(output_cpu[graph_index][:hidden_states.size(0)], non_blocking=True)
+    
+                return output_gpu[graph_index][:hidden_states.size(0)]      
+            else: 
+                graph_mode = 'default'
+                graph_index = self._find_best_graph_index(hidden_states.size(0), graph_mode)
+                stream = current_stream()
+                stream_ptr = get_cuda_stream_ptr(stream)
+                
+                input_tensor_cpu = FusedMoE.input_tensor_cpu[graph_mode]
+                expert_ids_cpu = FusedMoE.expert_ids_cpu[graph_mode]
+                weights_cpu = FusedMoE.weights_cpu[graph_mode]
+                output_cpu = FusedMoE.output_cpu[graph_mode]
+                bsz_tensor_cpu = FusedMoE.bsz_tensor_cpu[graph_mode]
+                output_gpu = FusedMoE.output_gpu[graph_mode]
+                cuda_graphs = FusedMoE.cuda_graphs_dict[graph_mode]
+                
+                bsz_tensor = torch.tensor([hidden_states.size(0)], device='cpu', dtype=torch.int32)
+                bsz_tensor_cpu[graph_index].copy_(bsz_tensor)
+            
+                input_tensor_cpu[graph_index][:hidden_states.size(0)].copy_(hidden_states, non_blocking=True)
+                expert_ids_cpu[graph_index][:hidden_states.size(0)].copy_(topk_ids, non_blocking=True)
+                weights_cpu[graph_index][:hidden_states.size(0)].copy_(topk_weights, non_blocking=True) 
+                input_ptr = input_tensor_cpu[graph_index].data_ptr()
+                expert_ids_ptr = expert_ids_cpu[graph_index].data_ptr()
+                weights_ptr = weights_cpu[graph_index].data_ptr()
+                output_ptr = output_cpu[graph_index].data_ptr()
+                 
+                self.lk_moe.submit_with_cuda_stream(
+                    stream_ptr, 
+                    hidden_states[graph_index].size(0),                                   # qlen
+                    expert_ids_cpu[graph_index].size(1),                     # k
+                    expert_ids_ptr,                  # expert_ids
+                    weights_ptr,                     # weights
+                    input_ptr,                       # input
+                    output_ptr,                      # output 
+                    bsz_tensor_cpu[graph_index].data_ptr()                   # bsz_tensor
+                )
+                self.lk_moe.sync_with_cuda_stream(stream_ptr) 
+                output_gpu[graph_index][:hidden_states.size(0)].copy_(output_cpu[graph_index][:hidden_states.size(0)], non_blocking=True)
+    
+                return output_gpu[graph_index][:hidden_states.size(0)] 
+     
+                # expert_ids_cpu = topk_ids.clone().to(dtype=torch.int64, device='cpu', memory_format=torch.contiguous_format)
+                # weights_cpu = topk_weights.clone().to(dtype=torch.float32, device='cpu', memory_format=torch.contiguous_format)
+                # hidden_states_cpu = hidden_states.clone().to(device='cpu', memory_format=torch.contiguous_format)
+                # output_cpu = torch.empty_like(hidden_states, device='cpu').contiguous()
+                # bsz_tensor = torch.tensor([hidden_states.size(0)], device='cpu', dtype=torch.int32)
+                # self.lk_moe.forward(
+                #     hidden_states.size(0),                         # qlen
+                #     expert_ids_cpu.size(1),                    # k
+                #     expert_ids_cpu.data_ptr(),                 # expert_ids
+                #     weights_cpu.data_ptr(),                    # weights
+                #     hidden_states_cpu.data_ptr(),              # input
+                #     output_cpu.data_ptr(),                     # output 
+                #     bsz_tensor.data_ptr()                      # bsz_tensor
+                # )      
+                # return output_cpu.to(device)
+
+       
+        except Exception as e:
+            logger.warning(f"lk_moe forward failed with error: {e}, falling back to default path")
+            self.use_lk_moe = False
+            raise RuntimeError("lk_moe forward failed, fallback to default MoE implementation")
+  
     @classmethod
     def make_expert_params_mapping(
             cls,
@@ -2001,8 +2415,9 @@ class FusedMoE(CustomOp):
 
         s += f", scoring_func='{self.scoring_func}', activation='{self.activation}'"  # noqa: E501
 
-        return s
-
+        return s 
+ 
+    
 
 def moe_forward(
     hidden_states: torch.Tensor,
