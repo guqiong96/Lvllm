@@ -1,9 +1,21 @@
-## LvLLM 2025-09-30 Lvllm使用numa加速moe模型！！！ 
+## LvLLM 2025-09-30 混合推理MOE大模型！！！ 
 
-当前限制：
+# 已验证：Qwen3-Next-80B-A3B-Instruct
+
+--单任务：
+
+--并发任务：
+  任务一：
+
+  任务二：
+
+# 当前限制：
 1、仅支持dtype: "bfloat16"
+
 2、仅支持compilation_config.cudagraph_mode: "NONE"
+
 3、仅支持moe模型
+
 4、仅支持max_num_batched_tokens: 1024
 
 ## 安装步骤
@@ -37,7 +49,7 @@ git clone https://github.com/guqiong96/Lvllm.git
 python use_existing_torch.py
 
 # 安装构建依赖
-pip install -r requirements/build.txt
+MAX_JOBS=32 NVCC_THREADS=1 pip install -r requirements/build.txt
 ```
 
 ### 4. 克隆第三方依赖库(可选,github网络好可以直接第5步)
@@ -55,6 +67,9 @@ git clone https://github.com/ggerganov/llama.cpp.git llama.cpp-src
 cd llama.cpp-src
 git checkout a94e6ff8774b7c9f950d9545baf0ce35e8d1ed2f
 cd ..
+
+# 安装flashinfer-python(可选)
+pip install flashinfer-python 
 ```
 
 ### 5. 安装Lvllm
@@ -69,7 +84,11 @@ pip install -e . --no-build-isolation -vvv
 使用以下命令启动Lvllm服务:
 
 ```bash
-LK_THREADS="88" OMP_NUM_THREADS="88" VLLM_ATTENTION_BACKEND="FLASHINFER" TORCH_COMPILE_DISABLE="1" vllm serve --config ~/Downloads/Lvllm/config.yaml
+LK_THREADS="88" OMP_NUM_THREADS="88" VLLM_ATTENTION_BACKEND="FLASHINFER" vllm serve --config ~/Downloads/Lvllm/config.yaml
+```
+# 使用flashinfer-python(可选)
+```bash 
+LK_THREADS="88" OMP_NUM_THREADS="88" VLLM_ATTENTION_BACKEND="FLASHINFER" vllm serve --config ~/Downloads/Lvllm/config.yaml
 ```
 
 ### 配置说明
