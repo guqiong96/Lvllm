@@ -4,10 +4,17 @@
 
 --单任务：
 
+<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/c37da729-a692-4b20-b7f5-b7798acd22c4" />
+
 --并发任务：
+
   任务一：
+  
+<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/feeb26d2-fc3d-40f5-bc70-3b32ee42b2b3" />
 
   任务二：
+  
+<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/a6abf4f8-58df-47a8-8532-373a94c1b4b2" />
 
 # 当前限制：
 1、仅支持dtype: "bfloat16"
@@ -110,3 +117,5 @@ LK_THREADS="88" OMP_NUM_THREADS="88" VLLM_ATTENTION_BACKEND="FLASHINFER" vllm se
 - `max_num_batched_tokens`: 最大批处理令牌数 (`1024`)
 
 根据实际环境需求，可以修改配置文件中的参数或调整环境变量值。
+
+![07e0fccaf80ecd2e9bc8476bb5b95514](https://github.com/user-attachments/assets/2178f29c-e7eb-4f8c-8649-b16d545c3fcc)
