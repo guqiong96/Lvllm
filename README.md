@@ -68,7 +68,7 @@ cd ~/Downloads/Lvllm/.deps
 
 git clone https://github.com/NVIDIA/cutlass.git cutlass-src
 git clone https://github.com/oneapi-src/oneDNN.git oneDNN-src
-git clone https://github.com/InternLM/flashmla.git flashmla-src
+git clone https://github.com/deepseek-ai/FlashMLA.git flashmla-src
 git clone https://github.com/vllm-project/vllm-flash-attn.git vllm-flash-attn-src
 
 # 安装指定版本的llama.cpp
