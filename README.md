@@ -37,6 +37,8 @@ sudo nvidia-uninstall
 # 下载并安装CUDA 12.8
 wget https://developer.download.nvidia.com/compute/cuda/12.8.1/local_installers/cuda_12.8.1_570.124.06_linux.run
 sudo sh cuda_12.8.1_570.124.06_linux.run
+# 升级libstdcxx-ng  （避免glibcxx_3.4.32 not found， 新增的vllm._lk_C模块无法加载退回到原始vllm模式，最后显存溢出）
+conda install -c conda-forge libstdcxx-ng
 ```
 
 ### 2. 创建并激活Python环境
