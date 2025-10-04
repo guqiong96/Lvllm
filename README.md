@@ -37,6 +37,7 @@ sudo nvidia-uninstall
 # 下载并安装CUDA 12.8
 wget https://developer.download.nvidia.com/compute/cuda/12.8.1/local_installers/cuda_12.8.1_570.124.06_linux.run
 sudo sh cuda_12.8.1_570.124.06_linux.run
+
 # 升级libstdcxx-ng  （避免glibcxx_3.4.32 not found， 新增的vllm._lk_C模块无法加载退回到原始vllm模式，最后显存溢出）
 conda install -c conda-forge libstdcxx-ng
 ```
@@ -66,14 +67,14 @@ pip install -r requirements/build.txt
 ```bash
 cd ~/Downloads/Lvllm/.deps
 
-git clone https://github.com/NVIDIA/cutlass.git cutlass-src
+git clone https://github.com/nvidia/cutlass.git cutlass-src
 git clone https://github.com/oneapi-src/oneDNN.git oneDNN-src
 git clone https://github.com/deepseek-ai/FlashMLA.git flashmla-src
-git clone https://github.com/vllm-project/vllm-flash-attn.git vllm-flash-attn-src
+git clone https://github.com/vllm-project/flash-attention.git vllm-flash-attn-src
 
 # 安装指定版本的llama.cpp
-git clone https://github.com/ggerganov/llama.cpp.git llama.cpp-src
-cd llama.cpp-src
+git clone https://github.com/ggerganov/llama.cpp.git llama_cpp-src
+cd llama_cpp-src
 git checkout a94e6ff8774b7c9f950d9545baf0ce35e8d1ed2f
 cd ..
 
@@ -111,8 +112,7 @@ LK_THREADS="88" OMP_NUM_THREADS="88" VLLM_ATTENTION_BACKEND="FLASHINFER" vllm se
 - `max-model-len`: 最大模型序列长度 (`10000`)
 - `gpu-memory-utilization`: GPU内存利用率 (`0.8`)
 - `max-num-seqs`: 最大并发序列数 (`4`)
-- `trust-remote-code`: 信任远程代码 (`true`)
-- `swap-space`: 交换空间大小 (GB) (`4`)
+- `trust-remote-code`: 信任远程代码 (`true`) 
 - `dtype`: 数据类型 (`bfloat16`)
 - `enable_prefix_caching`: 启用前缀缓存 (`true`)
 - `enable-chunked-prefill`: 启用分块预填充 (`true`)
