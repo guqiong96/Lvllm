@@ -34,6 +34,7 @@ class GGUFConfig(QuantizationConfig):
                  unquantized_modules: Optional[list[str]] = None) -> None:
         super().__init__()
         self.unquantized_modules = unquantized_modules or []
+        self.moe_weight_type_map = []
 
     def __repr__(self) -> str:
         return ("GGUFConfig()")

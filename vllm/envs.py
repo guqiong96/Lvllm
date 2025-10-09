@@ -188,6 +188,7 @@ if TYPE_CHECKING:
     VLLM_CUSTOM_SCOPES_FOR_PROFILING: bool = False
     VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES: bool = True
     VLLM_OBJECT_STORAGE_SHM_BUFFER_NAME: str = "VLLM_OBJECT_STORAGE_SHM_BUFFER"
+    LVLLM_MOE_NUMA_ENABLED: bool = False
 
 
 def get_default_cache_root():
@@ -1330,6 +1331,10 @@ environment_variables: dict[str, Callable[[], Any]] = {
     "VLLM_OBJECT_STORAGE_SHM_BUFFER_NAME":
     lambda: os.getenv("VLLM_OBJECT_STORAGE_SHM_BUFFER_NAME",
                       "VLLM_OBJECT_STORAGE_SHM_BUFFER"),
+    
+    # Whether to enable NUMA for MOE.
+    "LVLLM_MOE_NUMA_ENABLED":
+    lambda: bool(int(os.getenv("LVLLM_MOE_NUMA_ENABLED", "0"))),
 }
 
 # --8<-- [end:env-vars-definition]
@@ -1421,6 +1426,7 @@ def compute_hash() -> str:
         "VLLM_ROCM_QUICK_REDUCE_CAST_BF16_TO_FP16",
         "VLLM_ROCM_QUICK_REDUCE_MAX_SIZE_BYTES_MB",
         "VLLM_ROCM_FP8_MFMA_PAGE_ATTN",
+        "LVLLM_MOE_NUMA_ENABLED",
     ]
     for key in environment_variables_to_hash:
         # if this goes out of sync with environment_variables,
@@ -1436,3 +1442,12 @@ def compute_hash() -> str:
                            usedforsecurity=False).hexdigest()
 
     return hash_str
+
+def is_lk_moe_numa_enabled() -> bool:
+    try:
+        import  vllm._lk_C  
+        return environment_variables["LVLLM_MOE_NUMA_ENABLED"]()
+    except ImportError:
+        print("Error: vllm._lk_C is not available, "
+              "falling back to default behavior.")
+        return False

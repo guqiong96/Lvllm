@@ -144,6 +144,33 @@ class GGUFModelLoader(BaseModelLoader):
             if weight_type == "F32" and name.endswith(".weight")
         ]
         vllm_config.quant_config.unquantized_modules.extend(unquant_names)
+        
+        from vllm.envs import is_lk_moe_numa_enabled
+        if is_lk_moe_numa_enabled():
+            import re
+            layer_groups = {}
+            for name, weight_type in weight_type_map.items():
+                if name.endswith(".weight") and ("mlp.experts" in name) and (".gate_proj." in name or ".up_proj." in name or ".down_proj." in name):
+                    layer_match = re.search(r"model\.layers\.(\d+)", name)
+                    if layer_match:
+                        layer_id = int(layer_match.group(1))
+                        if layer_id not in layer_groups:
+                            layer_groups[layer_id] = {} 
+                            
+                        if ".gate_proj." in name:
+                            layer_groups[layer_id]["gate"] = weight_type
+                        elif ".up_proj." in name:
+                            layer_groups[layer_id]["up"] = weight_type
+                        elif ".down_proj." in name:
+                            layer_groups[layer_id]["down"] = weight_type
+             
+            max_layer = max(layer_groups.keys()) if layer_groups else -1
+            moe_weight_type_map = [None] * (max_layer + 1)
+            for layer_id, weights in layer_groups.items():
+                moe_weight_type_map[layer_id] = weights
+             
+            vllm_config.quant_config.moe_weight_type_map = moe_weight_type_map
+                
 
         target_device = torch.device(device_config.device)
         with set_default_torch_dtype(model_config.dtype):

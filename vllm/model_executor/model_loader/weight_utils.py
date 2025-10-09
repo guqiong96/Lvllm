@@ -778,7 +778,11 @@ def gguf_quant_weights_iterator(
             name = gguf_to_hf_name_map[tensor.name]
             if weight_type.name != "F32":
                 name = name.replace("weight", "qweight")
-            param = torch.tensor(weight)
+            from vllm.envs import is_lk_moe_numa_enabled
+            if is_lk_moe_numa_enabled() and (".gate_proj." in name or ".up_proj." in name or ".down_proj." in name):
+                param = torch.tensor(weight, device="cpu")
+            else:
+                param = torch.tensor(weight)
             yield name, param
 
 
