@@ -8,7 +8,7 @@ trust-remote-code: true
 tokenizer-mode: "auto"
 swap-space: 0
 served-model-name: "Qwen3-Next-80B-A3B-Instruct" 
-compilation_config.cudagraph_mode: "FULL-DECODE_ONLY"
+compilation_config.cudagraph_mode: "FULL_DECODE_ONLY"
 enable_prefix_caching: true
 enable-chunked-prefill: true
 max_num_batched_tokens: 1024
