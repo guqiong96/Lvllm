@@ -38,14 +38,14 @@ MOE::MOE(MOEConfig config) {
         }
     }    
     #endif
-    // if(config_.up_type == GGML_TYPE_BF16 && config_.hidden_type == GGML_TYPE_BF16){
-    //     #if defined(__AMX_INT8__) || defined(__AVX512VNNI__) || defined(__AVX512BF16__) || defined(__AVX512F__)
+    if(config_.up_type == GGML_TYPE_BF16 && config_.hidden_type == GGML_TYPE_BF16){
+        #if defined(__AMX_INT8__) || defined(__AVX512VNNI__) || defined(__AVX512BF16__) || defined(__AVX512F__)
 
-    //         // std::cout << "amx is enabled for bf16 ...... " << std::endl;
-    //     #else
-    //         use_fp32_buffer_ = true;
-    //     #endif
-    // }
+            // std::cout << "amx is enabled for bf16 ...... " << std::endl;
+        #else
+            use_fp32_buffer_ = true;
+        #endif
+    }
 
     
     hidden_type_size = ggml_type_size(config_.hidden_type);
