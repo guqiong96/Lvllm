@@ -2274,33 +2274,12 @@ class FusedMoE(CustomOp):
         )
          
         from vllm.forward_context import get_forward_context
-         
-        forward_context = get_forward_context()
-          
-        attn_metadata = forward_context.attn_metadata
-        cudagraph_runtime_mode = forward_context.cudagraph_runtime_mode
-        batch_descriptor = forward_context.batch_descriptor 
-           
-        
-        try:
-            from vllm.config import CUDAGraphMode
-            from vllm.compilation.monitor import cudagraph_capturing_enabled  
-              
-            is_capturing = (torch.cuda.is_available() and 
-                        torch.cuda.is_current_stream_capturing()  and 
-                        cudagraph_capturing_enabled) 
+        from vllm.config import CUDAGraphMode
+        from vllm.compilation.monitor import cudagraph_capturing_enabled  
+        from vllm.utils import current_stream, weak_ref_tensors 
+  
             
-            use_cuda_graph_path = is_capturing or cudagraph_runtime_mode != CUDAGraphMode.NONE
-           
-            def _is_decode_only(batch_descriptor): 
-                if hasattr(batch_descriptor, 'uniform_decode'):
-                    return batch_descriptor.uniform_decode  
-                return False
-            
-            is_decode_only = _is_decode_only(batch_descriptor)
-            
-            from vllm.utils import current_stream
-            def get_cuda_stream_ptr(stream: torch.cuda.Stream) -> int:
+        def get_cuda_stream_ptr(stream: torch.cuda.Stream) -> int:
                 """
                 Get the underlying CUDA stream pointer from a torch.cuda.Stream object.
                 """
@@ -2311,114 +2290,57 @@ class FusedMoE(CustomOp):
                 else:
                     # Fallback to using the default stream
                     return 0
-            
-            stream = current_stream()
-            stream_ptr = get_cuda_stream_ptr(stream) 
-            non_blocking = not self.reduce_results
-            
-            if use_cuda_graph_path:     
-                    
-                # if hasattr(batch_descriptor, 'num_tokens'):
-                #     graph_index = self._find_best_graph_index(batch_descriptor.num_tokens)
-                # else:
-                #     graph_index = self._find_best_graph_index(hidden_states.size(0))
-                graph_index = self._find_best_graph_index(hidden_states.size(0)) 
-                if is_decode_only:
-                    if hasattr(batch_descriptor, 'num_tokens'):
-                        assert(batch_descriptor.num_tokens == hidden_states.size(0))
-                    print(f"Decode only, graph_index: {graph_index}")
-                    print(f"hidden_states.size(0): {hidden_states.size(0)}")
-                stream = current_stream()
-                stream_ptr = get_cuda_stream_ptr(stream)
                 
-                input_tensor_cpu = FusedMoE.input_tensor_cpu
-                expert_ids_cpu = FusedMoE.expert_ids_cpu
-                weights_cpu = FusedMoE.weights_cpu
-                output_cpu = FusedMoE.output_cpu
-                bsz_tensor_cpu = FusedMoE.bsz_tensor_cpu
-                output_gpu = FusedMoE.output_gpu 
+        forward_context = get_forward_context()
+        cudagraph_runtime_mode = forward_context.cudagraph_runtime_mode
+        batch_descriptor = forward_context.batch_descriptor 
+         
+        is_decode_mode = getattr(batch_descriptor, 'uniform_decode', False) 
+        
+        if(hasattr(batch_descriptor, 'num_tokens')):
+            batch_size = batch_descriptor.num_tokens
+        else:
+            batch_size = hidden_states.size(0)
+        
+        stream = current_stream()
+        stream_ptr = get_cuda_stream_ptr(stream) 
+        non_blocking = True
+        
+        try:      
+            graph_index = self._find_best_graph_index(batch_size) 
+            
+            input_tensor_cpu = FusedMoE.input_tensor_cpu
+            expert_ids_cpu = FusedMoE.expert_ids_cpu
+            weights_cpu = FusedMoE.weights_cpu
+            output_cpu = FusedMoE.output_cpu
+            bsz_tensor_cpu = FusedMoE.bsz_tensor_cpu
+            output_gpu = FusedMoE.output_gpu 
                  
-                 
-                batch_size = hidden_states.size(0) 
-                bsz_tensor_cpu[graph_index][0] = batch_size 
+            bsz_tensor_cpu[graph_index][0] = batch_size 
 
-                input_tensor_cpu[graph_index][:hidden_states.size(0)].copy_(hidden_states, non_blocking=non_blocking)
-                expert_ids_cpu[graph_index][:hidden_states.size(0)].copy_(topk_ids, non_blocking=non_blocking)
-                weights_cpu[graph_index][:hidden_states.size(0)].copy_(topk_weights, non_blocking=non_blocking) 
-                input_ptr = input_tensor_cpu[graph_index].data_ptr()
-                expert_ids_ptr = expert_ids_cpu[graph_index].data_ptr()
-                weights_ptr = weights_cpu[graph_index].data_ptr()
-                output_ptr = output_cpu[graph_index].data_ptr()
-                 
-                self.lk_moe.submit_with_cuda_stream(
-                    stream_ptr, 
-                    hidden_states.size(0),                                   # qlen
-                    expert_ids_cpu[graph_index].size(1),                     # k
-                    expert_ids_ptr,                  # expert_ids
-                    weights_ptr,                     # weights
-                    input_ptr,                       # input
-                    output_ptr,                      # output 
-                    bsz_tensor_cpu[graph_index].data_ptr()                   # bsz_tensor
-                ) 
-                self.lk_moe.sync_with_cuda_stream(stream_ptr) 
-                output_gpu[graph_index][:hidden_states.size(0)].copy_(output_cpu[graph_index][:hidden_states.size(0)], non_blocking=non_blocking)
-                return output_gpu[graph_index][:hidden_states.size(0)]      
-            else:   
-                stream = current_stream()
-                stream_ptr = get_cuda_stream_ptr(stream)
-                graph_index = self._find_best_graph_index(hidden_states.size(0)) 
-                
-                input_tensor_cpu = FusedMoE.input_tensor_cpu
-                expert_ids_cpu = FusedMoE.expert_ids_cpu
-                weights_cpu = FusedMoE.weights_cpu
-                output_cpu = FusedMoE.output_cpu
-                bsz_tensor_cpu = FusedMoE.bsz_tensor_cpu
-                output_gpu = FusedMoE.output_gpu 
-                 
-                batch_size = hidden_states.size(0) 
-                bsz_tensor_cpu[graph_index][0] = batch_size 
-
-                input_tensor_cpu[graph_index][:hidden_states.size(0)].copy_(hidden_states, non_blocking=non_blocking)
-                expert_ids_cpu[graph_index][:hidden_states.size(0)].copy_(topk_ids, non_blocking=non_blocking)
-                weights_cpu[graph_index][:hidden_states.size(0)].copy_(topk_weights, non_blocking=non_blocking) 
-                input_ptr = input_tensor_cpu[graph_index].data_ptr()
-                expert_ids_ptr = expert_ids_cpu[graph_index].data_ptr()
-                weights_ptr = weights_cpu[graph_index].data_ptr()
-                output_ptr = output_cpu[graph_index].data_ptr()
-                 
-                self.lk_moe.submit_with_cuda_stream(
-                    stream_ptr, 
-                    hidden_states.size(0),                                   # qlen
-                    expert_ids_cpu[graph_index].size(1),                     # k
-                    expert_ids_ptr,                  # expert_ids
-                    weights_ptr,                     # weights
-                    input_ptr,                       # input
-                    output_ptr,                      # output 
-                    bsz_tensor_cpu[graph_index].data_ptr()                   # bsz_tensor
-                ) 
-                self.lk_moe.sync_with_cuda_stream(stream_ptr) 
-                output_gpu[graph_index][:hidden_states.size(0)].copy_(output_cpu[graph_index][:hidden_states.size(0)], non_blocking=non_blocking) 
-                return output_gpu[graph_index][:hidden_states.size(0)] 
-     
-                # expert_ids_cpu = topk_ids.clone().to(dtype=torch.int64, device='cpu', memory_format=torch.contiguous_format)
-                # weights_cpu = topk_weights.clone().to(dtype=torch.float32, device='cpu', memory_format=torch.contiguous_format)
-                # hidden_states_cpu = hidden_states.clone().to(device='cpu', memory_format=torch.contiguous_format)
-                # output_cpu = torch.empty_like(hidden_states, device='cpu').contiguous()
-                # bsz_tensor = torch.tensor([hidden_states.size(0)], device='cpu', dtype=torch.int32)
-                # self.lk_moe.forward(
-                #     hidden_states.size(0),                         # qlen
-                #     expert_ids_cpu.size(1),                    # k
-                #     expert_ids_cpu.data_ptr(),                 # expert_ids
-                #     weights_cpu.data_ptr(),                    # weights
-                #     hidden_states_cpu.data_ptr(),              # input
-                #     output_cpu.data_ptr(),                     # output 
-                #     bsz_tensor.data_ptr()                      # bsz_tensor
-                # )      
-                # return output_cpu.to(device=hidden_states.device, memory_format=torch.contiguous_format)
-
+            input_tensor_cpu[graph_index][:batch_size].copy_(hidden_states, non_blocking=non_blocking)
+            expert_ids_cpu[graph_index][:batch_size].copy_(topk_ids, non_blocking=non_blocking)
+            weights_cpu[graph_index][:batch_size].copy_(topk_weights, non_blocking=non_blocking) 
+            input_ptr = input_tensor_cpu[graph_index].data_ptr()
+            expert_ids_ptr = expert_ids_cpu[graph_index].data_ptr()
+            weights_ptr = weights_cpu[graph_index].data_ptr()
+            output_ptr = output_cpu[graph_index].data_ptr()   
+            self.lk_moe.submit_with_cuda_stream(
+                stream_ptr, 
+                hidden_states.size(0),                                   # qlen
+                expert_ids_cpu[graph_index].size(1),                     # k
+                expert_ids_ptr,                  # expert_ids
+                weights_ptr,                     # weights
+                input_ptr,                       # input
+                output_ptr,                      # output 
+                bsz_tensor_cpu[graph_index].data_ptr()                   # bsz_tensor
+            )  
+            self.lk_moe.sync_with_cuda_stream(stream_ptr) 
+            output_gpu[graph_index][:batch_size].copy_(output_cpu[graph_index][:batch_size], non_blocking=non_blocking) 
+            return weak_ref_tensors(output_gpu[graph_index][:batch_size])  
        
         except Exception as e:
-            logger.warning(f"lk_moe forward failed with error: {e}, falling back to default path")
+            logger.error(f"lk_moe forward failed with error: {e}, falling back to default path")
             self.use_lk_moe = False
             raise RuntimeError("lk_moe forward failed, fallback to default MoE implementation")
   

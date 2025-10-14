@@ -813,46 +813,55 @@ void MOE::forward_many_m(int qlen, int k, const uint64_t* expert_ids, const floa
 
 
 void MOE::forward(int qlen, int k, const uint64_t* expert_ids, const float* weights, const void* input, void* output, int* bsz_tensor) {
-    qlen = bsz_tensor[0];
-    
-    if (qlen < config_.group_min_len) {
-        for (int i = 0; i < qlen; i++) {
-            (this->*forward_one_impl)(k, expert_ids + i * k, weights + i * k, (uint8_t*)input + i * hidden_bytes, (uint8_t*)output + i * hidden_bytes);
+    int batch_size = bsz_tensor[0];
+    int processed = 0;
+    while (processed < batch_size) {
+        int remaining = batch_size - processed;
+        
+        if (remaining < config_.group_min_len) { 
+            for (int i = 0; i < remaining; i++) {
+                int current_pos = processed + i;
+                (this->*forward_one_impl)(
+                    k, 
+                    expert_ids + current_pos * k, 
+                    weights + current_pos * k, 
+                    (uint8_t*)input + current_pos * hidden_bytes, 
+                    (uint8_t*)output + current_pos * hidden_bytes
+                );
+            }
+            break;  
         }
-        sync_flag.store(true, std::memory_order_seq_cst);
-        return;
+         
+        int forward_len = std::min(config_.group_max_len, remaining);
+        (this->*forward_many_impl)(
+            forward_len, 
+            k, 
+            expert_ids + processed * k, 
+            weights + processed * k, 
+            (uint8_t*)input + processed * hidden_bytes, 
+            (uint8_t*)output + processed * hidden_bytes
+        );
+        
+        processed += forward_len;
     }
-    int forward_len = std::min(config_.group_max_len, qlen);
-    (this->*forward_many_impl)(forward_len, k, expert_ids, weights, input, output);
-
-    bsz_tensor[0] -= forward_len;
-    forward(qlen - forward_len, k, expert_ids + forward_len * k, weights + forward_len * k, (uint8_t*)input + forward_len * hidden_bytes, (uint8_t*)output + forward_len * hidden_bytes, bsz_tensor);
+    sync_flag.store(true, std::memory_order_seq_cst);
+       
+     
 }
- 
 
-struct ForwardParams {
-    MOE* moe_ptr;
-    int qlen;
-    int k;
-    const uint64_t* expert_ids;
-    const float* weights;
-    const void* input;
-    void* output;
-    int* bsz_tensor;
-};
- 
+
 static void forward_wrapper(void* args) {
     ForwardParams* params = (ForwardParams*)args;
-    params->moe_ptr->forward(
-        params->qlen, 
-        params->k, 
-        params->expert_ids, 
-        params->weights, 
-        params->input, 
-        params->output,
-        params->bsz_tensor
-    );
-    delete params;  
+        params->moe_ptr->forward(
+            params->qlen, 
+            params->k, 
+            params->expert_ids, 
+            params->weights, 
+            params->input, 
+            params->output, 
+            params->bsz_tensor
+        );
+        // delete params;  !don't delete params here
 }
 
 void MOE::submit_with_cuda_stream(intptr_t user_cuda_stream, int qlen, int k, const uint64_t* expert_ids, 

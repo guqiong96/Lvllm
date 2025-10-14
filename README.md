@@ -68,9 +68,24 @@ MAX_JOBS=32 NVCC_THREADS=1 pip install -r requirements/build.txt
 cd ~/Downloads/Lvllm/.deps
 
 git clone https://github.com/nvidia/cutlass.git cutlass-src
+cd cutlass-src
+git checkout v4.0.0
+cd ..
+
 git clone https://github.com/oneapi-src/oneDNN.git oneDNN-src
+cd oneDNN-src
+git checkout v3.9
+cd ..
+
 git clone https://github.com/vllm-project/FlashMLA flashmla-src
+cd flashmla-src
+git checkout a757314c04eedd166e329e846c820eb1bdd702de
+cd ..
+
 git clone https://github.com/vllm-project/flash-attention.git vllm-flash-attn-src
+cd vllm-flash-attn-src
+git checkout ee4d25bd84e0cbc7e0b9b9685085fd5db2dcb62a
+cd ..
 
 # 安装指定版本的llama.cpp
 git clone https://github.com/ggerganov/llama.cpp.git llama_cpp-src
@@ -79,27 +94,28 @@ git checkout a94e6ff8774b7c9f950d9545baf0ce35e8d1ed2f
 cd ..
 
 # 安装flashinfer-python(可选)
-pip install flashinfer-python 
+pip install flashinfer-python==0.3.1 
 ```
 
 ### 5. 安装Lvllm
 
 ```bash
 cd ~/Downloads/Lvllm
-MAX_JOBS=32 NVCC_THREADS=1 pip install -e . --no-build-isolation -vvv
+MAX_JOBS=32 NVCC_THREADS=1 CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
 ```
+MAX_JOBS=32 NVCC_THREADS=1 减少编译时内存占用，避免卡死
+CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" 性能选项
 
-## 启动命令
+## 启动命令 使用flashinfer-python
 
-使用以下命令启动Lvllm服务(需要去修改config.yaml里面配置参数）:
-
-```bash
-LK_THREADS="88" OMP_NUM_THREADS="88"  vllm serve --config ~/Downloads/Lvllm/config.yaml
-```
-# 使用flashinfer-python(可选)
+使用以下命令启动Lvllm服务:
+ 
 ```bash 
 LK_THREADS="88" OMP_NUM_THREADS="88" VLLM_ATTENTION_BACKEND="FLASHINFER" vllm serve --config ~/Downloads/Lvllm/config.yaml
 ```
+修改config.yaml里面配置参数
+LK_THREADS: 总计使用的CPU线程数，一般比总的线程数少10%，例如48核心96线程，LK_THREADS="88"
+OMP_NUM_THREADS：torch并发线程数，保持与LK_THREADS一致
 
 ### 配置说明
 
@@ -109,11 +125,10 @@ LK_THREADS="88" OMP_NUM_THREADS="88" VLLM_ATTENTION_BACKEND="FLASHINFER" vllm se
 - `host`: 主机地址 (`0.0.0.0`，表示监听所有IPv4地址)
 - `port`: 服务端口 (`8070`)
 - `tensor-parallel-size`: 张量并行大小 (`1`)
-- `max-model-len`: 最大模型序列长度 (`10000`)
+- `max-model-len`: 最大模型序列长度 (`66000`)
 - `gpu-memory-utilization`: GPU内存利用率 (`0.8`)
 - `max-num-seqs`: 最大并发序列数 (`4`)
 - `trust-remote-code`: 信任远程代码 (`true`) 
-- `dtype`: 数据类型 (`bfloat16`)
 - `enable_prefix_caching`: 启用前缀缓存 (`true`)
 - `enable-chunked-prefill`: 启用分块预填充 (`true`)
 - `max_num_batched_tokens`: 最大批处理令牌数 (`1024`)

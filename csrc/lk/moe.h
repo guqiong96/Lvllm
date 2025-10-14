@@ -29,6 +29,20 @@
 #if defined(__AMX_INT8__) && defined(__AVX512VNNI__)
     #include "amx_gemm.hpp"
 #endif
+#include <queue> 
+
+class MOE;
+struct ForwardParams {
+    MOE* moe_ptr;
+    int qlen;
+    int k;
+    const uint64_t* expert_ids;
+    const float* weights;
+    const void* input;
+    void* output;
+    int* bsz_tensor;
+    cudaEvent_t* forward_done_event;
+};
  
 struct MOEConfig {
     int expert_num;
