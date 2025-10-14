@@ -111,6 +111,11 @@ LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS="88" OMP_NUM_THREADS="88" VLLM_ATTENTION_BAC
 LK_THREADS: 总计使用的CPU线程数，一般比总的线程数少10%，例如48核心96线程，LK_THREADS="88"
 OMP_NUM_THREADS：torch并发线程数，保持与LK_THREADS一致
 
+### 错误排查
+运行以下命令，将错误输出提交至Issues或微信群
+python
+import  vllm._lk_C
+
 ### 配置说明
 
 配置文件 `config.yaml` 包含以下主要参数：
