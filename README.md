@@ -1,25 +1,18 @@
-## LvLLM 2025-09-30 混合推理MOE大模型！！！ 
+## LvLLM GPU+NUMA 混合推理MOE大模型！！！ 
 
-# 已验证：Qwen3-Next-80B-A3B-Instruct
+# 2025-10-14 开启CUDA GRAPH , DECODE 速度翻倍！！ 输出质量提高！！
+<img width="1000" height="1364" alt="a5b87ad9efc9427fcf743ce2a96bb7ca" src="https://github.com/user-attachments/assets/86520328-8272-4b2c-b3cc-8e475b8d6bca" />
 
---单任务：
 
+
+# 2025-09-30 已验证：Qwen3-Next-80B-A3B-Instruct、Qwen3-Coder-30B-A3B-Instruct 
 <img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/c37da729-a692-4b20-b7f5-b7798acd22c4" />
-
---并发任务：
-
-  任务一：
-  
-<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/feeb26d2-fc3d-40f5-bc70-3b32ee42b2b3" />
-
-  任务二：
-  
-<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/a6abf4f8-58df-47a8-8532-373a94c1b4b2" />
+ 
 
 # 当前限制：
 1、仅支持dtype: "bfloat16"
 
-2、仅支持compilation_config.cudagraph_mode: "NONE"
+2、仅支持compilation_config.cudagraph_mode: "NONE" [2025.10.14已没有限制]
 
 3、仅支持moe模型
 
@@ -111,7 +104,7 @@ CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" 性能选项
 使用以下命令启动Lvllm服务:
  
 ```bash 
-LK_THREADS="88" OMP_NUM_THREADS="88" VLLM_ATTENTION_BACKEND="FLASHINFER" vllm serve --config ~/Downloads/Lvllm/config.yaml
+LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS="88" OMP_NUM_THREADS="88" VLLM_ATTENTION_BACKEND="FLASHINFER" vllm serve --config ~/Downloads/Lvllm/config.yaml
 ```
 修改config.yaml里面配置参数
 LK_THREADS: 总计使用的CPU线程数，一般比总的线程数少10%，例如48核心96线程，LK_THREADS="88"
@@ -127,7 +120,6 @@ OMP_NUM_THREADS：torch并发线程数，保持与LK_THREADS一致
 - `tensor-parallel-size`: 张量并行大小 (`1`)
 - `max-model-len`: 最大模型序列长度 (`66000`)
 - `gpu-memory-utilization`: GPU内存利用率 (`0.8`)
-- `max-num-seqs`: 最大并发序列数 (`4`)
 - `trust-remote-code`: 信任远程代码 (`true`) 
 - `enable_prefix_caching`: 启用前缀缓存 (`true`)
 - `enable-chunked-prefill`: 启用分块预填充 (`true`)
@@ -135,4 +127,5 @@ OMP_NUM_THREADS：torch并发线程数，保持与LK_THREADS一致
 
 根据实际环境需求，可以修改配置文件中的参数或调整环境变量值。
 
-![07e0fccaf80ecd2e9bc8476bb5b95514](https://github.com/user-attachments/assets/2178f29c-e7eb-4f8c-8649-b16d545c3fcc)
+![78af18a5395c987b3f716bb11cc2cad7](https://github.com/user-attachments/assets/d3fe8f56-b8bc-4b28-84e6-6ebf9ff0e9bd)
+
