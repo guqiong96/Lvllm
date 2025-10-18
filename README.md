@@ -2,6 +2,7 @@
 
 
 # 2025-10-19 FP8支持GPU+NUMA 混合推理MOE模型！！ [显存FP8精度，内存FP16精度] 已验证GLM-4.5-Air-FP8
+<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/272b4e89-48e8-4cb5-8b8c-a892725dfe06" />
 
 
 # 2025-10-14 开启cuda graph , decode 速度翻倍！！ 输出质量提高！！
@@ -150,6 +151,7 @@ python -c "import  vllm._lk_C"
 根据实际环境需求，可以修改配置文件中的参数或调整环境变量值。
 
 # LvLLM GPU+NUMA Hybrid Inference for MOE Large Models!!! Run qwen3-next-80b on a single RTX 3090, with 590 tokens/s prefill and 40 tokens/s decoding!
+<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/b95902d5-4ce8-4bdb-9bc8-68f9e74acaaf" />
 
 
 ## October 14, 2025: CUDA Graph Enabled, Decoding Speed Doubled!!! Output Quality Improved!!!
