@@ -1,5 +1,6 @@
 ## LvLLM GPU+NUMA 混合推理MOE大模型！！！ 一张3090运行qwen3-next-80b, 预处理590ts，解码40ts ！！
 
+
 # 2025-10-14 开启cuda graph , decode 速度翻倍！！ 输出质量提高！！
 
 config.yaml里面设置dtype: "float16"相比不设置或设置为dtype: "bfloat16" 有1.5倍prefill速度提升，带amx的至强可能不受影响
@@ -14,7 +15,7 @@ config.yaml里面设置dtype: "float16"相比不设置或设置为dtype: "bfloat
  
 
 # 当前限制：
-1、仅支持dtype: "bfloat16"
+1、仅支持dtype: "bfloat16"、"float16"
 
 2、仅支持compilation_config.cudagraph_mode: "NONE" [2025.10.14已没有限制]
 
@@ -35,8 +36,7 @@ sudo nvidia-uninstall
 wget https://developer.download.nvidia.com/compute/cuda/12.8.1/local_installers/cuda_12.8.1_570.124.06_linux.run
 sudo sh cuda_12.8.1_570.124.06_linux.run
 
-# 升级libstdcxx-ng  （避免glibcxx_3.4.32 not found， 新增的vllm._lk_C模块无法加载退回到原始vllm模式，最后显存溢出）
-conda install -c conda-forge libstdcxx-ng
+
 ```
 
 ### 2. 创建并激活Python环境
@@ -44,6 +44,9 @@ conda install -c conda-forge libstdcxx-ng
 ```bash
 conda create -n Lvllm python==3.12.11
 conda activate Lvllm
+
+# 升级libstdcxx-ng  （避免glibcxx_3.4.32 not found， 新增的vllm._lk_C模块无法加载退回到原始vllm模式，最后显存溢出）
+conda install -c conda-forge libstdcxx-ng
 ```
 
 ### 3. 克隆仓库并安装依赖
@@ -51,6 +54,10 @@ conda activate Lvllm
 ```bash
 # 克隆Lvllm仓库
 git clone https://github.com/guqiong96/Lvllm.git
+
+
+# 安装PyTorch 2.8.0
+pip uninstall torch && pip install torch==2.8.0
 
 # 使用现有PyTorch
 python use_existing_torch.py
@@ -62,7 +69,9 @@ MAX_JOBS=32 NVCC_THREADS=1 pip install -r requirements/build.txt
 ### 4. 克隆第三方依赖库(可选,github网络好可以直接第5步)
 
 ```bash
-cd ~/Downloads/Lvllm/.deps
+
+mkdir -p .deps
+cd .deps
 
 git clone https://github.com/nvidia/cutlass.git cutlass-src
 cd cutlass-src
@@ -90,7 +99,7 @@ cd llama_cpp-src
 git checkout a94e6ff8774b7c9f950d9545baf0ce35e8d1ed2f
 cd ..
 
-# 安装flashinfer-python(可选)
+# 安装flashinfer-python
 pip install flashinfer-python==0.3.1 
 ```
 
@@ -98,12 +107,12 @@ pip install flashinfer-python==0.3.1
 
 ```bash
 cd ~/Downloads/Lvllm
-MAX_JOBS=32 NVCC_THREADS=1 CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
+MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
 ```
 MAX_JOBS=32 NVCC_THREADS=1 减少编译时内存占用，避免卡死
-CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" 性能选项
+CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" 性能选项
 
-## 启动命令 使用flashinfer-python
+## 启动命令 使用flashinfer
 
 使用以下命令启动Lvllm服务:
  
@@ -116,8 +125,9 @@ OMP_NUM_THREADS：torch并发线程数，保持与LK_THREADS一致
 
 ### 错误排查
 运行以下命令，将错误输出提交至Issues或微信群
-python
-import  vllm._lk_C
+```bash 
+python -c "import  vllm._lk_C"
+```
 
 ### 配置说明
 
@@ -135,6 +145,155 @@ import  vllm._lk_C
 - `max_num_batched_tokens`: 最大批处理令牌数 (`1024`)
 
 根据实际环境需求，可以修改配置文件中的参数或调整环境变量值。
+
+# LvLLM GPU+NUMA Hybrid Inference for MOE Large Models!!! Run qwen3-next-80b on a single RTX 3090, with 590 tokens/s prefill and 40 tokens/s decoding!
+
+
+## October 14, 2025: CUDA Graph Enabled, Decoding Speed Doubled!!! Output Quality Improved!!!
+
+Setting dtype: "float16" in config.yaml provides a 1.5x prefill speed increase compared to not setting it or setting it to dtype: "bfloat16". Xeon processors with AMX may not be affected.
+
+<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/b9760c71-d07b-423a-9e8d-f70c3a007a1b" />
+
+
+
+## September 30, 2025: Verified Models: Qwen3-Next-80B-A3B-Instruct, Qwen3-Coder-30B-A3B-Instruct
+<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/c37da729-a692-4b20-b7f5-b7798acd22c4" />
+
+
+# Current Limitations:
+1. Only supports dtype: "bfloat16" and "float16"
+
+2. Only supports compilation_config.cudagraph_mode: "NONE" [No limitation as of October 14, 2025]
+
+3. Only supports MOE models
+
+4. Only supports max_num_batched_tokens: 1024
+
+## Installation Steps
+
+### 1. Install CUDA 12.8
+
+```bash
+# Uninstall old CUDA and NVIDIA drivers
+sudo /usr/local/cuda/bin/cuda-uninstaller
+sudo nvidia-uninstall
+
+# Download and install CUDA 12.8
+wget https://developer.download.nvidia.com/compute/cuda/12.8.1/local_installers/cuda_12.8.1_570.124.06_linux.run
+sudo sh cuda_12.8.1_570.124.06_linux.run
+
+
+```
+
+### 2. Create and Activate Python Environment
+
+```bash
+conda create -n Lvllm python==3.12.11
+conda activate Lvllm
+
+# Upgrade libstdcxx-ng (to avoid glibcxx_3.4.32 not found error, which prevents loading vllm._lk_C module and causes memory overflow)
+conda install -c conda-forge libstdcxx-ng
+```
+
+### 3. Clone Repository and Install Dependencies
+
+```bash
+# Clone Lvllm repository
+git clone https://github.com/guqiong96/Lvllm.git
+
+
+# Install PyTorch 2.8.0
+pip uninstall torch && pip install torch==2.8.0
+
+# Use existing PyTorch
+python use_existing_torch.py
+
+# Install build dependencies
+MAX_JOBS=32 NVCC_THREADS=1 pip install -r requirements/build.txt
+```
+
+### 4. Clone Third-party Dependencies (Optional, skip if GitHub connection is good)
+
+```bash
+
+mkdir -p .deps
+cd .deps
+
+git clone https://github.com/nvidia/cutlass.git cutlass-src
+cd cutlass-src
+git checkout v4.0.0
+cd ..
+
+git clone https://github.com/oneapi-src/oneDNN.git oneDNN-src
+cd oneDNN-src
+git checkout v3.9
+cd ..
+
+git clone https://github.com/vllm-project/FlashMLA flashmla-src
+cd flashmla-src
+git checkout a757314c04eedd166e329e846c820eb1bdd702de
+cd ..
+
+git clone https://github.com/vllm-project/flash-attention.git vllm-flash-attn-src
+cd vllm-flash-attn-src
+git checkout ee4d25bd84e0cbc7e0b9b9685085fd5db2dcb62a
+cd ..
+
+# Install specific version of llama.cpp
+git clone https://github.com/ggerganov/llama.cpp.git llama_cpp-src
+cd llama_cpp-src
+git checkout a94e6ff8774b7c9f950d9545baf0ce35e8d1ed2f
+cd ..
+
+# Install flashinfer-python
+pip install flashinfer-python==0.3.1 
+```
+
+### 5. Install Lvllm
+
+```bash
+cd ~/Downloads/Lvllm
+MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
+```
+MAX_JOBS=32 NVCC_THREADS=1 reduces memory usage during compilation to avoid freezing
+CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" for performance optimization
+
+## Startup Command Using FlashInfer
+
+Use the following command to start the Lvllm service:
+ 
+```bash 
+LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS="88" OMP_NUM_THREADS="88" VLLM_ATTENTION_BACKEND="FLASHINFER" vllm serve --config ~/Downloads/Lvllm/config.yaml
+```
+Modify the configuration parameters in config.yaml
+LK_THREADS: Total CPU threads to use, typically 10% less than total threads (e.g., 88 for a 48-core 96-thread processor)
+OMP_NUM_THREADS: Torch concurrency threads, should be the same as LK_THREADS
+
+### Troubleshooting
+Run the following command and submit the error output to Issues or WeChat group
+```bash 
+python -c "import  vllm._lk_C"
+```
+
+### Configuration Explanation
+
+The configuration file `config.yaml` contains the following main parameters:
+
+- `model`: Model path (`/Downloads/Qwen3-Next-80B-A3B-Instruct`)
+- `host`: Host address (`0.0.0.0`, meaning listen on all IPv4 addresses)
+- `port`: Service port (`8070`)
+- `tensor-parallel-size`: Tensor parallel size (`1`)
+- `max-model-len`: Maximum model sequence length (`66000`)
+- `gpu-memory-utilization`: GPU memory utilization (`0.8`)
+- `trust-remote-code`: Trust remote code (`true`)
+- `enable_prefix_caching`: Enable prefix caching (`true`)
+- `enable-chunked-prefill`: Enable chunked prefill (`true`)
+- `max_num_batched_tokens`: Maximum number of batched tokens (`1024`)
+
+You can modify the parameters in the configuration file or adjust the environment variable values according to your actual environment needs.
+
+
 
 ![78af18a5395c987b3f716bb11cc2cad7](https://github.com/user-attachments/assets/d3fe8f56-b8bc-4b28-84e6-6ebf9ff0e9bd)
 
