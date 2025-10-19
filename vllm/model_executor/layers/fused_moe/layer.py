@@ -1948,7 +1948,7 @@ class FusedMoE(CustomOp):
         else:
             shared_output = None
 
-        if do_naive_dispatch_combine:
+        if do_naive_dispatch_combine and not self.use_lk_moe:
             hidden_states, router_logits = get_ep_group().dispatch(
                 hidden_states, router_logits)
 
@@ -1993,10 +1993,10 @@ class FusedMoE(CustomOp):
 
         def reduce_output(states: torch.Tensor,
                           do_combine: bool = True) -> torch.Tensor:
-            if do_naive_dispatch_combine and do_combine:
+            if do_naive_dispatch_combine and do_combine and not self.use_lk_moe:
                 states = get_ep_group().combine(states)
 
-            if self.reduce_results and (self.tp_size > 1 or self.ep_size > 1):
+            if self.reduce_results and (self.tp_size > 1 or self.ep_size > 1) and not self.use_lk_moe:
                 states = self.maybe_all_reduce_tensor_model_parallel(states)
 
             return states
@@ -2185,9 +2185,7 @@ class FusedMoE(CustomOp):
         
         group_shape = self.quant_method.weight_block_size
 
-            
-        # print(f" fp8 gate 权重前10个元素: {self.w13_weight_inv_origin[0, 0, :10]}") 
-        # print(f" fp8 gate scale权重前10个元素: {self.w13_weight_scale_inv_origin[0, 0, 0]}")  
+             
         num_experts = self.w13_weight_origin.shape[0]  
         intermediate_size = self.w13_weight_origin.shape[1] // 2 # torch.Size([512, 1024, 2048])
         for expert_idx in range(num_experts): 
@@ -2251,9 +2249,7 @@ class FusedMoE(CustomOp):
         
         up_tensor = torch.stack(up_projs, dim=0).to('cpu')
         gate_tensor = torch.stack(gate_projs, dim=0).to('cpu')
-        down_tensor = torch.stack(down_projs, dim=0).to('cpu')
-        # print(f"[layer.py] 原始gate权重前10个元素: {gate_tensor[0, 0, :10]}")
-        
+        down_tensor = torch.stack(down_projs, dim=0).to('cpu') 
         del gate_projs, up_projs, down_projs 
             
         up_numpy = up_tensor.half().view(torch.uint16).numpy()
@@ -2323,9 +2319,7 @@ class FusedMoE(CustomOp):
         gate_projs = []
         up_projs = []
         down_projs = []
-            
-        # print(f" fp8 gate 权重前10个元素: {self.w13_weight_origin[0, 0, :10]}") 
-        # print(f" fp8 gate scale权重前10个元素: {self.w13_weight_scale_origin[0, 0, 0]}")  
+             
         num_experts = self.w13_weight_origin.shape[0]  
         intermediate_size = self.w13_weight_origin.shape[1] // 2
         for expert_idx in range(num_experts): 
@@ -2381,9 +2375,7 @@ class FusedMoE(CustomOp):
         
         up_tensor = torch.stack(up_projs, dim=0).to('cpu')
         gate_tensor = torch.stack(gate_projs, dim=0).to('cpu')
-        down_tensor = torch.stack(down_projs, dim=0).to('cpu')
-        # print(f"[layer.py] 原始gate权重前10个元素: {gate_tensor[0, 0, :10]}")
-        
+        down_tensor = torch.stack(down_projs, dim=0).to('cpu') 
         del gate_projs, up_projs, down_projs 
             
         up_numpy = up_tensor.half().view(torch.uint16).numpy()
@@ -2468,9 +2460,7 @@ class FusedMoE(CustomOp):
             gate_projs = []
             up_projs = []
             down_projs = []
-              
-            # print(f" fp8 gate 权重前10个元素: {self.w13_weight_origin[0, 0, :10]}") 
-            # print(f" fp8 gate scale权重前10个元素: {self.w13_weight_scale_origin[0, 0, 0]}")  
+               
             num_experts = self.w13_weight_origin.shape[0]  
             
             for expert_idx in range(num_experts): 
@@ -2526,8 +2516,7 @@ class FusedMoE(CustomOp):
             
             up_tensor = torch.stack(up_projs, dim=0).to('cpu')
             gate_tensor = torch.stack(gate_projs, dim=0).to('cpu')
-            down_tensor = torch.stack(down_projs, dim=0).to('cpu')
-            # print(f"[layer.py] 原始gate权重前10个元素: {gate_tensor[0, 0, :10]}")
+            down_tensor = torch.stack(down_projs, dim=0).to('cpu') 
             
             del gate_projs, up_projs, down_projs 
               
