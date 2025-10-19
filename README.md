@@ -119,7 +119,7 @@ CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" 性能选项
 ## 启动命令 使用flashinfer
 
 使用以下命令启动Lvllm服务:
- 
+（Qwen3-Next-80B-A3B-Instruct-FP8模型，设置环境变量VLLM_MARLIN_USE_ATOMIC_ADD=1，decode速度上升一点，prefill速度下降一点 ）
 ```bash 
 LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS="88" OMP_NUM_THREADS="88" VLLM_ATTENTION_BACKEND="FLASHINFER" vllm serve --config ~/Downloads/Lvllm/config.yaml
 ```
@@ -270,7 +270,7 @@ CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" for performance
 ## Startup Command Using FlashInfer
 
 Use the following command to start the Lvllm service:
- 
+(Running the Qwen3-Next-80B-A3B-Instruct-FP8 model, setting the environment variable VLLM_MARLIN_USE_ATOMIC_ADD=1 slightly increases decode speed but slightly decreases prefill speed) 
 ```bash 
 LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS="88" OMP_NUM_THREADS="88" VLLM_ATTENTION_BACKEND="FLASHINFER" vllm serve --config ~/Downloads/Lvllm/config.yaml
 ```
