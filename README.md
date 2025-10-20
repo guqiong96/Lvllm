@@ -60,8 +60,9 @@ conda install -c conda-forge libstdcxx-ng
 git clone https://github.com/guqiong96/Lvllm.git
 
 
-# 安装PyTorch 2.8.0
-pip uninstall torch && pip install torch==2.8.0
+# 安装PyTorch 2.8.0 （Qwen3-VL 需要安装 xformers、torchvision）
+pip uninstall torch
+pip install  xformers torchvision torch==2.8.0
 
 # 使用现有PyTorch
 python use_existing_torch.py
@@ -109,8 +110,7 @@ pip install flashinfer-python==0.3.1
 
 ### 5. 安装Lvllm
 
-```bash
-cd ~/Downloads/Lvllm
+```bash 
 MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
 ```
 MAX_JOBS=32 NVCC_THREADS=1 减少编译时内存占用，避免卡死
@@ -123,6 +123,11 @@ CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" 性能选项
 ```bash 
 LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS="88" OMP_NUM_THREADS="88" VLLM_ATTENTION_BACKEND="FLASHINFER" vllm serve --config ~/Downloads/Lvllm/config.yaml
 ```
+使用以下命令启动Lvllm服务 (Qwen3-VL 不支持 VLLM_ATTENTION_BACKEND="FLASHINFER" )：
+```bash 
+LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS="88" OMP_NUM_THREADS="88" vllm serve --config ~/Downloads/Lvllm/config.yaml
+```
+
 修改config.yaml里面配置参数
 LK_THREADS: 总计使用的CPU线程数，一般比总的线程数少10%，例如48核心96线程，LK_THREADS="88"
 OMP_NUM_THREADS：torch并发线程数，保持与LK_THREADS一致
@@ -211,14 +216,16 @@ conda install -c conda-forge libstdcxx-ng
 git clone https://github.com/guqiong96/Lvllm.git
 
 
-# Install PyTorch 2.8.0
-pip uninstall torch && pip install torch==2.8.0
+# Install PyTorch 2.8.0 （Qwen3-VL models need install xformers、torchvision）
+pip uninstall torch
+pip install  xformers torchvision torch==2.8.0
 
 # Use existing PyTorch
 python use_existing_torch.py
 
 # Install build dependencies
 MAX_JOBS=32 NVCC_THREADS=1 pip install -r requirements/build.txt
+
 ```
 
 ### 4. Clone Third-party Dependencies (Optional, skip if GitHub connection is good)
@@ -261,7 +268,6 @@ pip install flashinfer-python==0.3.1
 ### 5. Install Lvllm
 
 ```bash
-cd ~/Downloads/Lvllm
 MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
 ```
 MAX_JOBS=32 NVCC_THREADS=1 reduces memory usage during compilation to avoid freezing
@@ -274,6 +280,12 @@ Use the following command to start the Lvllm service:
 ```bash 
 LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS="88" OMP_NUM_THREADS="88" VLLM_ATTENTION_BACKEND="FLASHINFER" vllm serve --config ~/Downloads/Lvllm/config.yaml
 ```
+
+Use the following command to start the Lvllm service (Qwen3-VL does not support VLLM_ATTENTION_BACKEND="FLASHINFER" ):
+```bash 
+LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS="88" OMP_NUM_THREADS="88" vllm serve --config ~/Downloads/Lvllm/config.yaml
+```
+
 Modify the configuration parameters in config.yaml
 LK_THREADS: Total CPU threads to use, typically 10% less than total threads (e.g., 88 for a 48-core 96-thread processor)
 OMP_NUM_THREADS: Torch concurrency threads, should be the same as LK_THREADS
