@@ -105,7 +105,7 @@ git checkout a94e6ff8774b7c9f950d9545baf0ce35e8d1ed2f
 cd ..
 
 # 安装flashinfer-python
-pip install flashinfer-python==0.3.1 
+pip install flashinfer-python==0.4.1 
 ```
 
 ### 5. 安装Lvllm
@@ -262,7 +262,7 @@ git checkout a94e6ff8774b7c9f950d9545baf0ce35e8d1ed2f
 cd ..
 
 # Install flashinfer-python
-pip install flashinfer-python==0.3.1 
+pip install flashinfer-python==0.4.1 
 ```
 
 ### 5. Install Lvllm

@@ -2635,11 +2635,17 @@ class FusedMoE(CustomOp):
              
         num_experts = self.w13_weight_origin.shape[0]  
         intermediate_size = self.w13_weight_origin.shape[1] // 2 # torch.Size([512, 1024, 2048])
+        hidden_size = self.w13_weight_origin.shape[2]
+        dequant_device = self.w13_weight_origin.device
+        gate_buf = torch.empty(intermediate_size, hidden_size, dtype=torch.float32, device=dequant_device)
+        up_buf = torch.empty(intermediate_size, hidden_size, dtype=torch.float32, device=dequant_device)
+        down_buf = torch.empty(hidden_size, intermediate_size, dtype=torch.float32, device=dequant_device)
+        
         for expert_idx in range(num_experts): 
-            expert_w13_weight = self.w13_weight_origin[expert_idx].to('cpu')  # torch.Size([1024, 2048])
-            expert_w13_scale_inv = self.w13_weight_scale_inv_origin[expert_idx].to('cpu')  # torch.Size([8, 16]) 
-            expert_w2_weight = self.w2_weight_origin[expert_idx].to('cpu')   # torch.Size([2048, 512])
-            expert_w2_scale_inv = self.w2_weight_scale_inv_origin[expert_idx].to('cpu') #  torch.Size([16, 4]) 
+            expert_w13_weight = self.w13_weight_origin[expert_idx].to(dequant_device)  # torch.Size([1024, 2048])
+            expert_w13_scale_inv = self.w13_weight_scale_inv_origin[expert_idx].to(dequant_device)  # torch.Size([8, 16]) 
+            expert_w2_weight = self.w2_weight_origin[expert_idx].to(dequant_device)   # torch.Size([2048, 512])
+            expert_w2_scale_inv = self.w2_weight_scale_inv_origin[expert_idx].to(dequant_device) #  torch.Size([16, 4]) 
             
             gate_size = expert_w13_weight.shape[0] // 2 
             expert_gate_weight = expert_w13_weight[:gate_size, :]   
@@ -2650,14 +2656,7 @@ class FusedMoE(CustomOp):
             expert_up_scale_inv = expert_w13_scale_inv[gate_scale_inv_size:, :]    # torch.Size([4, 16])
                 
             expert_down_weight = expert_w2_weight  
-            expert_down_scale_inv = expert_w2_scale_inv  
-            
-            
-            
-            gate_buf = torch.empty_like(expert_gate_weight, dtype=torch.float32, device='cpu')
-            up_buf = torch.empty_like(expert_up_weight, dtype=torch.float32, device='cpu')
-            down_buf = torch.empty_like(expert_down_weight, dtype=torch.float32, device='cpu')
-            
+            expert_down_scale_inv = expert_w2_scale_inv   
                 
                 
             gate_float = expert_gate_weight.to(dtype=torch.float32)
@@ -2686,8 +2685,8 @@ class FusedMoE(CustomOp):
             del expert_gate_scale_inv, expert_up_scale_inv, expert_down_scale_inv
             del gate_scale_inv_expanded, up_scale_inv_expanded, down_scale_inv_expanded
             del gate_float, up_float, down_float 
-            del gate_buf, up_buf, down_buf
-            
+           
+        del gate_buf, up_buf, down_buf    
         gc.collect() 
         
         gate_ggml_type = 1
@@ -2769,11 +2768,17 @@ class FusedMoE(CustomOp):
              
         num_experts = self.w13_weight_origin.shape[0]  
         intermediate_size = self.w13_weight_origin.shape[1] // 2
+        hidden_size = self.w13_weight_origin.shape[2]
+        dequant_device = self.w13_weight_origin.device
+        gate_buf = torch.empty(intermediate_size, hidden_size, dtype=torch.float32, device=dequant_device)
+        up_buf = torch.empty(intermediate_size, hidden_size, dtype=torch.float32, device=dequant_device)
+        down_buf = torch.empty(hidden_size, intermediate_size, dtype=torch.float32, device=dequant_device)
+        
         for expert_idx in range(num_experts): 
-            expert_w13_weight = self.w13_weight_origin[expert_idx].to('cpu')  # shape: [1408, 4096]
-            expert_w13_scale = self.w13_weight_scale_origin[expert_idx].to('cpu')    # shape: [1408, 1]
-            expert_w2_weight = self.w2_weight_origin[expert_idx].to('cpu')    # shape: [4096, 1408]
-            expert_w2_scale = self.w2_weight_scale_origin[expert_idx].to('cpu')  # shape: [4096, 1]
+            expert_w13_weight = self.w13_weight_origin[expert_idx].to(dequant_device)  # shape: [1408, 4096]
+            expert_w13_scale = self.w13_weight_scale_origin[expert_idx].to(dequant_device)    # shape: [1408, 1]
+            expert_w2_weight = self.w2_weight_origin[expert_idx].to(dequant_device)    # shape: [4096, 1408]
+            expert_w2_scale = self.w2_weight_scale_origin[expert_idx].to(dequant_device)  # shape: [4096, 1]
             
             gate_size = expert_w13_weight.shape[0] // 2 
             expert_gate_weight = expert_w13_weight[:gate_size, :]  # [704, 4096]
@@ -2785,11 +2790,7 @@ class FusedMoE(CustomOp):
                 
             expert_down_weight = expert_w2_weight  # [4096, 1408]
             expert_down_scale = expert_w2_scale  # [4096, 1]
-            
-            gate_buf = torch.empty_like(expert_gate_weight, dtype=torch.float32, device='cpu')
-            up_buf = torch.empty_like(expert_up_weight, dtype=torch.float32, device='cpu')
-            down_buf = torch.empty_like(expert_down_weight, dtype=torch.float32, device='cpu')
-                
+             
                 
             gate_float = expert_gate_weight.to(dtype=torch.float32)
             up_float = expert_up_weight.to(dtype=torch.float32)
@@ -2812,8 +2813,8 @@ class FusedMoE(CustomOp):
             del expert_gate_scale, expert_up_scale, expert_down_scale
             del gate_float, up_float, down_float
             del gate_scale_expanded, up_scale_expanded, down_scale_expanded
-            del gate_buf, up_buf, down_buf
             
+        del gate_buf, up_buf, down_buf    
         gc.collect() 
         
         gate_ggml_type = 1
@@ -2909,12 +2910,16 @@ class FusedMoE(CustomOp):
             down_projs = []
                
             num_experts = self.w13_weight_origin.shape[0]  
+            dequant_device = self.w13_weight_origin.device
+            gate_buf = torch.empty_like(expert_gate_weight, dtype=torch.float32, device=dequant_device)
+            up_buf = torch.empty_like(expert_up_weight, dtype=torch.float32, device=dequant_device)
+            down_buf = torch.empty_like(expert_down_weight, dtype=torch.float32, device=dequant_device)
             
             for expert_idx in range(num_experts): 
-                expert_w13_weight = self.w13_weight_origin[expert_idx].to('cpu')  # shape: [1408, 4096]
-                expert_w13_scale = self.w13_weight_scale_origin[expert_idx].to('cpu')    # shape: [1408, 1]
-                expert_w2_weight = self.w2_weight_origin[expert_idx].to('cpu')    # shape: [4096, 1408]
-                expert_w2_scale = self.w2_weight_scale_origin[expert_idx].to('cpu')  # shape: [4096, 1]
+                expert_w13_weight = self.w13_weight_origin[expert_idx].to(dequant_device)  # shape: [1408, 4096]
+                expert_w13_scale = self.w13_weight_scale_origin[expert_idx].to(dequant_device)    # shape: [1408, 1]
+                expert_w2_weight = self.w2_weight_origin[expert_idx].to(dequant_device)    # shape: [4096, 1408]
+                expert_w2_scale = self.w2_weight_scale_origin[expert_idx].to(dequant_device)  # shape: [4096, 1]
                 
                 intermediate_size = expert_w13_weight.shape[0] // 2
                 gate_size = intermediate_size
@@ -2925,11 +2930,7 @@ class FusedMoE(CustomOp):
                 expert_up_scale = expert_w13_scale[gate_size:, :]    # [704, 1]
                  
                 expert_down_weight = expert_w2_weight  # [4096, 1408]
-                expert_down_scale = expert_w2_scale  # [4096, 1]
-                
-                gate_buf = torch.empty_like(expert_gate_weight, dtype=torch.float32, device='cpu')
-                up_buf = torch.empty_like(expert_up_weight, dtype=torch.float32, device='cpu')
-                down_buf = torch.empty_like(expert_down_weight, dtype=torch.float32, device='cpu')
+                expert_down_scale = expert_w2_scale  # [4096, 1] 
                  
                  
                 gate_float = expert_gate_weight.to(dtype=torch.float32)
@@ -2953,8 +2954,8 @@ class FusedMoE(CustomOp):
                 del expert_gate_scale, expert_up_scale, expert_down_scale
                 del gate_float, up_float, down_float
                 del gate_scale_expanded, up_scale_expanded, down_scale_expanded
-                del gate_buf, up_buf, down_buf
                 
+            del gate_buf, up_buf, down_buf    
             gc.collect() 
             
             gate_ggml_type = 1
