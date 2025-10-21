@@ -19,7 +19,7 @@ config.yaml里面设置dtype: "float16"相比不设置或设置为dtype: "bfloat
  
 
 # 当前限制：
-1、仅支持dtype: "bfloat16"、"float16"
+1、仅支持原版BF16模型、FP8原版或FP8量化模型
 
 2、仅支持compilation_config.cudagraph_mode: "NONE" [2025.10.14已没有限制]
 
@@ -116,18 +116,13 @@ MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TY
 MAX_JOBS=32 NVCC_THREADS=1 减少编译时内存占用，避免卡死
 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" 性能选项
 
-## 启动命令 使用flashinfer
+## 启动命令
 
-使用以下命令启动Lvllm服务:
-（Qwen3-Next-80B-A3B-Instruct-FP8模型，设置环境变量VLLM_MARLIN_USE_ATOMIC_ADD=1，decode速度上升一点，prefill速度下降一点 ）
-```bash 
-LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS="88" OMP_NUM_THREADS="88" VLLM_ATTENTION_BACKEND="FLASHINFER" vllm serve --config ~/Downloads/Lvllm/config.yaml
-```
-使用以下命令启动Lvllm服务 (Qwen3-VL 不支持 VLLM_ATTENTION_BACKEND="FLASHINFER" )：
+使用以下命令启动Lvllm服务: 
 ```bash 
 LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS="88" OMP_NUM_THREADS="88" vllm serve --config ~/Downloads/Lvllm/config.yaml
 ```
-
+VLLM_ATTENTION_BACKEND="FLASHINFER": 这个环境变量已不是最优选项[2025-10-21]
 修改config.yaml里面配置参数
 LK_THREADS: 总计使用的CPU线程数，一般比总的线程数少10%，例如48核心96线程，LK_THREADS="88"
 OMP_NUM_THREADS：torch并发线程数，保持与LK_THREADS一致
