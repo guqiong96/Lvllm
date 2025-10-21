@@ -2360,7 +2360,7 @@ class FusedMoE(CustomOp):
             return self.forward_impl_chunked(hidden_states, router_logits)
 
         do_naive_dispatch_combine: bool = (
-            self.dp_size > 1 and not self.quant_method.using_modular_kernel
+            self.dp_size > 1 and not self.quant_method.using_modular_kernel and not self.use_lk_moe
         )
 
         # If there are shared experts but we are not using a modular kernel, the
