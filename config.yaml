@@ -1,4 +1,4 @@
-model: "/home/guqiong/Models/Qwen3-VL-30B-A3B-Thinking-FP8"
+model: "/home/guqiong/Models/Qwen3-Next-80B-A3B-Instruct-FP8"
 host: "0.0.0.0"
 port: 8070
 tensor-parallel-size: 1
@@ -7,10 +7,10 @@ gpu-memory-utilization: 0.80
 trust-remote-code: true
 tokenizer-mode: "auto"
 swap-space: 0
-served-model-name: "Qwen3-VL-30B-A3B-Thinking-FP8" 
+served-model-name: "Qwen3-Next-80B-A3B-Instruct-FP8" 
 compilation_config.cudagraph_mode: "FULL_DECODE_ONLY"
 enable_prefix_caching: true
 enable-chunked-prefill: true
 max_num_batched_tokens: 1024
-dtype: "float16"  
+dtype: "float16"
 # speculative-config: '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'

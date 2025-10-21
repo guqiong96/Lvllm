@@ -2239,16 +2239,8 @@ class FusedMoE(CustomOp):
             staged_router_logits = batched_router_logits[:chunk_size, :]  # type: ignore
             staged_hidden_states.copy_(hidden_states, non_blocking=True)
             staged_router_logits.copy_(router_logits, non_blocking=True)
-            
-            if self.use_lk_moe and self.lk_moe is not None:
-                try:  
-                    final_hidden_states = self.forward_lk(staged_hidden_states, staged_router_logits)
-                except Exception as e:
-                    logger.error(f"Error in lk::MOE forward with chunk size {chunk_size}: {e}") 
-                    self.use_lk_moe = False
-            else:
 
-                # If there are shared experts but we are not using a modular kernel,
+            # If there are shared experts but we are not using a modular kernel,
             # the shared experts must be called here
             if (
                 not isinstance(self.quant_method.fused_experts, FusedMoEModularKernel)
@@ -2257,8 +2249,16 @@ class FusedMoE(CustomOp):
                 shared_output = self.shared_experts(staged_hidden_states)
             else:
                 shared_output = None
+                    
+            if self.use_lk_moe and self.lk_moe is not None:
+                try:  
+                    final_hidden_states = self.forward_lk(staged_hidden_states, staged_router_logits)
+                except Exception as e:
+                    logger.error(f"Error in lk::MOE forward with chunk size {chunk_size}: {e}") 
+                    self.use_lk_moe = False
+            else: 
 
-            # Matrix multiply.
+                # Matrix multiply.
                 final_hidden_states = self.quant_method.apply(
                     layer=self,
                     x=staged_hidden_states,
@@ -2268,8 +2268,8 @@ class FusedMoE(CustomOp):
                     use_grouped_topk=self.use_grouped_topk,
                     global_num_experts=self.global_num_experts,
                     expert_map=self.expert_map
-                if not is_rocm_aiter_moe_enabled()
-                else self.expert_mask,
+                    if not is_rocm_aiter_moe_enabled()
+                    else self.expert_mask,
                     topk_group=self.topk_group,
                     num_expert_group=self.num_expert_group,
                     custom_routing_function=self.custom_routing_function,
@@ -2372,17 +2372,25 @@ class FusedMoE(CustomOp):
         else:
             shared_output = None
 
-        if do_naive_dispatch_combine and not self.use_lk_moe:
-            hidden_states, router_logits = get_ep_group().dispatch(
-                hidden_states, router_logits)
+        ctx = get_forward_context()
+        sp_ctx = (
+            ctx.dp_metadata.sp_local_sizes(self.sp_size)
+            if ctx.dp_metadata
+            else nullcontext()
+        )
 
-        if self.use_lk_moe and self.lk_moe is not None:
-            try:  
-                final_hidden_states = self.forward_lk(hidden_states, router_logits)
-            except Exception as e:
-                logger.error(f"Error in lk::MOE forward: {e}") 
-                self.use_lk_moe = False
-        else:
+        with sp_ctx:
+            if do_naive_dispatch_combine and self.lk_moe is not None:
+                hidden_states, router_logits = get_ep_group().dispatch(
+                    hidden_states, router_logits, self.is_sequence_parallel
+                )
+            if self.use_lk_moe and self.lk_moe is not None:
+                try:  
+                    final_hidden_states = self.forward_lk(hidden_states, router_logits)
+                except Exception as e:
+                    logger.error(f"Error in lk::MOE forward: {e}") 
+                    self.use_lk_moe = False
+            else:
                 # Matrix multiply.
                 final_hidden_states = self.quant_method.apply(
                     layer=self,
@@ -2393,8 +2401,8 @@ class FusedMoE(CustomOp):
                     use_grouped_topk=self.use_grouped_topk,
                     global_num_experts=self.global_num_experts,
                     expert_map=self.expert_map
-                if not is_rocm_aiter_moe_enabled()
-                else self.expert_mask,
+                    if not is_rocm_aiter_moe_enabled()
+                    else self.expert_mask,
                     topk_group=self.topk_group,
                     num_expert_group=self.num_expert_group,
                     custom_routing_function=self.custom_routing_function,
@@ -2420,13 +2428,19 @@ class FusedMoE(CustomOp):
                 assert isinstance(final_hidden_states, tuple)
                 final_hidden_states, zero_expert_result = final_hidden_states
 
-        def reduce_output(states: torch.Tensor,
-                          do_combine: bool = True) -> torch.Tensor:
-            if do_naive_dispatch_combine and do_combine and not self.use_lk_moe:
-                states = get_ep_group().combine(states)
+            def reduce_output(
+                states: torch.Tensor, do_combine: bool = True
+            ) -> torch.Tensor:
+                if do_naive_dispatch_combine and do_combine and not self.use_lk_moe:
+                    states = get_ep_group().combine(states, self.is_sequence_parallel)
 
-            if self.reduce_results and (self.tp_size > 1 or self.ep_size > 1) and not self.use_lk_moe:
-                states = self.maybe_all_reduce_tensor_model_parallel(states)
+                if (
+                    not self.is_sequence_parallel
+                    and self.reduce_results
+                    and (self.tp_size > 1 or self.ep_size > 1)
+                    and not self.use_lk_moe
+                ):
+                    states = self.maybe_all_reduce_tensor_model_parallel(states)
 
                 return states
 
@@ -2435,6 +2449,13 @@ class FusedMoE(CustomOp):
                     reduce_output(final_hidden_states[0], do_combine=False),
                     reduce_output(final_hidden_states[1]),
                 )
+            elif self.zero_expert_num is not None and self.zero_expert_num > 0:
+                assert isinstance(final_hidden_states, torch.Tensor)
+                return reduce_output(final_hidden_states) + zero_expert_result
+            else:
+                return reduce_output(final_hidden_states)
+    
+            
             
     def _get_ggml_type_from_quant_config(self,  quant_config, layer_idx, weight_type):  
         if layer_idx < len(quant_config.moe_weight_type_map):
@@ -3074,7 +3095,7 @@ class FusedMoE(CustomOp):
 
     def _process_valid_inputs(self, hidden_states: torch.Tensor, router_logits: torch.Tensor) -> torch.Tensor:
         """Process inputs that are guaranteed to be valid (non-NaN)"""
-        topk_weights, topk_ids = self.select_experts(
+        topk_weights, topk_ids, _ = self.select_experts(
             hidden_states=hidden_states,
             router_logits=router_logits,
             top_k=self.top_k,
@@ -3096,7 +3117,7 @@ class FusedMoE(CustomOp):
         from vllm.forward_context import get_forward_context
         from vllm.config import CUDAGraphMode
         from vllm.compilation.monitor import cudagraph_capturing_enabled  
-        from vllm.utils import current_stream, weak_ref_tensors 
+        from vllm.utils.torch_utils import current_stream, weak_ref_tensors 
   
             
         def get_cuda_stream_ptr(stream: torch.cuda.Stream) -> int:
@@ -3163,11 +3184,7 @@ class FusedMoE(CustomOp):
             logger.error(f"lk_moe forward failed with error: {e}, falling back to default path")
             self.use_lk_moe = False
             raise RuntimeError("lk_moe forward failed, fallback to default MoE implementation")
-              elif self.zero_expert_num is not None and self.zero_expert_num > 0:
-                assert isinstance(final_hidden_states, torch.Tensor)
-                return reduce_output(final_hidden_states) + zero_expert_result
-            else:
-                return reduce_output(final_hidden_states)
+            
 
     @classmethod
     def make_expert_params_mapping(
@@ -3226,9 +3243,8 @@ class FusedMoE(CustomOp):
 
         s += f", scoring_func='{self.scoring_func}', activation='{self.activation}'"  # noqa: E501
 
-        return s 
- 
-    
+        return s
+
 
 def moe_forward(
     hidden_states: torch.Tensor,

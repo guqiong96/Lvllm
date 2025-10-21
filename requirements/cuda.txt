@@ -6,6 +6,5 @@ numba == 0.61.2 # Required for N-gram speculative decoding
 # Dependencies for NVIDIA GPUs
 ray[cgraph]>=2.48.0 # Ray Compiled Graph, required for pipeline parallelism in V1.
 # https://github.com/facebookresearch/xformers/releases/tag/v0.0.32.post1
-xformers==0.0.32.post1; platform_system == 'Linux' and platform_machine == 'x86_64'  # Requires PyTorch >= 2.8
 # FlashInfer should be updated together with the Dockerfile
 flashinfer-python==0.4.1
