@@ -2376,7 +2376,7 @@ class FusedMoE(CustomOp):
         ctx = get_forward_context()
         sp_ctx = (
             ctx.dp_metadata.sp_local_sizes(self.sp_size)
-            if ctx.dp_metadata
+            if ctx.dp_metadata and not self.use_lk_moe
             else nullcontext()
         )
 
