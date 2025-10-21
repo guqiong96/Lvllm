@@ -1126,11 +1126,14 @@ list(APPEND LLAMAFILE_ARCH_FILES
   "csrc/lk/llamafile/tinyblas_cpu_unsupported.cpp"
 )
  
+add_subdirectory(csrc/lk/bestla)
+
 set(LK_EXT_SRC
   "csrc/lk/amx_gemm.cpp"
   "csrc/lk/backend_numa.cpp"
   "csrc/lk/moe.cpp"
   "csrc/lk/lk_bindings.cpp"
+  "csrc/lk/fp8_decompress_wrapper.cpp"
   "csrc/lk/amx_gemm.hpp"
   "csrc/lk/backend_numa.h"
   "csrc/lk/conversion.h"
@@ -1178,9 +1181,9 @@ else()
 endif()
 
 if (USE_ONEDNN)
-  target_link_libraries(_lk_C PRIVATE dnnl_ext)
+  target_link_libraries(_lk_C PRIVATE dnnl_ext llama neural_speed::bestla)
 endif() 
-target_link_libraries(_lk_C PRIVATE llama)
+target_link_libraries(_lk_C PRIVATE llama neural_speed::bestla)
  
 if(UNIX AND NOT APPLE)
   find_library(NUMA_LIBRARY numa REQUIRED)

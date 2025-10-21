@@ -2372,18 +2372,9 @@ class FusedMoE(CustomOp):
         else:
             shared_output = None
 
-        ctx = get_forward_context()
-        sp_ctx = (
-            ctx.dp_metadata.sp_local_sizes(self.sp_size)
-            if ctx.dp_metadata
-            else nullcontext()
-        )
-
-        with sp_ctx:
-            if do_naive_dispatch_combine:
-                hidden_states, router_logits = get_ep_group().dispatch(
-                    hidden_states, router_logits, self.is_sequence_parallel
-                )
+        if do_naive_dispatch_combine and not self.use_lk_moe:
+            hidden_states, router_logits = get_ep_group().dispatch(
+                hidden_states, router_logits)
 
         if self.use_lk_moe and self.lk_moe is not None:
             try:  
@@ -2429,18 +2420,13 @@ class FusedMoE(CustomOp):
                 assert isinstance(final_hidden_states, tuple)
                 final_hidden_states, zero_expert_result = final_hidden_states
 
-            def reduce_output(
-                states: torch.Tensor, do_combine: bool = True
-            ) -> torch.Tensor:
-                if do_naive_dispatch_combine and do_combine:
-                    states = get_ep_group().combine(states, self.is_sequence_parallel)
+        def reduce_output(states: torch.Tensor,
+                          do_combine: bool = True) -> torch.Tensor:
+            if do_naive_dispatch_combine and do_combine and not self.use_lk_moe:
+                states = get_ep_group().combine(states)
 
-                if (
-                    not self.is_sequence_parallel
-                    and self.reduce_results
-                    and (self.tp_size > 1 or self.ep_size > 1)
-                ):
-                    states = self.maybe_all_reduce_tensor_model_parallel(states)
+            if self.reduce_results and (self.tp_size > 1 or self.ep_size > 1) and not self.use_lk_moe:
+                states = self.maybe_all_reduce_tensor_model_parallel(states)
 
                 return states
 
@@ -2477,20 +2463,30 @@ class FusedMoE(CustomOp):
             return
         try:  
             find_weight = False 
-             
-            if hasattr(self, 'w13_qweight') and hasattr(self, 'w2_qweight'): 
+            from compressed_tensors.quantization import QuantizationStrategy
+            if hasattr(self, 'quant_method') and hasattr(self.quant_method, 'block_quant') :
+                block_quant = self.quant_method.block_quant
+            else:
+                block_quant = False 
+            if hasattr(self, 'w13_qweight'): 
                 self._process_gguf_weights()
                 find_weight = True
-            elif hasattr(self, 'w13_weight') and hasattr(self, 'w2_weight'): 
+            elif hasattr(self, 'w13_weight_scale_inv_origin') and block_quant:
+                self._process_block_weights()
+                find_weight = True
+            elif hasattr(self, 'w13_weight_scale_origin'):
+                self._process_channel_weights()
+                find_weight = True 
+            elif hasattr(self, 'w13_weight'): 
                 self._process_regular_weights()
                 find_weight = True
-            
+             
             if not find_weight: 
                 logger.error("weight not found in layer")
                 return
             
             self._initialize_cuda_graph_buffers()
-            logger.info(f"Initialized lk::MOE with {self.local_num_experts} experts")
+            logger.info(f"Initialized lk::MOE with {self.local_num_experts} experts for layer {self.layer_name}")
         except Exception as e:
             logger.error(f"Failed to initialize lk::MOE: {e}")
             self.use_lk_moe = False
@@ -2504,6 +2500,10 @@ class FusedMoE(CustomOp):
                 return 1  # GGML_TYPE_F16
             elif dtype == torch.bfloat16:
                 return 30  # GGML_TYPE_BF16
+            elif dtype == torch.float8_e4m3fn:
+                return 1  # to GGML_TYPE_BF16
+            elif dtype == torch.int32:
+                return 1
             else:
                 raise ValueError(f"Unsupported dtype {dtype}")
             
@@ -2511,11 +2511,12 @@ class FusedMoE(CustomOp):
     def _process_gguf_weights(self):  
          
         if not self.w13_qweight.device.type == 'cpu' or not self.w2_qweight.device.type == 'cpu':
-            logger.warning("GGUF Weights are still on GPU, can't use lk moe ...")
+            logger.error("GGUF Weights are still on GPU, can't use lk moe ...")
             return
               
         import re
-        layer_idx = int(re.search(r'\d+', self.layer_name).group())
+        from vllm.model_executor.models.utils import extract_layer_index
+        layer_idx = extract_layer_index(self.layer_name)
         gate_ggml_type = self._get_ggml_type_from_quant_config(self.quant_config, layer_idx, 'gate')
         up_ggml_type = self._get_ggml_type_from_quant_config(self.quant_config, layer_idx, 'up')
         down_ggml_type = self._get_ggml_type_from_quant_config(self.quant_config, layer_idx, 'down')
@@ -2566,13 +2567,294 @@ class FusedMoE(CustomOp):
         
         import gc
         gc.collect()
+    
+    def _block_scale_broadcast_fixed(self, scale, target_shape, group_shape): 
+        if torch.is_tensor(group_shape): 
+            group_shape = group_shape.tolist()
+       
+        target_rows, target_cols = target_shape
+        block_rows, block_cols = group_shape
+         
+        num_groups_m = target_rows // block_rows
+        num_groups_n = target_cols // block_cols
+         
+        assert scale.shape == (num_groups_m, num_groups_n) 
+         
+        scale_expanded = scale.repeat_interleave(block_rows, dim=0) 
+        scale_expanded = scale_expanded.repeat_interleave(block_cols, dim=1)
+         
+        assert scale_expanded.shape == (target_rows, target_cols) 
         
+        return scale_expanded
+    
+    def _process_block_weights(self): 
+        w13_weight = self.w13_weight
+        w2_weight = self.w2_weight
+         
+        if not w13_weight.device.type == 'cpu' or not w2_weight.device.type == 'cpu':
+            logger.error("Weights are still on GPU, can't use lk moe ...")
+            return
+               
+        gate_ggml_type = 1
+        up_ggml_type = 1
+        down_ggml_type = 1
+        hidden_ggml_type = self.get_ggml_type_from_dtype(self.moe_config.in_dtype)
+         
+        del w13_weight, w2_weight
+        del self.w13_weight, self.w2_weight
+        import gc
+        gc.collect() 
+            
+        gate_projs = []
+        up_projs = []
+        down_projs = []
+        
+        group_shape = self.quant_method.weight_block_size
+
+             
+        num_experts = self.w13_weight_origin.shape[0]  
+        intermediate_size = self.w13_weight_origin.shape[1] // 2 # torch.Size([512, 1024, 2048])
+        for expert_idx in range(num_experts): 
+            expert_w13_weight = self.w13_weight_origin[expert_idx].to('cpu')  # torch.Size([1024, 2048])
+            expert_w13_scale_inv = self.w13_weight_scale_inv_origin[expert_idx].to('cpu')  # torch.Size([8, 16]) 
+            expert_w2_weight = self.w2_weight_origin[expert_idx].to('cpu')   # torch.Size([2048, 512])
+            expert_w2_scale_inv = self.w2_weight_scale_inv_origin[expert_idx].to('cpu') #  torch.Size([16, 4]) 
+            
+            gate_size = expert_w13_weight.shape[0] // 2 
+            expert_gate_weight = expert_w13_weight[:gate_size, :]   
+            expert_up_weight = expert_w13_weight[gate_size:, :]   
+            
+            gate_scale_inv_size = expert_w13_scale_inv.shape[0] // 2     
+            expert_gate_scale_inv = expert_w13_scale_inv[:gate_scale_inv_size, :]  # torch.Size([4, 16])
+            expert_up_scale_inv = expert_w13_scale_inv[gate_scale_inv_size:, :]    # torch.Size([4, 16])
+                
+            expert_down_weight = expert_w2_weight  
+            expert_down_scale_inv = expert_w2_scale_inv  
+            
+            
+            
+            gate_buf = torch.empty_like(expert_gate_weight, dtype=torch.float32, device='cpu')
+            up_buf = torch.empty_like(expert_up_weight, dtype=torch.float32, device='cpu')
+            down_buf = torch.empty_like(expert_down_weight, dtype=torch.float32, device='cpu')
+            
+                
+                
+            gate_float = expert_gate_weight.to(dtype=torch.float32)
+            up_float = expert_up_weight.to(dtype=torch.float32)
+            down_float = expert_down_weight.to(dtype=torch.float32)
+                 
+             
+            gate_scale_inv_expanded = self._block_scale_broadcast_fixed(
+                expert_gate_scale_inv, gate_float.shape, group_shape)
+            gate_buf = gate_float * gate_scale_inv_expanded
+             
+            up_scale_inv_expanded = self._block_scale_broadcast_fixed(
+                expert_up_scale_inv, up_float.shape, group_shape)
+            up_buf = up_float * up_scale_inv_expanded
+             
+            down_scale_inv_expanded = self._block_scale_broadcast_fixed(
+                expert_down_scale_inv, down_float.shape, group_shape)
+            down_buf = down_float * down_scale_inv_expanded
+            
+            gate_projs.append(gate_buf)
+            up_projs.append(up_buf)
+            down_projs.append(down_buf)
+            
+            del expert_w13_weight, expert_w13_scale_inv, expert_w2_weight, expert_w2_scale_inv
+            del expert_gate_weight, expert_up_weight, expert_down_weight
+            del expert_gate_scale_inv, expert_up_scale_inv, expert_down_scale_inv
+            del gate_scale_inv_expanded, up_scale_inv_expanded, down_scale_inv_expanded
+            del gate_float, up_float, down_float 
+            del gate_buf, up_buf, down_buf
+            
+        gc.collect() 
+        
+        gate_ggml_type = 1
+        up_ggml_type = 1
+        down_ggml_type = 1  
+        
+        up_tensor = torch.stack(up_projs, dim=0).to('cpu')
+        gate_tensor = torch.stack(gate_projs, dim=0).to('cpu')
+        down_tensor = torch.stack(down_projs, dim=0).to('cpu') 
+        del gate_projs, up_projs, down_projs 
+            
+        up_numpy = up_tensor.half().view(torch.uint16).numpy()
+        gate_numpy = gate_tensor.half().view(torch.uint16).numpy()
+        down_numpy = down_tensor.half().view(torch.uint16).numpy()
+        
+        del up_tensor, gate_tensor, down_tensor
+    
+            
+        gate_ptr = ctypes.addressof(
+            ctypes.cast(gate_numpy.ctypes.data, ctypes.POINTER(ctypes.c_uint8)).contents
+        )
+        
+        up_ptr = ctypes.addressof(
+            ctypes.cast(up_numpy.ctypes.data, ctypes.POINTER(ctypes.c_uint8)).contents
+        )
+        
+    
+        down_ptr = ctypes.addressof(
+            ctypes.cast(down_numpy.ctypes.data, ctypes.POINTER(ctypes.c_uint8)).contents
+        ) 
+        
+        moe_config = vllm._lk_C.MOEConfig(
+            self.local_num_experts,        # expert_num
+            self.top_k,                    # routed_expert_num
+            self.hidden_size,              # hidden_size
+            intermediate_size,             # intermediate_size
+            32,                            # stride
+            10,                            # group_min_len
+            1024,                          # group_max_len
+            gate_ptr,                 # gate_proj
+            up_ptr,                   # up_proj
+            down_ptr,                 # down_proj
+            gate_ggml_type,                # gate_type 
+            up_ggml_type,                  # up_type  
+            down_ggml_type,                # down_type  
+            hidden_ggml_type,              # hidden_type 
+        )
+         
+        self.lk_moe_config = moe_config 
+        self.lk_moe = vllm._lk_C.MOE(moe_config)
+          
+        del self.w13_weight_origin, self.w2_weight_origin
+        del self.w13_weight_scale_inv_origin, self.w2_weight_scale_inv_origin
+     
+        gc.collect()
+    
+        
+    def _process_channel_weights(self): 
+        w13_weight = self.w13_weight
+        w2_weight = self.w2_weight
+         
+        if not w13_weight.device.type == 'cpu' or not w2_weight.device.type == 'cpu':
+            logger.error("Weights are still on GPU, can't use lk moe ...")
+            return
+               
+        gate_ggml_type = 1
+        up_ggml_type = 1
+        down_ggml_type = 1
+        hidden_ggml_type = self.get_ggml_type_from_dtype(self.moe_config.in_dtype)
+         
+        del w13_weight, w2_weight
+        del self.w13_weight, self.w2_weight
+        import gc
+        gc.collect() 
+            
+        gate_projs = []
+        up_projs = []
+        down_projs = []
+             
+        num_experts = self.w13_weight_origin.shape[0]  
+        intermediate_size = self.w13_weight_origin.shape[1] // 2
+        for expert_idx in range(num_experts): 
+            expert_w13_weight = self.w13_weight_origin[expert_idx].to('cpu')  # shape: [1408, 4096]
+            expert_w13_scale = self.w13_weight_scale_origin[expert_idx].to('cpu')    # shape: [1408, 1]
+            expert_w2_weight = self.w2_weight_origin[expert_idx].to('cpu')    # shape: [4096, 1408]
+            expert_w2_scale = self.w2_weight_scale_origin[expert_idx].to('cpu')  # shape: [4096, 1]
+            
+            gate_size = expert_w13_weight.shape[0] // 2 
+            expert_gate_weight = expert_w13_weight[:gate_size, :]  # [704, 4096]
+            expert_up_weight = expert_w13_weight[gate_size:, :]    # [704, 4096]
+            
+            gate_scale_size = expert_w13_scale.shape[0] // 2    
+            expert_gate_scale = expert_w13_scale[:gate_scale_size, :]  # [704, 1]
+            expert_up_scale = expert_w13_scale[gate_scale_size:, :]    # [704, 1]
+                
+            expert_down_weight = expert_w2_weight  # [4096, 1408]
+            expert_down_scale = expert_w2_scale  # [4096, 1]
+            
+            gate_buf = torch.empty_like(expert_gate_weight, dtype=torch.float32, device='cpu')
+            up_buf = torch.empty_like(expert_up_weight, dtype=torch.float32, device='cpu')
+            down_buf = torch.empty_like(expert_down_weight, dtype=torch.float32, device='cpu')
+                
+                
+            gate_float = expert_gate_weight.to(dtype=torch.float32)
+            up_float = expert_up_weight.to(dtype=torch.float32)
+            down_float = expert_down_weight.to(dtype=torch.float32)
+                
+            gate_scale_expanded = expert_gate_scale.expand_as(gate_float)
+            up_scale_expanded = expert_up_scale.expand_as(up_float)
+            down_scale_expanded = expert_down_scale.expand_as(down_float)
+                
+            gate_buf = gate_float * gate_scale_expanded
+            up_buf = up_float * up_scale_expanded
+            down_buf = down_float * down_scale_expanded 
+            
+            gate_projs.append(gate_buf)
+            up_projs.append(up_buf)
+            down_projs.append(down_buf)
+            
+            del expert_w13_weight, expert_w13_scale, expert_w2_weight, expert_w2_scale
+            del expert_gate_weight, expert_up_weight, expert_down_weight
+            del expert_gate_scale, expert_up_scale, expert_down_scale
+            del gate_float, up_float, down_float
+            del gate_scale_expanded, up_scale_expanded, down_scale_expanded
+            del gate_buf, up_buf, down_buf
+            
+        gc.collect() 
+        
+        gate_ggml_type = 1
+        up_ggml_type = 1
+        down_ggml_type = 1  
+        
+        up_tensor = torch.stack(up_projs, dim=0).to('cpu')
+        gate_tensor = torch.stack(gate_projs, dim=0).to('cpu')
+        down_tensor = torch.stack(down_projs, dim=0).to('cpu') 
+        del gate_projs, up_projs, down_projs 
+            
+        up_numpy = up_tensor.half().view(torch.uint16).numpy()
+        gate_numpy = gate_tensor.half().view(torch.uint16).numpy()
+        down_numpy = down_tensor.half().view(torch.uint16).numpy()
+        
+        del up_tensor, gate_tensor, down_tensor
+    
+            
+        gate_ptr = ctypes.addressof(
+            ctypes.cast(gate_numpy.ctypes.data, ctypes.POINTER(ctypes.c_uint8)).contents
+        )
+        
+        up_ptr = ctypes.addressof(
+            ctypes.cast(up_numpy.ctypes.data, ctypes.POINTER(ctypes.c_uint8)).contents
+        )
+        
+    
+        down_ptr = ctypes.addressof(
+            ctypes.cast(down_numpy.ctypes.data, ctypes.POINTER(ctypes.c_uint8)).contents
+        ) 
+        
+        moe_config = vllm._lk_C.MOEConfig(
+            self.local_num_experts,        # expert_num
+            self.top_k,                    # routed_expert_num
+            self.hidden_size,              # hidden_size
+            intermediate_size,             # intermediate_size
+            32,                            # stride
+            10,                            # group_min_len
+            1024,                          # group_max_len
+            gate_ptr,                 # gate_proj
+            up_ptr,                   # up_proj
+            down_ptr,                 # down_proj
+            gate_ggml_type,                # gate_type 
+            up_ggml_type,                  # up_type  
+            down_ggml_type,                # down_type  
+            hidden_ggml_type,              # hidden_type 
+        )
+         
+        self.lk_moe_config = moe_config 
+        self.lk_moe = vllm._lk_C.MOE(moe_config)
+          
+        del self.w13_weight_origin, self.w2_weight_origin
+        del self.w13_weight_scale_origin, self.w2_weight_scale_origin
+     
+        gc.collect()
+            
     def _process_regular_weights(self): 
         w13_weight = self.w13_weight
         w2_weight = self.w2_weight
          
         if not w13_weight.device.type == 'cpu' or not w2_weight.device.type == 'cpu':
-            logger.warning("Weights are still on GPU, can't use lk moe ...")
+            logger.error("Weights are still on GPU, can't use lk moe ...")
             return
               
         gate_up_dtype = w13_weight.dtype
@@ -2589,10 +2871,103 @@ class FusedMoE(CustomOp):
         gate_proj_view = self.w13_weight.narrow(1, 0, intermediate_size).contiguous()
         up_proj_view = self.w13_weight.narrow(1, intermediate_size, intermediate_size).contiguous()
         
-        gate_proj_ptr = gate_proj_view.data_ptr()
-        up_proj_ptr = up_proj_view.data_ptr()
-        down_proj_ptr = self.w2_weight.contiguous().data_ptr()
+        gate_ptr = gate_proj_view.data_ptr()
+        up_ptr = up_proj_view.data_ptr()
+        down_ptr = self.w2_weight.contiguous().data_ptr()
+         
+        use_scale = hasattr(self, 'w13_weight_scale_origin') and hasattr(self, 'w2_weight_scale_origin')
+        
+        if use_scale: 
+            del w13_weight, w2_weight
+            del self.w13_weight, self.w2_weight
+            import gc
+            gc.collect() 
             
+            gate_projs = []
+            up_projs = []
+            down_projs = []
+               
+            num_experts = self.w13_weight_origin.shape[0]  
+            
+            for expert_idx in range(num_experts): 
+                expert_w13_weight = self.w13_weight_origin[expert_idx].to('cpu')  # shape: [1408, 4096]
+                expert_w13_scale = self.w13_weight_scale_origin[expert_idx].to('cpu')    # shape: [1408, 1]
+                expert_w2_weight = self.w2_weight_origin[expert_idx].to('cpu')    # shape: [4096, 1408]
+                expert_w2_scale = self.w2_weight_scale_origin[expert_idx].to('cpu')  # shape: [4096, 1]
+                
+                intermediate_size = expert_w13_weight.shape[0] // 2
+                gate_size = intermediate_size
+                expert_gate_weight = expert_w13_weight[:gate_size, :]  # [704, 4096]
+                expert_up_weight = expert_w13_weight[gate_size:, :]    # [704, 4096]
+                 
+                expert_gate_scale = expert_w13_scale[:gate_size, :]  # [704, 1]
+                expert_up_scale = expert_w13_scale[gate_size:, :]    # [704, 1]
+                 
+                expert_down_weight = expert_w2_weight  # [4096, 1408]
+                expert_down_scale = expert_w2_scale  # [4096, 1]
+                
+                gate_buf = torch.empty_like(expert_gate_weight, dtype=torch.float32, device='cpu')
+                up_buf = torch.empty_like(expert_up_weight, dtype=torch.float32, device='cpu')
+                down_buf = torch.empty_like(expert_down_weight, dtype=torch.float32, device='cpu')
+                 
+                 
+                gate_float = expert_gate_weight.to(dtype=torch.float32)
+                up_float = expert_up_weight.to(dtype=torch.float32)
+                down_float = expert_down_weight.to(dtype=torch.float32)
+                 
+                gate_scale_expanded = expert_gate_scale.expand_as(gate_float)
+                up_scale_expanded = expert_up_scale.expand_as(up_float)
+                down_scale_expanded = expert_down_scale.expand_as(down_float)
+                 
+                gate_buf = gate_float * gate_scale_expanded
+                up_buf = up_float * up_scale_expanded
+                down_buf = down_float * down_scale_expanded 
+             
+                gate_projs.append(gate_buf)
+                up_projs.append(up_buf)
+                down_projs.append(down_buf)
+                
+                del expert_w13_weight, expert_w13_scale, expert_w2_weight, expert_w2_scale
+                del expert_gate_weight, expert_up_weight, expert_down_weight
+                del expert_gate_scale, expert_up_scale, expert_down_scale
+                del gate_float, up_float, down_float
+                del gate_scale_expanded, up_scale_expanded, down_scale_expanded
+                del gate_buf, up_buf, down_buf
+                
+            gc.collect() 
+            
+            gate_ggml_type = 1
+            up_ggml_type = 1
+            down_ggml_type = 1  
+            
+            up_tensor = torch.stack(up_projs, dim=0).to('cpu')
+            gate_tensor = torch.stack(gate_projs, dim=0).to('cpu')
+            down_tensor = torch.stack(down_projs, dim=0).to('cpu') 
+            
+            del gate_projs, up_projs, down_projs 
+              
+            up_numpy = up_tensor.half().view(torch.uint16).numpy()
+            gate_numpy = gate_tensor.half().view(torch.uint16).numpy()
+            down_numpy = down_tensor.half().view(torch.uint16).numpy()
+            
+            del up_tensor, gate_tensor, down_tensor
+        
+             
+            gate_ptr = ctypes.addressof(
+                ctypes.cast(gate_numpy.ctypes.data, ctypes.POINTER(ctypes.c_uint8)).contents
+            )
+            
+            up_ptr = ctypes.addressof(
+                ctypes.cast(up_numpy.ctypes.data, ctypes.POINTER(ctypes.c_uint8)).contents
+            )
+            
+        
+            down_ptr = ctypes.addressof(
+                ctypes.cast(down_numpy.ctypes.data, ctypes.POINTER(ctypes.c_uint8)).contents
+            )
+            
+            
+        
         
         moe_config = vllm._lk_C.MOEConfig(
             self.local_num_experts,        # expert_num
@@ -2602,9 +2977,9 @@ class FusedMoE(CustomOp):
             32,                            # stride
             10,                            # group_min_len
             1024,                          # group_max_len
-            gate_proj_ptr,                 # gate_proj
-            up_proj_ptr,                   # up_proj
-            down_proj_ptr,                 # down_proj
+            gate_ptr,                 # gate_proj
+            up_ptr,                   # up_proj
+            down_ptr,                 # down_proj
             gate_ggml_type,                # gate_type 
             up_ggml_type,                  # up_type  
             down_ggml_type,                # down_type  
@@ -2614,9 +2989,14 @@ class FusedMoE(CustomOp):
         self.lk_moe_config = moe_config 
         self.lk_moe = vllm._lk_C.MOE(moe_config)
          
-        del gate_proj_view, up_proj_view,  
-        del self.w13_weight, self.w2_weight
         
+        if use_scale:
+            del self.w13_weight_origin, self.w2_weight_origin
+            del self.w13_weight_scale_origin, self.w2_weight_scale_origin
+        else:
+            del gate_proj_view, up_proj_view,  
+            del self.w13_weight, self.w2_weight
+ 
         import gc
         gc.collect()
                 

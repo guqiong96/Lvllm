@@ -1546,7 +1546,6 @@ def is_lk_moe_numa_enabled() -> bool:
     try:
         import  vllm._lk_C  
         return environment_variables["LVLLM_MOE_NUMA_ENABLED"]()
-    except ImportError:
-        print("Error: vllm._lk_C is not available, "
-              "falling back to default behavior.")
+    except Exception as e:
+        print(f"Error: vllm._lk_C is not available falling back to default behavior." , e)
         return False
