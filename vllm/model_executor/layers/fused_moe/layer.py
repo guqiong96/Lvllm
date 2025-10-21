@@ -1425,10 +1425,10 @@ class FusedMoE(CustomOp):
         # Route to the chunked forward path using the FlashInfer Cutlass kernel
         # only when data parallelism (DP) is enabled.
         return (
-            self.moe_parallel_config.use_pplx_kernels
+            (self.moe_parallel_config.use_pplx_kernels
             or self.moe_parallel_config.use_deepep_ll_kernels
-            or (self.dp_size > 1 and self.use_flashinfer_cutlass_kernels)
-            or self.use_lk_moe
+            or (self.dp_size > 1 and self.use_flashinfer_cutlass_kernels))
+            and not self.use_lk_moe
         )
 
     def update_expert_map(self):
