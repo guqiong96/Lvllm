@@ -2087,7 +2087,7 @@ class FusedMoE(CustomOp):
             if indices_type is not None:
                 topk_ids = topk_ids.to(dtype=indices_type)
 
-        if self.enable_eplb and not self.use_lk_moe:
+        if enable_eplb and not is_lk_moe_numa_enabled:
             assert expert_load_view is not None
             assert logical_to_physical_map is not None
             assert logical_replica_count is not None
