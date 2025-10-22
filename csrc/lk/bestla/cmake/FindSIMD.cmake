@@ -67,7 +67,7 @@ set(AMX_BF16_CODE "
         return 0;
     }
 ")
-set(AMX_BF16_FLAGS " ")
+set(AMX_BF16_FLAGS "-march=native")
 
 # "amx_tile", "amx_int8"
 set(AMX_INT8_CODE "
@@ -78,7 +78,7 @@ set(AMX_INT8_CODE "
         return 0;
     }
 ")
-set(AMX_INT8_FLAGS " ")
+set(AMX_INT8_FLAGS "-march=native")
 
 # "amx_tile", "amx_fp16"
 set(AMX_FP16_CODE "
@@ -89,7 +89,7 @@ set(AMX_FP16_CODE "
         return 0;
     }
 ")
-set(AMX_FP16_FLAGS " ")
+set(AMX_FP16_FLAGS "-march=native")
 
 # "avx512_fp16"
 set(AVX512_FP16_CODE "

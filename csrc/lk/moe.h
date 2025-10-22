@@ -28,6 +28,9 @@
 // #define __AVX512VNNI__ 1
 #if defined(__AMX_INT8__) && defined(__AVX512VNNI__)
     #include "amx_gemm.hpp"
+    #pragma message("AMX support enabled in compilation")
+#else
+    #pragma message("AMX support disabled in compilation")
 #endif
 #include <queue> 
 
