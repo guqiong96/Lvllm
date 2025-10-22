@@ -1173,6 +1173,11 @@ class FusedMoE(CustomOp):
         self.layer_name = prefix
 
         self.enable_eplb = enable_eplb
+        if self.enable_eplb and self.use_lk_moe:
+            raise RuntimeError(
+                "EPLB (Expert Parallel Load Balancing) is not compatible with LK-MoE NUMA mode. "
+                "Please disable either EPLB or set environment variable LVLLM_MOE_NUMA_ENABLED to 0."
+            )
         self.expert_load_view: torch.Tensor | None = None
         self.logical_to_physical_map: torch.Tensor | None = None
         self.logical_replica_count: torch.Tensor | None = None
@@ -2082,7 +2087,7 @@ class FusedMoE(CustomOp):
             if indices_type is not None:
                 topk_ids = topk_ids.to(dtype=indices_type)
 
-        if enable_eplb and is_lk_moe_numa_enabled():
+        if self.enable_eplb and not self.use_lk_moe:
             assert expert_load_view is not None
             assert logical_to_physical_map is not None
             assert logical_replica_count is not None
@@ -3032,42 +3037,80 @@ class FusedMoE(CustomOp):
             max_num_batched_tokens = 2048 
             FusedMoE.cuda_graphs = [1, 2, 4] + list(range(8, max_num_batched_tokens+1, 8))
              
-            FusedMoE.input_tensor_cpu = []
-            FusedMoE.expert_ids_cpu = []
-            FusedMoE.weights_cpu = []
-            FusedMoE.output_cpu = []
-            FusedMoE.bsz_tensor_cpu = []
-            FusedMoE.output_gpu = []
+            FusedMoE.input_tensor_cpu = {}  # device_id -> buffers
+            FusedMoE.expert_ids_cpu = {}    # device_id -> buffers
+            FusedMoE.weights_cpu = {}       # device_id -> buffers
+            FusedMoE.output_cpu = {}        # device_id -> buffers
+            FusedMoE.bsz_tensor_cpu = {}    # device_id -> buffers
+            FusedMoE.output_gpu = {}        # device_id -> buffers
             
+            current_device = torch.cuda.current_device()
+    
             num_experts_per_tok = self.top_k
             hidden_size = self.hidden_size
             buff_dtype = self.moe_config.in_dtype
              
-            FusedMoE.output_gpu = [
-                torch.zeros((batch_size, hidden_size), device="cuda", dtype=buff_dtype)
+            FusedMoE.output_gpu[current_device] = [
+                torch.zeros((batch_size, hidden_size), device=current_device, dtype=buff_dtype)
                 for batch_size in FusedMoE.cuda_graphs
             ]
             
-            FusedMoE.input_tensor_cpu = [
+            FusedMoE.input_tensor_cpu[current_device] = [
                 torch.zeros((batch_size, self.hidden_size), device="cpu", dtype=buff_dtype, pin_memory=True)
                 for batch_size in FusedMoE.cuda_graphs
             ]
-            FusedMoE.expert_ids_cpu = [
+            FusedMoE.expert_ids_cpu[current_device] = [
                 torch.zeros((batch_size, num_experts_per_tok), device="cpu", dtype=torch.long, pin_memory=True)
                 for batch_size in FusedMoE.cuda_graphs
             ]
-            FusedMoE.weights_cpu = [
+            FusedMoE.weights_cpu[current_device] = [
                 torch.zeros((batch_size, num_experts_per_tok), device="cpu", dtype=torch.float32, pin_memory=True)
                 for batch_size in FusedMoE.cuda_graphs
             ]
-            FusedMoE.output_cpu = [
+            FusedMoE.output_cpu[current_device] = [
                 torch.zeros((batch_size, hidden_size), device="cpu", pin_memory=True, dtype=buff_dtype)
                 for batch_size in FusedMoE.cuda_graphs
             ]
-            FusedMoE.bsz_tensor_cpu = [
+            FusedMoE.bsz_tensor_cpu[current_device] = [
                 torch.zeros((1), device="cpu", dtype=torch.int32, pin_memory=True)
                 for _ in range(len(FusedMoE.cuda_graphs))
             ]
+            
+    def _initialize_device_buffers(self, device_id: int): 
+        from vllm.compilation.monitor import cudagraph_capturing_enabled 
+        if cudagraph_capturing_enabled:
+            import logging
+            logging.warning(f"CUDA graph capturing is enabled during buffer initialization for device {device_id}")
+        
+        num_experts_per_tok = self.top_k
+        hidden_size = self.hidden_size
+        buff_dtype = self.moe_config.in_dtype
+         
+        FusedMoE.output_gpu[device_id] = [
+            torch.zeros((batch_size, hidden_size), device=device_id, dtype=buff_dtype)
+            for batch_size in FusedMoE.cuda_graphs
+        ]
+        
+        FusedMoE.input_tensor_cpu[device_id] = [
+            torch.zeros((batch_size, self.hidden_size), device="cpu", dtype=buff_dtype, pin_memory=True)
+            for batch_size in FusedMoE.cuda_graphs
+        ]
+        FusedMoE.expert_ids_cpu[device_id] = [
+            torch.zeros((batch_size, num_experts_per_tok), device="cpu", dtype=torch.long, pin_memory=True)
+            for batch_size in FusedMoE.cuda_graphs
+        ]
+        FusedMoE.weights_cpu[device_id] = [
+            torch.zeros((batch_size, num_experts_per_tok), device="cpu", dtype=torch.float32, pin_memory=True)
+            for batch_size in FusedMoE.cuda_graphs
+        ]
+        FusedMoE.output_cpu[device_id] = [
+            torch.zeros((batch_size, hidden_size), device="cpu", pin_memory=True, dtype=buff_dtype)
+            for batch_size in FusedMoE.cuda_graphs
+        ]
+        FusedMoE.bsz_tensor_cpu[device_id] = [
+            torch.zeros((1), device="cpu", dtype=torch.int32, pin_memory=True)
+            for _ in range(len(FusedMoE.cuda_graphs))
+        ]
          
     def _find_best_graph_index(self, total_tokens: int) -> int:
         if not hasattr(FusedMoE, 'cuda_graphs') or not FusedMoE.cuda_graphs:
@@ -3150,14 +3193,18 @@ class FusedMoE(CustomOp):
         non_blocking = True
         
         try:      
-            graph_index = self._find_best_graph_index(batch_size) 
+            graph_index = self._find_best_graph_index(batch_size)
             
-            input_tensor_cpu = FusedMoE.input_tensor_cpu
-            expert_ids_cpu = FusedMoE.expert_ids_cpu
-            weights_cpu = FusedMoE.weights_cpu
-            output_cpu = FusedMoE.output_cpu
-            bsz_tensor_cpu = FusedMoE.bsz_tensor_cpu
-            output_gpu = FusedMoE.output_gpu 
+            current_device = torch.cuda.current_device() 
+            if current_device not in FusedMoE.input_tensor_cpu: 
+                self._initialize_device_buffers(current_device)
+            
+            input_tensor_cpu = FusedMoE.input_tensor_cpu[current_device]
+            expert_ids_cpu = FusedMoE.expert_ids_cpu[current_device]
+            weights_cpu = FusedMoE.weights_cpu[current_device]
+            output_cpu = FusedMoE.output_cpu[current_device]
+            bsz_tensor_cpu = FusedMoE.bsz_tensor_cpu[current_device]
+            output_gpu = FusedMoE.output_gpu[current_device]
                  
             bsz_tensor_cpu[graph_index][0] = batch_size 
 
