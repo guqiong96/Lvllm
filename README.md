@@ -1,5 +1,6 @@
 ## LvLLM GPU+NUMA 混合推理MOE大模型！！！ 一张3090运行qwen3-next-80b, 预处理590ts，解码40ts ！！
 
+# 更新日期：2025-10-27 （update date: 2025-10-27）
 
 # 2025-10-19 FP8支持GPU+NUMA 混合推理MOE模型！！ [显存FP8精度，内存FP16精度] 已验证GLM-4.5-Air-FP8
 <img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/272b4e89-48e8-4cb5-8b8c-a892725dfe06" />
@@ -142,6 +143,17 @@ OMP_NUM_THREADS：torch并发线程数，保持与LK_THREADS一致
 运行以下命令，将错误输出提交至Issues或微信群
 ```bash 
 python -c "import  vllm._lk_C"
+```
+
+### 更新已有Lvllm
+
+如果已安装Lvllm，需要更新到最新版本，请执行以下命令：
+
+```bash
+git pull --force
+python use_existing_torch.py 
+pip install -r requirements/build.txt
+MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
 ```
 
 ### 配置说明
@@ -306,6 +318,17 @@ OMP_NUM_THREADS: Torch concurrency threads, should be the same as LK_THREADS
 Run the following command and submit the error output to Issues or WeChat group
 ```bash 
 python -c "import  vllm._lk_C"
+```
+
+### Update Existing LvllmIf 
+
+Lvllm is already installed and needs to be updated to the latest version, please execute the following command:
+
+```bash
+git pull --force
+python use_existing_torch.py 
+pip install -r requirements/build.txt
+MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
 ```
 
 ### Configuration Explanation
