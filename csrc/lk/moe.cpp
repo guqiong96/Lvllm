@@ -762,7 +762,7 @@ void MOE::forward_many_m(int qlen, int k, const uint64_t* expert_ids, const floa
         amx_gemm_compute(config_.down_type, down_proj_ptr, down_input_ptr, down_output_ptr, n, n_stride, config_.intermediate_size, config_.hidden_size);
         #else
         void* down_proj_ptr = (uint8_t*)down_numa_[nid] + (expert_id * num_blocks + offset) * stride_down_bytes_;
-        llamafile_sgemm(n_stride, n, config_.intermediate_size / down_blk_size, down_proj_ptr, config_.intermediate_size / down_blk_size, down_input_ptr, down_input_em, down_output_ptr, config_.hidden_size, 0, 1, GGML_TASK_TYPE_COMPUTE, config_.down_type, use_fp32_buffer_ ? GGML_TYPE_F32 : down_vec_type, GGML_TYPE_F32, GGML_PREC_DEFAULT);
+        llamafile_sgemm(n_stride, n, config_.intermediate_size / down_blk_size, down_proj_ptr, config_.intermediate_size / down_blk_size, down_input_ptr, down_input_em, down_output_ptr, config_.hidden_size, 0, 1, GGML_TASK_TYPE_COMPUTE, config_.down_type, use_fp32_buffer_ ? GGML_TYPE_F32 : down_vec_dot_type, GGML_TYPE_F32, GGML_PREC_DEFAULT);
         #endif    
     }, nullptr);
     

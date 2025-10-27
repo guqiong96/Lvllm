@@ -31,16 +31,16 @@ config.yaml里面设置dtype: "float16"相比不设置或设置为dtype: "bfloat
 
 ## 安装步骤
 
-### 1. 安装CUDA 12.8
+### 1. 安装CUDA 12.9
 
 ```bash
 # 卸载旧版本CUDA和NVIDIA驱动
 sudo /usr/local/cuda/bin/cuda-uninstaller
 sudo nvidia-uninstall
 
-# 下载并安装CUDA 12.8
-wget https://developer.download.nvidia.com/compute/cuda/12.8.1/local_installers/cuda_12.8.1_570.124.06_linux.run
-sudo sh cuda_12.8.1_570.124.06_linux.run
+# 下载并安装CUDA 12.9
+wget https://developer.download.nvidia.com/compute/cuda/12.9.1/local_installers/cuda_12.9.1_575.57.08_linux.run
+sudo sh cuda_12.9.1_575.57.08_linux.run
 
 
 ```
@@ -67,15 +67,19 @@ sudo dnf install numactl-devel
 git clone https://github.com/guqiong96/Lvllm.git
 
 
-# 安装PyTorch 2.8.0 （Qwen3-VL 需要安装 xformers、torchvision）
+# 安装PyTorch 2.8.0 （可选 Qwen3-VL 需要安装 xformers、torchvision）
 pip uninstall torch
-pip install  xformers torchvision torch==2.8.0
+pip install xformers torchvision torch==2.8.0
+
+# 50 系列 GPU 需要安装 xformers==0.0.33.dev1086 
+pip install xformers==0.0.33.dev1086 
+ 
 
 # 使用现有PyTorch
 python use_existing_torch.py
 
 # 安装构建依赖
-MAX_JOBS=32 NVCC_THREADS=1 pip install -r requirements/build.txt
+pip install -r requirements/build.txt
 ```
 
 ### 4. 克隆第三方依赖库(可选,github网络好可以直接第5步)
@@ -195,8 +199,8 @@ sudo /usr/local/cuda/bin/cuda-uninstaller
 sudo nvidia-uninstall
 
 # Download and install CUDA 12.8
-wget https://developer.download.nvidia.com/compute/cuda/12.8.1/local_installers/cuda_12.8.1_570.124.06_linux.run
-sudo sh cuda_12.8.1_570.124.06_linux.run
+wget https://developer.download.nvidia.com/compute/cuda/12.9.1/local_installers/cuda_12.9.1_575.57.08_linux.run
+sudo sh cuda_12.9.1_575.57.08_linux.run
 
 
 ```
@@ -219,18 +223,20 @@ sudo dnf install numactl-devel
 
 ```bash
 # Clone Lvllm repository
-git clone https://github.com/guqiong96/Lvllm.git
-
-
-# Install PyTorch 2.8.0 （Qwen3-VL models need install xformers、torchvision）
+git clone https://github.com/guqiong96/Lvllm.git 
+ 
+# Install PyTorch 2.8.0 Optional（Qwen3 Qwen3-VL models need install xformers、torchvisionn）
 pip uninstall torch
-pip install  xformers torchvision torch==2.8.0
+pip install xformers torchvision torch==2.8.0
+
+# 50 series GPUs require installing xformers==0.0.33.dev1086 for Qwen3 Qwen3-VL models
+pip install xformers==0.0.33.dev1086 
 
 # Use existing PyTorch
 python use_existing_torch.py
 
 # Install build dependencies
-MAX_JOBS=32 NVCC_THREADS=1 pip install -r requirements/build.txt
+pip install -r requirements/build.txt
 
 ```
 

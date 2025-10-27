@@ -8,3 +8,4 @@ ray[cgraph]>=2.48.0 # Ray Compiled Graph, required for pipeline parallelism in V
 # https://github.com/facebookresearch/xformers/releases/tag/v0.0.32.post1
 # FlashInfer should be updated together with the Dockerfile
 flashinfer-python==0.4.1
+triton_kernels @ git+https://github.com/triton-lang/triton.git@v3.5.0#subdirectory=python/triton_kernels
