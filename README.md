@@ -349,7 +349,7 @@ The configuration file `config.yaml` contains the following main parameters:
 You can modify the parameters in the configuration file or adjust the environment variable values according to your actual environment needs.
 
 
+![90118eea5ff29b8975840b83b7168368](https://github.com/user-attachments/assets/9879df82-f03f-49c7-980d-4c9b4cb42be2)
 
-![495ef218dccf6c5f5608f94f5fb71adf](https://github.com/user-attachments/assets/e3370bbb-7591-49a8-bdca-74c8ad5d8424)
 
 
