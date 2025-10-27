@@ -32,14 +32,14 @@ config.yaml里面设置dtype: "float16"相比不设置或设置为dtype: "bfloat
 
 ## 安装步骤
 
-### 1. 安装CUDA 12.9
+### 1. 安装CUDA 12.9 ( 50系显卡注意https://github.com/guqiong96/Lvllm/issues/5 ）
 
 ```bash
 # 卸载旧版本CUDA和NVIDIA驱动
 sudo /usr/local/cuda/bin/cuda-uninstaller
 sudo nvidia-uninstall
 
-# 下载并安装CUDA 12.9
+# 下载并安装CUDA 12.9 
 wget https://developer.download.nvidia.com/compute/cuda/12.9.1/local_installers/cuda_12.9.1_575.57.08_linux.run
 sudo sh cuda_12.9.1_575.57.08_linux.run
 
@@ -203,14 +203,14 @@ Setting dtype: "float16" in config.yaml provides a 1.5x prefill speed increase c
 
 ## Installation Steps
 
-### 1. Install CUDA 12.8
+### 1. Install CUDA 12.9  ( Attention to 50 series GPUs https://github.com/guqiong96/Lvllm/issues/5 ）
 
 ```bash
 # Uninstall old CUDA and NVIDIA drivers
 sudo /usr/local/cuda/bin/cuda-uninstaller
 sudo nvidia-uninstall
 
-# Download and install CUDA 12.8
+# Download and install CUDA 12.9
 wget https://developer.download.nvidia.com/compute/cuda/12.9.1/local_installers/cuda_12.9.1_575.57.08_linux.run
 sudo sh cuda_12.9.1_575.57.08_linux.run
 
