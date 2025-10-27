@@ -27,6 +27,8 @@ config.yaml里面设置dtype: "float16"相比不设置或设置为dtype: "bfloat
 
 4、仅支持max_num_batched_tokens: 1024
 
+5、仅支持单卡推理
+
 ## 安装步骤
 
 ### 1. 安装CUDA 12.8
@@ -43,7 +45,7 @@ sudo sh cuda_12.8.1_570.124.06_linux.run
 
 ```
 
-### 2. 创建并激活Python环境
+### 2. 创建并激活Python环境及一些系统库
 
 ```bash
 conda create -n Lvllm python==3.12.11
@@ -51,6 +53,11 @@ conda activate Lvllm
 
 # 升级libstdcxx-ng  （避免glibcxx_3.4.32 not found， 新增的vllm._lk_C模块无法加载退回到原始vllm模式，最后显存溢出）
 conda install -c conda-forge libstdcxx-ng
+
+# 安装NUMA库 ubuntu
+sudo apt-get install libnuma-dev
+# 安装NUMA库 rocky linux
+sudo dnf install numactl-devel
 ```
 
 ### 3. 克隆仓库并安装依赖
@@ -194,7 +201,7 @@ sudo sh cuda_12.8.1_570.124.06_linux.run
 
 ```
 
-### 2. Create and Activate Python Environment
+### 2. Create and Activate Python Environment and Some System Libraries
 
 ```bash
 conda create -n Lvllm python==3.12.11
@@ -202,6 +209,10 @@ conda activate Lvllm
 
 # Upgrade libstdcxx-ng (to avoid glibcxx_3.4.32 not found error, which prevents loading vllm._lk_C module and causes memory overflow)
 conda install -c conda-forge libstdcxx-ng
+# install libnuma-dev on ubuntu
+sudo apt-get install libnuma-dev
+# install numactl-devel on rocky linux
+sudo dnf install numactl-devel
 ```
 
 ### 3. Clone Repository and Install Dependencies

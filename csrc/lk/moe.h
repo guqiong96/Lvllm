@@ -118,27 +118,27 @@ class MOE {
     uint8_t* s_gate_input_;                    // [hidden_size * ggml_type_size(ggml_internal_get_type_traits(gate_type).vec_dot_type) / ggml_blck_size(ggml_internal_get_type_traits(gate_type).vec_dot_type)]
     uint8_t* s_up_input_;                      // [hidden_size * ggml_type_size(ggml_internal_get_type_traits(up_type).vec_dot_type) / ggml_blck_size(ggml_internal_get_type_traits(up_type).vec_dot_type)]
     uint8_t* s_down_input_;       // [routed_expert_num, intermediate_size * ggml_type_size(ggml_internal_get_type_traits(down_type).vec_dot_type) / ggml_blck_size(ggml_internal_get_type_traits(down_type).vec_dot_type)]
-  
- 
-
+   
     size_t hidden_type_size;
-    size_t hidden_blk_size;
-    size_t hidden_bytes;
-
-    ggml_type gate_vec_type;
+    size_t hidden_blk_size;  
+    
+    ggml_type gate_vec_dot_type;
     size_t gate_type_size;
-    size_t gate_blk_size;
-    size_t gate_bytes;
-
-    ggml_type up_vec_type;
+    size_t gate_blk_size; 
+    size_t gate_vec_dot_type_size;
+    size_t gate_vec_dot_blk_size;
+ 
+    ggml_type up_vec_dot_type;
     size_t up_type_size;
-    size_t up_blk_size;
-    size_t up_bytes;
-
-    ggml_type down_vec_type;
+    size_t up_blk_size; 
+    size_t up_vec_dot_type_size;
+    size_t up_vec_dot_blk_size;
+    
+    ggml_type down_vec_dot_type;
     size_t down_type_size;
-    size_t down_blk_size;
-    size_t down_bytes;
+    size_t down_blk_size; 
+    size_t down_vec_dot_type_size;
+    size_t down_vec_dot_blk_size;
 
     float* input_fp32_;        //[ group_max_len * hidden_size]
     uint8_t* gate_input_;      //[ group_max_len * hidden_size * ggml_type_size(ggml_internal_get_type_traits(gate_type).vec_dot_type) / ggml_blck_size(ggml_internal_get_type_traits(gate_type).vec_dot_type)]

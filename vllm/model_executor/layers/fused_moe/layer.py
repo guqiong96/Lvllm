@@ -2087,7 +2087,7 @@ class FusedMoE(CustomOp):
             if indices_type is not None:
                 topk_ids = topk_ids.to(dtype=indices_type)
 
-        if enable_eplb and not is_lk_moe_numa_enabled:
+        if enable_eplb and not is_lk_moe_numa_enabled():
             assert expert_load_view is not None
             assert logical_to_physical_map is not None
             assert logical_replica_count is not None
@@ -2361,7 +2361,7 @@ class FusedMoE(CustomOp):
 
         self.ensure_moe_quant_config()
 
-        if self.use_dp_chunking:
+        if self.use_dp_chunking and not self.use_lk_moe:
             return self.forward_impl_chunked(hidden_states, router_logits)
 
         do_naive_dispatch_combine: bool = (
@@ -2386,7 +2386,7 @@ class FusedMoE(CustomOp):
         )
 
         with sp_ctx:
-            if do_naive_dispatch_combine and self.lk_moe is not None:
+            if do_naive_dispatch_combine and not self.use_lk_moe:
                 hidden_states, router_logits = get_ep_group().dispatch(
                     hidden_states, router_logits, self.is_sequence_parallel
                 )
@@ -2540,8 +2540,7 @@ class FusedMoE(CustomOp):
         if not self.w13_qweight.device.type == 'cpu' or not self.w2_qweight.device.type == 'cpu':
             logger.error("GGUF Weights are still on GPU, can't use lk moe ...")
             return
-              
-        import re
+               
         from vllm.model_executor.models.utils import extract_layer_index
         layer_idx = extract_layer_index(self.layer_name)
         gate_ggml_type = self._get_ggml_type_from_quant_config(self.quant_config, layer_idx, 'gate')
@@ -2564,11 +2563,14 @@ class FusedMoE(CustomOp):
         gate_proj_view = self.w13_qweight.narrow(1, 0, intermediate_size).contiguous()
         up_proj_view = self.w13_qweight.narrow(1, intermediate_size, intermediate_size).contiguous()
         
-        gate_proj_ptr = gate_proj_view.data_ptr()
-        up_proj_ptr = up_proj_view.data_ptr()
-        down_proj_ptr = self.w2_qweight.contiguous().data_ptr() 
-         
+        gate_numpy = gate_proj_view.numpy()
+        up_numpy = up_proj_view.numpy()
+        down_numpy = self.w2_qweight.contiguous().numpy()  
         
+        gate_ptr = gate_numpy.ctypes.data
+        up_ptr = up_numpy.ctypes.data
+        down_ptr = down_numpy.ctypes.data 
+            
         moe_config = vllm._lk_C.MOEConfig(
             self.local_num_experts,        # expert_num
             self.top_k,                    # routed_expert_num
@@ -2577,9 +2579,9 @@ class FusedMoE(CustomOp):
             32,                            # stride
             10,                            # group_min_len
             1024,                          # group_max_len
-            gate_proj_ptr,                 # gate_proj
-            up_proj_ptr,                   # up_proj
-            down_proj_ptr,                 # down_proj
+            gate_ptr,                 # gate_ptr
+            up_ptr,                   # up_ptr
+            down_ptr,                 # down_ptr
             gate_ggml_type,                # gate_type 
             up_ggml_type,                  # up_type  
             down_ggml_type,                # down_type  
@@ -2628,9 +2630,7 @@ class FusedMoE(CustomOp):
         hidden_ggml_type = self.get_ggml_type_from_dtype(self.moe_config.in_dtype)
          
         del w13_weight, w2_weight
-        del self.w13_weight, self.w2_weight
-        import gc
-        gc.collect() 
+        del self.w13_weight, self.w2_weight 
             
         gate_projs = []
         up_projs = []
@@ -2642,7 +2642,7 @@ class FusedMoE(CustomOp):
         num_experts = self.w13_weight_origin.shape[0]  
         intermediate_size = self.w13_weight_origin.shape[1] // 2 # torch.Size([512, 1024, 2048])
         hidden_size = self.w13_weight_origin.shape[2]
-        dequant_device = self.w13_weight_origin.device
+        dequant_device = 'cpu'
         gate_buf = torch.empty(intermediate_size, hidden_size, dtype=torch.float32, device=dequant_device)
         up_buf = torch.empty(intermediate_size, hidden_size, dtype=torch.float32, device=dequant_device)
         down_buf = torch.empty(hidden_size, intermediate_size, dtype=torch.float32, device=dequant_device)
@@ -2692,8 +2692,7 @@ class FusedMoE(CustomOp):
             del gate_scale_inv_expanded, up_scale_inv_expanded, down_scale_inv_expanded
             del gate_float, up_float, down_float 
            
-        del gate_buf, up_buf, down_buf    
-        gc.collect() 
+        del gate_buf, up_buf, down_buf     
         
         gate_ggml_type = 1
         up_ggml_type = 1
@@ -2746,7 +2745,8 @@ class FusedMoE(CustomOp):
           
         del self.w13_weight_origin, self.w2_weight_origin
         del self.w13_weight_scale_inv_origin, self.w2_weight_scale_inv_origin
-     
+        
+        import gc
         gc.collect()
     
         
@@ -2764,9 +2764,7 @@ class FusedMoE(CustomOp):
         hidden_ggml_type = self.get_ggml_type_from_dtype(self.moe_config.in_dtype)
          
         del w13_weight, w2_weight
-        del self.w13_weight, self.w2_weight
-        import gc
-        gc.collect() 
+        del self.w13_weight, self.w2_weight 
             
         gate_projs = []
         up_projs = []
@@ -2775,7 +2773,7 @@ class FusedMoE(CustomOp):
         num_experts = self.w13_weight_origin.shape[0]  
         intermediate_size = self.w13_weight_origin.shape[1] // 2
         hidden_size = self.w13_weight_origin.shape[2]
-        dequant_device = self.w13_weight_origin.device
+        dequant_device = 'cpu'
         gate_buf = torch.empty(intermediate_size, hidden_size, dtype=torch.float32, device=dequant_device)
         up_buf = torch.empty(intermediate_size, hidden_size, dtype=torch.float32, device=dequant_device)
         down_buf = torch.empty(hidden_size, intermediate_size, dtype=torch.float32, device=dequant_device)
@@ -2821,7 +2819,6 @@ class FusedMoE(CustomOp):
             del gate_scale_expanded, up_scale_expanded, down_scale_expanded
             
         del gate_buf, up_buf, down_buf    
-        gc.collect() 
         
         gate_ggml_type = 1
         up_ggml_type = 1
@@ -2874,7 +2871,8 @@ class FusedMoE(CustomOp):
           
         del self.w13_weight_origin, self.w2_weight_origin
         del self.w13_weight_scale_origin, self.w2_weight_scale_origin
-     
+        
+        import gc
         gc.collect()
             
     def _process_regular_weights(self): 
@@ -2907,16 +2905,14 @@ class FusedMoE(CustomOp):
         
         if use_scale: 
             del w13_weight, w2_weight
-            del self.w13_weight, self.w2_weight
-            import gc
-            gc.collect() 
+            del self.w13_weight, self.w2_weight 
             
             gate_projs = []
             up_projs = []
             down_projs = []
                
             num_experts = self.w13_weight_origin.shape[0]  
-            dequant_device = self.w13_weight_origin.device
+            dequant_device = 'cpu'
             gate_buf = torch.empty_like(expert_gate_weight, dtype=torch.float32, device=dequant_device)
             up_buf = torch.empty_like(expert_up_weight, dtype=torch.float32, device=dequant_device)
             down_buf = torch.empty_like(expert_down_weight, dtype=torch.float32, device=dequant_device)
@@ -2962,7 +2958,7 @@ class FusedMoE(CustomOp):
                 del gate_scale_expanded, up_scale_expanded, down_scale_expanded
                 
             del gate_buf, up_buf, down_buf    
-            gc.collect() 
+             
             
             gate_ggml_type = 1
             up_ggml_type = 1
