@@ -70,7 +70,7 @@ git clone https://github.com/guqiong96/Lvllm.git
 
 # 安装PyTorch 2.8.0 （可选 Qwen3-VL 需要安装 xformers、torchvision）
 pip uninstall torch
-pip install xformers torchvision torch==2.8.0
+pip install triton xformers torchvision torch==2.8.0
 
 # 50 系列 GPU 需要安装 xformers==0.0.33.dev1086 
 pip install xformers==0.0.33.dev1086 
@@ -239,7 +239,7 @@ git clone https://github.com/guqiong96/Lvllm.git
  
 # Install PyTorch 2.8.0 Optional（Qwen3 Qwen3-VL models need install xformers、torchvisionn）
 pip uninstall torch
-pip install xformers torchvision torch==2.8.0
+pip install triton xformers torchvision torch==2.8.0
 
 # 50 series GPUs require installing xformers==0.0.33.dev1086 for Qwen3 Qwen3-VL models
 pip install xformers==0.0.33.dev1086 
