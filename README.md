@@ -1,4 +1,4 @@
-<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/246c7e4c-1e4c-4044-844a-abcac1221d7e" />## LvLLM GPU+NUMA 混合推理MOE大模型！！！ 一张3090运行qwen3-next-80b, 预处理590ts，解码40ts ！！
+## LvLLM GPU+NUMA 混合推理MOE大模型！！！ 一张3090运行qwen3-next-80b, 预处理590ts，解码40ts ！！
 
 # 2025-10-30: 支持GGUF模型混合推理 [查看config.yaml里面的新参数]
 
