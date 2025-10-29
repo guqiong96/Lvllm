@@ -1,6 +1,6 @@
 # LvLLM GPU+NUMA 混合推理MOE大模型 - 本地部署推理模型
 
-## 2025-10-30: 支持GGUF模型混合推理 [查看config.yaml里面的新参数]
+## 2025-10-30: 支持部分GGUF模型混合推理 [查看config.yaml里面的新参数]
 
 <img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/898ad4e5-a562-43c5-a10f-d130ec8ba0a0" />
 
@@ -186,7 +186,7 @@ MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TY
 
 # LvLLM GPU+NUMA Hybrid Inference for MOE Large Models!!! Run qwen3-next-80b on a single RTX 3090, with 590 tokens/s prefill and 40 tokens/s decoding!
 
-## October 30, 2025: Supports GGUF model hybrid inference [view new params in config.yaml]
+## October 30, 2025: Supports some GGUF model hybrid inference [view new params in config.yaml]
 
 <img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/b95902d5-4ce8-4bdb-9bc8-68f9e74acaaf" />
 
