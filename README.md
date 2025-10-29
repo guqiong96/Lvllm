@@ -6,7 +6,7 @@
 
 ```bash
 # 需要合并GGUF为单个文件： 
-~/Downloads/llama.cpp/build-x64-linux-gcc-release/bin/llama-gguf-split --merge ~/Models/GLM-4.6-GGUF/UD-Q4_K_XL/GLM-4.6-UD-Q4_K_XL-00001-of-00005.gguf ~/Models/GLM-4.6-UD-Q4_K_XL-merged.gguf
+llama-gguf-split --merge ~/Models/XXXXX-00001-of-00005.gguf ~/Models/XXXX-merged.gguf
 ```
 
 ## 2025-10-19: FP8支持GPU+NUMA 混合推理MOE模型！！ [显存FP8精度，内存FP16精度] 已验证GLM-4.5-Air-FP8
@@ -192,7 +192,7 @@ MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TY
 
 ```bash
 # Need to merge GGUF into a single file： 
-~/Downloads/llama.cpp/build-x64-linux-gcc-release/bin/llama-gguf-split --merge ~/Models/GLM-4.6-GGUF/UD-Q4_K_XL/GLM-4.6-UD-Q4_K_XL-00001-of-00005.gguf ~/Models/GLM-4.6-UD-Q4_K_XL-merged.gguf
+llama-gguf-split --merge ~/Models/XXXXX-00001-of-00005.gguf ~/Models/XXXX-merged.gguf
 ```
 ## October 14, 2025: CUDA Graph Enabled, Decoding Speed Doubled!!! Output Quality Improved!!!
 
