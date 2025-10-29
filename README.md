@@ -1,14 +1,14 @@
-## LvLLM GPU+NUMA 混合推理MOE大模型！！！ 一张3090运行qwen3-next-80b, 预处理590ts，解码40ts ！！
+# LvLLM GPU+NUMA 混合推理MOE大模型 - 本地部署推理模型
 
-# 2025-10-30: 支持GGUF模型混合推理 [查看config.yaml里面的新参数]
+## 2025-10-30: 支持GGUF模型混合推理 [查看config.yaml里面的新参数]
 
 <img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/898ad4e5-a562-43c5-a10f-d130ec8ba0a0" />
 
-# 2025-10-19: FP8支持GPU+NUMA 混合推理MOE模型！！ [显存FP8精度，内存FP16精度] 已验证GLM-4.5-Air-FP8
+## 2025-10-19: FP8支持GPU+NUMA 混合推理MOE模型！！ [显存FP8精度，内存FP16精度] 已验证GLM-4.5-Air-FP8
 <img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/272b4e89-48e8-4cb5-8b8c-a892725dfe06" />
 
 
-# 2025-10-14: 开启cuda graph , decode 速度翻倍！！ 输出质量提高！！
+## 2025-10-14: 开启cuda graph , decode 速度翻倍！！ 输出质量提高！！
 
 config.yaml里面设置dtype: "float16"相比不设置或设置为dtype: "bfloat16" 有1.5倍prefill速度提升，带amx的至强可能不受影响
 
@@ -17,7 +17,7 @@ config.yaml里面设置dtype: "float16"相比不设置或设置为dtype: "bfloat
 
 
 
-# 2025-09-30 已验证：Qwen3-Next-80B-A3B-Instruct、Qwen3-Coder-30B-A3B-Instruct 
+## 2025-09-30 已验证：Qwen3-Next-80B-A3B-Instruct、Qwen3-Coder-30B-A3B-Instruct 
 <img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/c37da729-a692-4b20-b7f5-b7798acd22c4" />
  
 
