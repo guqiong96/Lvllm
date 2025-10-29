@@ -434,6 +434,10 @@ class AWQMoEMethod(FusedMoEMethodBase):
         params_dtype: torch.dtype,
         **extra_weight_attrs,
     ):
+        from vllm.envs import is_lk_moe_numa_enabled
+        device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
+        if isinstance(layer, FusedMoE) and is_lk_moe_numa_enabled():
+            device = "cpu" 
         extra_weight_attrs.update(
             {
                 "is_transposed": True,
@@ -447,6 +451,7 @@ class AWQMoEMethod(FusedMoEMethodBase):
                 hidden_size,
                 2 * intermediate_size_per_partition // self.quant_config.pack_factor,
                 dtype=torch.int32,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -459,6 +464,7 @@ class AWQMoEMethod(FusedMoEMethodBase):
                 intermediate_size_per_partition,
                 hidden_size // self.quant_config.pack_factor,
                 dtype=torch.int32,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -476,6 +482,7 @@ class AWQMoEMethod(FusedMoEMethodBase):
                 num_groups_w13,
                 intermediate_size_per_partition * 2,
                 dtype=params_dtype,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -483,7 +490,7 @@ class AWQMoEMethod(FusedMoEMethodBase):
         set_weight_attrs(w13_scales, extra_weight_attrs)
 
         w2_scales = Parameter(
-            torch.empty(num_experts, num_groups_w2, hidden_size, dtype=params_dtype),
+            torch.empty(num_experts, num_groups_w2, hidden_size, dtype=params_dtype, device=device),
             requires_grad=False,
         )
         layer.register_parameter("w2_scales", w2_scales)
@@ -497,6 +504,7 @@ class AWQMoEMethod(FusedMoEMethodBase):
                 num_groups_w13,
                 2 * intermediate_size_per_partition // self.quant_config.pack_factor,
                 dtype=torch.int32,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -509,14 +517,16 @@ class AWQMoEMethod(FusedMoEMethodBase):
                 num_groups_w2,
                 hidden_size // self.quant_config.pack_factor,
                 dtype=torch.int32,
+                device=device,
             ),
             requires_grad=False,
         )
         layer.register_parameter("w2_qzeros", w2_qzeros)
         set_weight_attrs(w2_qzeros, extra_weight_attrs)
 
-        device = layer.w13_qweight.device
-        layer.workspace = marlin_make_workspace_new(device, 4)
+        if isinstance(layer, FusedMoE) and not is_lk_moe_numa_enabled():
+            device = layer.w13_qweight.device
+            layer.workspace = marlin_make_workspace_new(device, 4)
 
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
         num_experts = layer.w13_qweight.shape[0]

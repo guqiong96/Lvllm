@@ -28,9 +28,9 @@ MOE::MOE(MOEConfig config) {
     down_proj_ = config_.down_proj;
 
     struct ggml_init_params pdata = {
-            .mem_size   = 0,
+            .mem_size   = 128LL * 1024 * 1024,
             .mem_buffer = NULL,
-            .no_alloc   = true,
+            .no_alloc   = false,
         };
 
     ggml_init(pdata);
@@ -38,7 +38,7 @@ MOE::MOE(MOEConfig config) {
     config_.stride = 32;
     use_fp32_buffer_ = false;
     #if defined(__AMX_INT8__) && defined(__AVX512VNNI__)
-    // std::cout << "AMX enabled ...... " << std::endl;
+    std::cout << "AMX enabled ...... " << std::endl;
     if(config_.gate_type == GGML_TYPE_F16){
         use_fp32_buffer_ = true;
         if(config_.up_type != GGML_TYPE_F16 || config_.down_type != GGML_TYPE_F16){
@@ -49,7 +49,7 @@ MOE::MOE(MOEConfig config) {
     if(config_.up_type == GGML_TYPE_BF16 && config_.hidden_type == GGML_TYPE_BF16){
         #if defined(__AMX_INT8__) || defined(__AVX512VNNI__) || defined(__AVX512BF16__) || defined(__AVX512F__)
 
-            // std::cout << "amx is enabled for bf16 ...... " << std::endl;
+            std::cout << "amx is enabled for bf16 ...... " << std::endl;
         #else
             use_fp32_buffer_ = true;
         #endif
@@ -405,8 +405,8 @@ void MOE::forward_one(int k, const uint64_t* expert_ids, const float* weights, c
     if(use_fp32_buffer_){
         to_float(input, s_input_fp32_, config_.hidden_size, config_.hidden_type);
         gate_input_ptr = up_input_ptr = s_input_fp32_;
-        gate_input_em = up_input_em = config_.hidden_size;
-        down_input_em = config_.intermediate_size; 
+        gate_input_em = up_input_em = config_.hidden_size / hidden_blk_size;
+        down_input_em = config_.intermediate_size / hidden_blk_size; 
     }else{
         if (config_.hidden_type == gate_vec_dot_type && config_.hidden_type == up_vec_dot_type) {
             gate_input_ptr = up_input_ptr = input;
@@ -532,8 +532,8 @@ void MOE::forward_many_m(int qlen, int k, const uint64_t* expert_ids, const floa
     size_t up_input_em = config_.hidden_size / up_blk_size;
     size_t down_input_em = config_.intermediate_size / down_blk_size;
     if(use_fp32_buffer_){ 
-        gate_input_em = up_input_em = config_.hidden_size;
-        down_input_em = config_.intermediate_size;
+        gate_input_em = up_input_em = config_.hidden_size / hidden_blk_size;
+        down_input_em = config_.intermediate_size / hidden_blk_size;
     }
 
     std::vector<int> expert_reorder_offset(config_.expert_num,0);  // [expert_id, offset_in_buffer]       

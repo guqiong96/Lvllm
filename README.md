@@ -1,12 +1,12 @@
 ## LvLLM GPU+NUMA 混合推理MOE大模型！！！ 一张3090运行qwen3-next-80b, 预处理590ts，解码40ts ！！
 
-# 更新日期：2025-10-27 （update date: 2025-10-27）
+# 2025-10-30: 支持GGUF模型混合推理 [查看config.yaml里面的新参数]
 
-# 2025-10-19 FP8支持GPU+NUMA 混合推理MOE模型！！ [显存FP8精度，内存FP16精度] 已验证GLM-4.5-Air-FP8
+# 2025-10-19: FP8支持GPU+NUMA 混合推理MOE模型！！ [显存FP8精度，内存FP16精度] 已验证GLM-4.5-Air-FP8
 <img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/272b4e89-48e8-4cb5-8b8c-a892725dfe06" />
 
 
-# 2025-10-14 开启cuda graph , decode 速度翻倍！！ 输出质量提高！！
+# 2025-10-14: 开启cuda graph , decode 速度翻倍！！ 输出质量提高！！
 
 config.yaml里面设置dtype: "float16"相比不设置或设置为dtype: "bfloat16" 有1.5倍prefill速度提升，带amx的至强可能不受影响
 
@@ -20,7 +20,7 @@ config.yaml里面设置dtype: "float16"相比不设置或设置为dtype: "bfloat
  
 
 # 当前限制：
-1、仅支持原版BF16模型、FP8原版或FP8量化模型
+1、仅支持原版BF16模型、FP8原版或FP8量化模型 [2025-10-19: FP8支持GPU+NUMA 混合推理MOE模型, 2025.10.30 支持GGUF模型]
 
 2、仅支持compilation_config.cudagraph_mode: "NONE" [2025.10.14已没有限制]
 
@@ -171,11 +171,16 @@ MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TY
 - `enable-chunked-prefill`: 启用分块预填充 (`true`)
 - `max_num_batched_tokens`: 最大批处理令牌数 (`1024`)
 
+ GGUF模型重要参数：
+- `hf-config-path`: HF模型配置路径 (`/home/guqiong/Downloads/Qwen3-Coder-30B-A3B-Instruct`)
+- `tokenizer`: 分词器路径 (`/home/guqiong/Downloads/Qwen3-Coder-30B-A3B-Instruct`)
+
 根据实际环境需求，可以修改配置文件中的参数或调整环境变量值。
 
 # LvLLM GPU+NUMA Hybrid Inference for MOE Large Models!!! Run qwen3-next-80b on a single RTX 3090, with 590 tokens/s prefill and 40 tokens/s decoding!
 <img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/b95902d5-4ce8-4bdb-9bc8-68f9e74acaaf" />
 
+## October 30, 2025: Supports GGUF model hybrid inference [view new params in config.yaml]
 
 ## October 14, 2025: CUDA Graph Enabled, Decoding Speed Doubled!!! Output Quality Improved!!!
 
@@ -193,7 +198,7 @@ Setting dtype: "float16" in config.yaml provides a 1.5x prefill speed increase c
 
 
 # Current Limitations:
-1. Only supports dtype: "bfloat16" and "float16"
+1. Only supports dtype: "bfloat16" and "float16" "fp8" [October 19, 2025: FP8 supports GPU NUMA hybrid inference MOE models, October 30, 2025: Supports GGUF model hybrid inference]
 
 2. Only supports compilation_config.cudagraph_mode: "NONE" [No limitation as of October 14, 2025]
 
@@ -345,7 +350,11 @@ The configuration file `config.yaml` contains the following main parameters:
 - `enable_prefix_caching`: Enable prefix caching (`true`)
 - `enable-chunked-prefill`: Enable chunked prefill (`true`)
 - `max_num_batched_tokens`: Maximum number of batched tokens (`1024`)
+Important parameters of the GGUF model:
+- `hf-config-path`: Path to the HF model configuration (`/home/guqiong/Downloads/Qwen3-Coder-30B-A3B-Instruct`)
+- `tokenizer`: Path to the tokenizer (`/home/guqiong/Downloads/Qwen3-Coder-30B-A3B-Instruct`)
 
+Depending on the actual environment 
 You can modify the parameters in the configuration file or adjust the environment variable values according to your actual environment needs.
 
 
