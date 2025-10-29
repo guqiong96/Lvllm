@@ -4,6 +4,11 @@
 
 <img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/898ad4e5-a562-43c5-a10f-d130ec8ba0a0" />
 
+```bash
+# 需要合并GGUF为单个文件： 
+~/Downloads/llama.cpp/build-x64-linux-gcc-release/bin/llama-gguf-split --merge ~/Models/GLM-4.6-GGUF/UD-Q4_K_XL/GLM-4.6-UD-Q4_K_XL-00001-of-00005.gguf ~/Models/GLM-4.6-UD-Q4_K_XL-merged.gguf
+```
+
 ## 2025-10-19: FP8支持GPU+NUMA 混合推理MOE模型！！ [显存FP8精度，内存FP16精度] 已验证GLM-4.5-Air-FP8
 <img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/272b4e89-48e8-4cb5-8b8c-a892725dfe06" />
 
@@ -180,10 +185,15 @@ MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TY
 根据实际环境需求，可以修改配置文件中的参数或调整环境变量值。
 
 # LvLLM GPU+NUMA Hybrid Inference for MOE Large Models!!! Run qwen3-next-80b on a single RTX 3090, with 590 tokens/s prefill and 40 tokens/s decoding!
-<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/b95902d5-4ce8-4bdb-9bc8-68f9e74acaaf" />
 
 ## October 30, 2025: Supports GGUF model hybrid inference [view new params in config.yaml]
 
+<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/b95902d5-4ce8-4bdb-9bc8-68f9e74acaaf" />
+
+```bash
+# Need to merge GGUF into a single file： 
+~/Downloads/llama.cpp/build-x64-linux-gcc-release/bin/llama-gguf-split --merge ~/Models/GLM-4.6-GGUF/UD-Q4_K_XL/GLM-4.6-UD-Q4_K_XL-00001-of-00005.gguf ~/Models/GLM-4.6-UD-Q4_K_XL-merged.gguf
+```
 ## October 14, 2025: CUDA Graph Enabled, Decoding Speed Doubled!!! Output Quality Improved!!!
 
 Setting dtype: "float16" in config.yaml provides a 1.5x prefill speed increase compared to not setting it or setting it to dtype: "bfloat16". Xeon processors with AMX may not be affected.
