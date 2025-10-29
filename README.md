@@ -1,6 +1,8 @@
-## LvLLM GPU+NUMA 混合推理MOE大模型！！！ 一张3090运行qwen3-next-80b, 预处理590ts，解码40ts ！！
+<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/246c7e4c-1e4c-4044-844a-abcac1221d7e" />## LvLLM GPU+NUMA 混合推理MOE大模型！！！ 一张3090运行qwen3-next-80b, 预处理590ts，解码40ts ！！
 
 # 2025-10-30: 支持GGUF模型混合推理 [查看config.yaml里面的新参数]
+
+<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/898ad4e5-a562-43c5-a10f-d130ec8ba0a0" />
 
 # 2025-10-19: FP8支持GPU+NUMA 混合推理MOE模型！！ [显存FP8精度，内存FP16精度] 已验证GLM-4.5-Air-FP8
 <img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/272b4e89-48e8-4cb5-8b8c-a892725dfe06" />
@@ -188,10 +190,12 @@ Setting dtype: "float16" in config.yaml provides a 1.5x prefill speed increase c
 
 <img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/b9760c71-d07b-423a-9e8d-f70c3a007a1b" />
 
+<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/2ae72c33-cea9-4777-8862-5bd711d3f004" />
 
 
 ## October 19, 2025: FP8 supports GPU NUMA hybrid inference MOE models!! [VRAM FP8 precision, memory FP16 precision]
 
+<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/272b4e89-48e8-4cb5-8b8c-a892725dfe06" />
 
 ## September 30, 2025: Verified Models: Qwen3-Next-80B-A3B-Instruct, Qwen3-Coder-30B-A3B-Instruct
 <img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/c37da729-a692-4b20-b7f5-b7798acd22c4" />
