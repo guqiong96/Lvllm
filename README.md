@@ -22,7 +22,7 @@ config.yaml里面设置dtype: "float16"相比不设置或设置为dtype: "bfloat
  
 
 # 当前限制：
-1、仅支持原版BF16模型、FP8原版或FP8量化模型 [2025-10-19: FP8支持GPU+NUMA 混合推理MOE模型, 2025.10.30 支持GGUF模型]
+1、仅支持原版BF16模型、FP8原版或FP8量化模型 [2025-10-19: FP8支持GPU+NUMA 混合推理MOE模型, 2025.10.30 支持GGUF单文件模型]
 
 2、仅支持compilation_config.cudagraph_mode: "NONE" [2025.10.14已没有限制]
 
@@ -202,7 +202,7 @@ Setting dtype: "float16" in config.yaml provides a 1.5x prefill speed increase c
 
 
 # Current Limitations:
-1. Only supports dtype: "bfloat16" and "float16" "fp8" [October 19, 2025: FP8 supports GPU NUMA hybrid inference MOE models, October 30, 2025: Supports GGUF model hybrid inference]
+1. Only supports dtype: "bfloat16" and "float16" "fp8" [October 19, 2025: FP8 supports GPU NUMA hybrid inference MOE models, October 30, 2025: Supports GGUF model hybrid inference single gguf file]
 
 2. Only supports compilation_config.cudagraph_mode: "NONE" [No limitation as of October 14, 2025]
 
