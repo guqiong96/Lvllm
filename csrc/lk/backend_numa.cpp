@@ -22,7 +22,7 @@
 // #define __AMX_INT8__ 1
 // #define __AVX512VNNI__ 1
 #if defined(__AMX_INT8__) && defined(__AVX512VNNI__)
-    #include "../operators/llamafile/amx_gemm.hpp"
+    #include "amx_gemm.hpp"
 #endif
 
 
