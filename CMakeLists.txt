@@ -15,6 +15,44 @@ project(vllm_extensions LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+ 
+include(CheckCXXCompilerFlag)
+ 
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+    check_cxx_compiler_flag("-mamx-int8" COMPILER_SUPPORTS_AMX_INT8)
+    check_cxx_compiler_flag("-mamx-tile" COMPILER_SUPPORTS_AMX_TILE)
+    check_cxx_compiler_flag("-mavx512vnni" COMPILER_SUPPORTS_AVX512VNNI)
+     
+    execute_process(
+        COMMAND grep -q "^flags.* amx_" /proc/cpuinfo
+        RESULT_VARIABLE GREP_RESULT
+        ERROR_QUIET
+    )
+     
+    if(GREP_RESULT EQUAL 0)
+        set(CPU_SUPPORTS_AMX TRUE)
+        message(STATUS "CPU supports AMX: yes")
+    else()
+        set(CPU_SUPPORTS_AMX FALSE)
+        message(STATUS "CPU supports AMX: no")
+    endif()
+     
+    if(DEFINED ENV{VLLM_CPU_AMX_INT8} AND "$ENV{VLLM_CPU_AMX_INT8}")
+        set(ENABLE_AMX_INT8 TRUE)
+    else()
+        set(ENABLE_AMX_INT8 FALSE)
+    endif()
+     
+    if(CPU_SUPPORTS_AMX AND COMPILER_SUPPORTS_AMX_INT8 AND COMPILER_SUPPORTS_AMX_TILE AND COMPILER_SUPPORTS_AVX512VNNI AND ENABLE_AMX_INT8)
+        set(AMX_COMPILE_FLAGS "-mamx-int8;-mamx-tile;-mavx512vnni")
+        message(STATUS "AMX support detected and enabled for all modules")
+    else()
+        set(AMX_COMPILE_FLAGS "")
+        message(STATUS "AMX support disabled or not available")
+    endif()
+else()
+    set(AMX_COMPILE_FLAGS "")
+endif()
 
 
 # CUDA by default, can be overridden by using -DVLLM_TARGET_DEVICE=... (used by setup.py)
@@ -1167,16 +1205,16 @@ target_include_directories(_lk_C PRIVATE ${llama_cpp_SOURCE_DIR} )
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   # Use minimal optimization and enable debug info for better debugging experience
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    target_compile_options(_lk_C PRIVATE -fPIC -O0 -g3 -fno-omit-frame-pointer -fopenmp -fdebug-prefix-map=${CMAKE_SOURCE_DIR}=${CMAKE_SOURCE_DIR} ${CXX_COMPILE_FLAGS})
+    target_compile_options(_lk_C PRIVATE -fPIC -O0 -g3 -fno-omit-frame-pointer -fopenmp -fdebug-prefix-map=${CMAKE_SOURCE_DIR}=${CMAKE_SOURCE_DIR} ${CXX_COMPILE_FLAGS} ${AMX_COMPILE_FLAGS})
   elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    target_compile_options(_lk_C PRIVATE -fPIC -O0 -g3 -fno-omit-frame-pointer -fopenmp -fdebug-prefix-map=${CMAKE_SOURCE_DIR}=${CMAKE_SOURCE_DIR} ${CXX_COMPILE_FLAGS})
+    target_compile_options(_lk_C PRIVATE -fPIC -O0 -g3 -fno-omit-frame-pointer -fopenmp -fdebug-prefix-map=${CMAKE_SOURCE_DIR}=${CMAKE_SOURCE_DIR} ${CXX_COMPILE_FLAGS} ${AMX_COMPILE_FLAGS})
   endif()
 else()
   # Keep original optimization settings for release builds
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    target_compile_options(_lk_C PRIVATE -fPIC -O3 -ffast-math -fopenmp ${CXX_COMPILE_FLAGS})
+    target_compile_options(_lk_C PRIVATE -fPIC -O3 -ffast-math -fopenmp ${CXX_COMPILE_FLAGS} ${AMX_COMPILE_FLAGS})
   elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    target_compile_options(_lk_C PRIVATE -fPIC -O3 -ffast-math -fopenmp ${CXX_COMPILE_FLAGS})
+    target_compile_options(_lk_C PRIVATE -fPIC -O3 -ffast-math -fopenmp ${CXX_COMPILE_FLAGS} ${AMX_COMPILE_FLAGS})
   endif()
 endif()
 
