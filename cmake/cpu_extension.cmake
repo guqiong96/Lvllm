@@ -15,6 +15,7 @@ endif()
 #
 set(ENABLE_AVX512BF16 $ENV{VLLM_CPU_AVX512BF16})
 set(ENABLE_AVX512VNNI $ENV{VLLM_CPU_AVX512VNNI})
+set(ENABLE_AMX_INT8 $ENV{VLLM_CPU_AMX_INT8})
 
 include_directories("${CMAKE_SOURCE_DIR}/csrc")
 
@@ -95,6 +96,9 @@ if (MACOSX_FOUND AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
 else()
     find_isa(${CPUINFO} "avx2" AVX2_FOUND)
     find_isa(${CPUINFO} "avx512f" AVX512_FOUND)
+    find_isa(${CPUINFO} "avx512_vnni" AVX512VNNI_FOUND)
+    find_isa(${CPUINFO} "amx_int8" AMX_INT8_FOUND)   
+    find_isa(${CPUINFO} "amx_tile" AMX_TILE_FOUND)  
     find_isa(${CPUINFO} "Power11" POWER11_FOUND)
     find_isa(${CPUINFO} "POWER10" POWER10_FOUND)
     find_isa(${CPUINFO} "POWER9" POWER9_FOUND)
@@ -139,6 +143,23 @@ if (AVX512_FOUND AND NOT AVX512_DISABLED)
     else()
         set(ENABLE_AVX512VNNI OFF)
         message(WARNING "Disable AVX512-VNNI ISA support, no avx512_vnni found in local CPU flags." " If cross-compilation is required, please set env VLLM_CPU_AVX512VNNI=1.")
+    endif()
+    
+    if ((AMX_INT8_FOUND AND AMX_TILE_FOUND) OR ENABLE_AMX_INT8)
+        if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND
+            CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12.3)
+            list(APPEND CXX_COMPILE_FLAGS
+                "-mamx-int8"
+                "-mamx-tile")
+            set(ENABLE_AMX_INT8 ON)
+            message(STATUS "AMX INT8 and TILE support enabled")
+        else()
+            set(ENABLE_AMX_INT8 OFF)
+            message(WARNING "Disable AMX support, requires gcc/g++ >= 12.3")
+        endif()
+    else()
+        set(ENABLE_AMX_INT8 OFF)
+        message(WARNING "Disable AMX support, no amx_int8/amx_tile found in local CPU flags. If cross-compilation is required, please set env VLLM_CPU_AMX_INT8=1.")
     endif()
     
 elseif (AVX2_FOUND)
