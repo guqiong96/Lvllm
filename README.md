@@ -129,9 +129,17 @@ pip install flashinfer-python==0.4.1
 
 ### 5. 安装Lvllm
 
-```bash 
+```bash
+# 一般安装
 MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
 ```
+
+```bash 
+# AMX指令集支持安装
+ENABLE_AMX_INT8=1  MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
+```
+ENABLE_AMX_INT8 
+
 MAX_JOBS=32 NVCC_THREADS=1 减少编译时内存占用，避免卡死
 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" 性能选项
 
@@ -311,7 +319,12 @@ pip install flashinfer-python==0.4.1
 ### 5. Install Lvllm
 
 ```bash
+# General Installation
 MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
+```
+```bash 
+# AMX instruction set supports installation
+ENABLE_AMX_INT8=1  MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
 ```
 MAX_JOBS=32 NVCC_THREADS=1 reduces memory usage during compilation to avoid freezing
 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" for performance optimization
