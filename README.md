@@ -1,5 +1,10 @@
 # LvLLM GPU+NUMA 混合推理MOE大模型 - 本地部署推理模型
 
+## 2025-10-31: 更新
+
+<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/66c48cf8-ac00-4928-90db-7519ff349fd8" />
+
+
 ## 2025-10-30: 支持部分GGUF模型混合推理 [查看config.yaml里面的新参数]
 
 <img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/898ad4e5-a562-43c5-a10f-d130ec8ba0a0" />
@@ -385,7 +390,8 @@ Depending on the actual environment
 You can modify the parameters in the configuration file or adjust the environment variable values according to your actual environment needs.
 
 
-![90118eea5ff29b8975840b83b7168368](https://github.com/user-attachments/assets/9879df82-f03f-49c7-980d-4c9b4cb42be2)
+![72f4f64bb882bfa6fed572f121034a63](https://github.com/user-attachments/assets/91feba79-21d4-4f69-ba84-47a4d7425473)
+
 
 
 
