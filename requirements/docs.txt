@@ -12,5 +12,7 @@ ruff
 
 # Required for argparse hook only
 cachetools
+cloudpickle
+py-cpuinfo
 msgspec
 pydantic
