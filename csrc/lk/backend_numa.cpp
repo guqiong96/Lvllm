@@ -357,8 +357,9 @@ void Backend_NUMA::worker_thread(int thread_id) {
     int cpu_id = threads_info_[thread_id].cpu_id;
 
     assert(numa_node_ == numa_node_of_cpu(cpu_id));
+     
     
-    bind_to_cpu(cpu_id); 
+    bind_to_numa_node(numa_node_);
     set_numa_mempolicy(numa_node_);
 
     #if defined(__AMX_INT8__) && defined(__AVX512VNNI__)
