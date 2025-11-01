@@ -5,8 +5,6 @@
 LK_THREADS、OMP_NUM_THREADS设置为单个cpu的核心数量-2
 ```
 
-<iframe src="//player.bilibili.com/player.html?isOutside=true&aid=115471269500827&bvid=BV1b61VBaEcm&cid=33575469849&p=1" scrolling="no" border="0" frameborder="no" framespacing="0" allowfullscreen="true"></iframe>
-
 ## 2025-10-31: 更新
 
 <img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/66c48cf8-ac00-4928-90db-7519ff349fd8" />
@@ -210,8 +208,6 @@ MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TY
 ```bash
 Set LK_THREADS and OMP_NUM_THREADS to the number of cores of a single CPU minus 2
 ```
-
-<iframe src="//player.bilibili.com/player.html?isOutside=true&aid=115471269500827&bvid=BV1b61VBaEcm&cid=33575469849&p=1" scrolling="no" border="0" frameborder="no" framespacing="0" allowfullscreen="true"></iframe> 
 
 ## October 30, 2025: Supports some GGUF model hybrid inference [view new params in config.yaml]
 
