@@ -1,10 +1,12 @@
 # LvLLM GPU+NUMA 混合推理MOE大模型 - 本地部署推理模型
 
-# 2025-11-1： 模型串行、张量并行支持多卡推理
+# 2025-11-1： 模型串行、张量并行支持多卡推理 https://b23.tv/xzHieMs
 ```bash
 LK_THREADS、OMP_NUM_THREADS设置为单个cpu的核心数量-2
 ```
-【Lvllm 混合推理张量并行、串行测试-哔哩哔哩】 https://b23.tv/xzHieMs
+
+<iframe src="//player.bilibili.com/player.html?isOutside=true&aid=115471269500827&bvid=BV1b61VBaEcm&cid=33575469849&p=1" scrolling="no" border="0" frameborder="no" framespacing="0" allowfullscreen="true"></iframe>
+
 ## 2025-10-31: 更新
 
 <img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/66c48cf8-ac00-4928-90db-7519ff349fd8" />
@@ -204,11 +206,12 @@ MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TY
 
 # LvLLM GPU+NUMA Hybrid Inference for MOE Large Models!!! Run qwen3-next-80b on a single RTX 3090, with 590 tokens/s prefill and 40 tokens/s decoding!
 
-# 2025-11-1: Model serial and tensor parallel support for multi-card inference
+# 2025-11-1: Model serial and tensor parallel support for multi-card inference   https://b23.tv/xzHieMs
 ```bash
 Set LK_THREADS and OMP_NUM_THREADS to the number of cores of a single CPU minus 2
 ```
-【Lvllm 混合推理张量并行、串行测试-哔哩哔哩】 https://b23.tv/xzHieMs
+
+<iframe src="//player.bilibili.com/player.html?isOutside=true&aid=115471269500827&bvid=BV1b61VBaEcm&cid=33575469849&p=1" scrolling="no" border="0" frameborder="no" framespacing="0" allowfullscreen="true"></iframe> 
 
 ## October 30, 2025: Supports some GGUF model hybrid inference [view new params in config.yaml]
 
