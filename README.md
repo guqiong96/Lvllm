@@ -2,7 +2,7 @@
 
 # 2025-11-1： 模型串行、张量并行支持多卡推理 https://b23.tv/xzHieMs
 ```bash
-LK_THREADS、OMP_NUM_THREADS设置为单个cpu的核心数量-2 , 开启超线程则设置为单个cpu线程数量-4
+LK_THREADS、OMP_NUM_THREADS设置为单个cpu的核心数量-4 , 开启超线程则设置为单个cpu线程数量-8
 ```
 
 ## 2025-10-31: 更新
@@ -206,7 +206,7 @@ MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TY
 
 # 2025-11-1: Model serial and tensor parallel support for multi-card inference   https://b23.tv/xzHieMs
 ```bash
-Set LK_THREADS and OMP_NUM_THREADS to the number of cores of a single CPU minus 2, If hyper-threading is enabled, set it to the number of CPU threads minus 4
+Set LK_THREADS and OMP_NUM_THREADS to the number of cores of a single CPU minus 4, If hyper-threading is enabled, set it to the number of CPU threads minus 8
 ```
 
 ## October 30, 2025: Supports some GGUF model hybrid inference [view new params in config.yaml]
