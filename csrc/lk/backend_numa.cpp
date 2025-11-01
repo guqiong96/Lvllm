@@ -322,17 +322,20 @@ void Backend_NUMA::process_tasks(int thread_id) {
         }
         compute_func_(task_id);
     } 
-    for(int i=0; i<max_threads_; i++){
+    // 修改：从当前线程开始，优先窃取下一个线程的任务
+    for(int offset = 1; offset < max_threads_; offset++) {
+        int target_thread_id = (thread_id + offset) % max_threads_;
+        
         auto& this_ = threads_info_[thread_id];
-        auto& other_ = threads_info_[i];
+        auto& other_ = threads_info_[target_thread_id];
         if(this_.node_id == other_.node_id && this_.cpu_id != other_.cpu_id){
-            if (thread_state_[i]->status.load(std::memory_order_acquire) != ThreadStatus::WORKING) {
+            if (thread_state_[target_thread_id]->status.load(std::memory_order_acquire) != ThreadStatus::WORKING) {
                 continue;
             } 
             while (true) {
-                int task_id = thread_state_[i]->curr.fetch_add(
+                int task_id = thread_state_[target_thread_id]->curr.fetch_add(
                     1, std::memory_order_acq_rel);
-                if (task_id >= thread_state_[i]->end) {
+                if (task_id >= thread_state_[target_thread_id]->end) {
                     break;
                 }
                 compute_func_(task_id);
