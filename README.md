@@ -1,5 +1,6 @@
-# LvLLM GPU并行+NUMA并行 混合推理MOE大模型 
+# LvLLM GPU、NUMA双并行
 
+​LvLLM是vllm的特别扩展，充分利用cpu和内存资源，降低显卡显存要求，高效的GPU并行+NUMA并行架构，支持混合推理MOE大模型 
 
 # 2025-11-1： 模型串行、张量并行支持多卡推理 https://b23.tv/xzHieMs
 ```bash
@@ -54,9 +55,13 @@ config.yaml里面设置dtype: "float16"相比不设置或设置为dtype: "bfloat
 
 ```bash
 # 卸载旧版本CUDA和NVIDIA驱动
-sudo /usr/local/cuda/bin/cuda-uninstaller
+sudo /usr/local/cuda/bin/cuda-uninstaller   
 sudo nvidia-uninstall
 
+# 如需彻底卸载清理：
+https://www.bilibili.com/opus/1131154984017068033?spm_id_from=333.1387.0.0
+[https://github.com/guqiong96/Lvllm/issues/5 ](https://github.com/guqiong96/Lvllm/issues/8)
+ 
 # 下载并安装CUDA 12.9 
 wget https://developer.download.nvidia.com/compute/cuda/12.9.1/local_installers/cuda_12.9.1_575.57.08_linux.run
 sudo sh cuda_12.9.1_575.57.08_linux.run
@@ -218,7 +223,9 @@ MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TY
    - 用途：低位量化、反量化及矩阵乘法
 
 
-# LvLLM GPU Parallel NUMA Parallel Hybrid Inference MOE Large Model
+# LvLLM GPU and NUMA Dual Parallelism
+
+LvLLM is a special extension of vllm that makes full use of CPU and memory resources, reduces GPU memory requirements, and features an efficient GPU parallel and NUMA parallel architecture, supporting hybrid inference for MOE large models.
 
 
 # 2025-11-1: Model serial and tensor parallel support for multi-card inference   https://b23.tv/xzHieMs
@@ -268,6 +275,10 @@ Setting dtype: "float16" in config.yaml provides a 1.5x prefill speed increase c
 # Uninstall old CUDA and NVIDIA drivers
 sudo /usr/local/cuda/bin/cuda-uninstaller
 sudo nvidia-uninstall
+
+# To completely uninstall and clean:
+https://www.bilibili.com/opus/1131154984017068033?spm_id_from=333.1387.0.0
+[https://github.com/guqiong96/Lvllm/issues/5 ](https://github.com/guqiong96/Lvllm/issues/8)
 
 # Download and install CUDA 12.9
 wget https://developer.download.nvidia.com/compute/cuda/12.9.1/local_installers/cuda_12.9.1_575.57.08_linux.run
