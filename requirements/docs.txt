@@ -9,10 +9,4 @@ mkdocs-git-revision-date-localized-plugin
 mkdocs-minify-plugin
 regex
 ruff
-
-# Required for argparse hook only
-cachetools
-cloudpickle
-py-cpuinfo
-msgspec
 pydantic

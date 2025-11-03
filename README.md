@@ -1,4 +1,5 @@
-# LvLLM GPU+NUMA 混合推理MOE大模型 - 本地部署推理模型
+# LvLLM GPU并行+NUMA并行 混合推理MOE大模型 
+
 
 # 2025-11-1： 模型串行、张量并行支持多卡推理 https://b23.tv/xzHieMs
 ```bash
@@ -86,11 +87,11 @@ git clone https://github.com/guqiong96/Lvllm.git
 
 
 # 安装PyTorch 2.8.0 （可选 Qwen3-VL 需要安装 xformers、torchvision）
-pip uninstall torch
+pip uninstall triton xformers torchvision torch
 pip install triton xformers torchvision torch==2.8.0
 
-# 50 系列 GPU 需要安装 xformers==0.0.33.dev1086 
-pip install xformers==0.0.33.dev1086 
+# 50 系列 GPU 需要安装 xformers==0.0.33.dev1091 
+pip install xformers==0.0.33.dev1091 
  
 
 # 使用现有PyTorch
@@ -202,7 +203,23 @@ MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TY
 
 根据实际环境需求，可以修改配置文件中的参数或调整环境变量值。
 
-# LvLLM GPU+NUMA Hybrid Inference for MOE Large Models!!! Run qwen3-next-80b on a single RTX 3090, with 590 tokens/s prefill and 40 tokens/s decoding!
+# 本项目为vLLM的分支，引用了以下开源项目的源代码：
+
+1. **llama.cpp**
+   - 项目地址：[https://github.com/ggerganov/llama.cpp](https://github.com/ggerganov/llama.cpp)
+   - 用途：GGML相关定义
+
+2. **llamafile**
+   - 项目地址：[https://github.com/Mozilla-Ocho/llamafile](https://github.com/Mozilla-Ocho/llamafile)
+   - 用途：GGUF权重量化、反量化及矩阵乘法
+
+3. **bestla**
+   - 项目地址：[https://github.com/bestla-org/bestla](https://github.com/bestla-org/bestla)
+   - 用途：低位量化、反量化及矩阵乘法
+
+
+# LvLLM GPU Parallel NUMA Parallel Hybrid Inference MOE Large Model
+
 
 # 2025-11-1: Model serial and tensor parallel support for multi-card inference   https://b23.tv/xzHieMs
 ```bash
@@ -280,11 +297,11 @@ sudo dnf install numactl-devel
 git clone https://github.com/guqiong96/Lvllm.git 
  
 # Install PyTorch 2.8.0 Optional（Qwen3 Qwen3-VL models need install xformers、torchvisionn）
-pip uninstall torch
+pip uninstall triton xformers torchvision torch
 pip install triton xformers torchvision torch==2.8.0
 
-# 50 series GPUs require installing xformers==0.0.33.dev1086 for Qwen3 Qwen3-VL models
-pip install xformers==0.0.33.dev1086 
+# 50 series GPUs require installing xformers==0.0.33.dev1091 for Qwen3 Qwen3-VL models
+pip install xformers==0.0.33.dev1091
 
 # Use existing PyTorch
 python use_existing_torch.py
@@ -403,5 +420,8 @@ You can modify the parameters in the configuration file or adjust the environmen
 ![72f4f64bb882bfa6fed572f121034a63](https://github.com/user-attachments/assets/91feba79-21d4-4f69-ba84-47a4d7425473)
 
 
-
+# This project is a branch of vLLM and incorporates source code from the following open-source projects:
+1. **llama.cpp**- Project URL: [https://github.com/ggerganov/llama.cpp](https://github.com/ggerganov/llama.cpp)- Purpose: GGML related definitions
+2. **llamafile**- Project URL: [https://github.com/Mozilla-Ocho/llamafile](https://github.com/Mozilla-Ocho/llamafile)- Purpose: GGUF weight quantization, dequantization, and matrix multiplication
+3. **bestla**- Project URL: [https://github.com/bestla-org/bestla](https://github.com/bestla-org/bestla)- Purpose: Low-bit quantization, dequantization, and matrix multiplication
 
