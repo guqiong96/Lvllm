@@ -87,11 +87,11 @@ git clone https://github.com/guqiong96/Lvllm.git
 
 
 # 安装PyTorch 2.8.0 （可选 Qwen3-VL 需要安装 xformers、torchvision）
-pip uninstall triton xformers torchvision torch
-pip install triton xformers torchvision torch==2.8.0
+pip uninstall torchaudio triton xformers torchvision torch
+pip install torchaudio triton xformers torchvision torch==2.8.0
 
-# 50 系列 GPU 需要安装 xformers==0.0.33.dev1091 
-pip install xformers==0.0.33.dev1091 
+# 50 系列 GPU 需要安装 xformers==0.0.33.dev1090 
+pip install xformers==0.0.33.dev1090 
  
 
 # 使用现有PyTorch
@@ -297,11 +297,11 @@ sudo dnf install numactl-devel
 git clone https://github.com/guqiong96/Lvllm.git 
  
 # Install PyTorch 2.8.0 Optional（Qwen3 Qwen3-VL models need install xformers、torchvisionn）
-pip uninstall triton xformers torchvision torch
-pip install triton xformers torchvision torch==2.8.0
+pip uninstall torchaudio triton xformers torchvision torch
+pip install torchaudio triton xformers torchvision torch==2.8.0
 
-# 50 series GPUs require installing xformers==0.0.33.dev1091 for Qwen3 Qwen3-VL models
-pip install xformers==0.0.33.dev1091
+# 50 series GPUs require installing xformers==0.0.33.dev1090 for Qwen3 Qwen3-VL models
+pip install xformers==0.0.33.dev1090
 
 # Use existing PyTorch
 python use_existing_torch.py
