@@ -416,8 +416,7 @@ Important parameters of the GGUF model:
 Depending on the actual environment 
 You can modify the parameters in the configuration file or adjust the environment variable values according to your actual environment needs.
 
-
-![72f4f64bb882bfa6fed572f121034a63](https://github.com/user-attachments/assets/91feba79-21d4-4f69-ba84-47a4d7425473)
+ 
 
 
 # This project is a branch of vLLM and incorporates source code from the following open-source projects:
