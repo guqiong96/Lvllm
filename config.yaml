@@ -1,4 +1,4 @@
-model: "/home/guqiong/Models/Kimi-Linear-48B-A3B-Instruct"
+model: "/home/guqiong/Downloads/Qwen3-Next-80B-A3B-Instruct"
 host: "0.0.0.0"
 port: 8070
 tensor-parallel-size: 1
@@ -7,8 +7,8 @@ gpu-memory-utilization: 0.80
 trust-remote-code: true
 tokenizer-mode: "auto"
 swap-space: 0
-served-model-name: "Kimi-Linear-48B-A3B-Instruct" 
-compilation_config.cudagraph_mode: "FULL"
+served-model-name: "Qwen3-Next-80B-A3B-Instruct" 
+compilation_config.cudagraph_mode: "FULL_DECODE_ONLY"
 enable_prefix_caching: true
 enable-chunked-prefill: true
 max_num_batched_tokens: 1024
