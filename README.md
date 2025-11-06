@@ -1,215 +1,17 @@
-# LvLLM GPU+NUMA 混合推理MOE大模型 - 本地部署推理模型
 
-# 2025-11-1： 模型串行、张量并行支持多卡推理
+# LvLLM GPU and NUMA Dual Parallelism
+
+LvLLM is a special extension of vllm that makes full use of CPU and memory resources, reduces GPU memory requirements, and features an efficient GPU parallel and NUMA parallel architecture, supporting hybrid inference for MOE large models.
+
+
+# 2025-11-1: Support tensor parallelism and pipeline for multi-card inference   https://b23.tv/xzHieMs
 ```bash
-LK_THREADS、OMP_NUM_THREADS设置为单个cpu的核心数量-2
+LK_THREADS and OMP_NUM_THREADS Configuration Rules:
+1. Single GPU Inference (N): LK_THREADS and OMP_NUM_THREADS should be set to total number of cores minus 4. If hyper-threading is enabled, set it to total number of threads minus 8.
+2. Multi-GPU Inference (N/number of GPUs): For each GPU, set LK_THREADS and OMP_NUM_THREADS to N divided by the number of GPUs.
 ```
 
-## 2025-10-31: 更新
-
-<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/66c48cf8-ac00-4928-90db-7519ff349fd8" />
-
-
-## 2025-10-30: 支持部分GGUF模型混合推理 [查看config.yaml里面的新参数]
-
-<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/898ad4e5-a562-43c5-a10f-d130ec8ba0a0" />
-
-```bash
-# 需要合并GGUF为单个文件： 
-llama-gguf-split --merge ~/Models/XXXXX-00001-of-00005.gguf ~/Models/XXXX-merged.gguf
-```
-
-## 2025-10-19: FP8支持GPU+NUMA 混合推理MOE模型！！ [显存FP8精度，内存FP16精度] 已验证GLM-4.5-Air-FP8
-<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/272b4e89-48e8-4cb5-8b8c-a892725dfe06" />
-
-
-## 2025-10-14: 开启cuda graph , decode 速度翻倍！！ 输出质量提高！！
-
-config.yaml里面设置dtype: "float16"相比不设置或设置为dtype: "bfloat16" 有1.5倍prefill速度提升，带amx的至强可能不受影响
-
-<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/b9760c71-d07b-423a-9e8d-f70c3a007a1b" />
-
-
-
-
-## 2025-09-30 已验证：Qwen3-Next-80B-A3B-Instruct、Qwen3-Coder-30B-A3B-Instruct 
-<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/c37da729-a692-4b20-b7f5-b7798acd22c4" />
- 
-
-# 当前限制：
-1、仅支持原版BF16模型、FP8原版或FP8量化模型 [2025-10-19: FP8支持GPU+NUMA 混合推理MOE模型, 2025.10.30 支持GGUF单文件模型]
-
-2、仅支持compilation_config.cudagraph_mode: "NONE" [2025.10.14已没有限制]
-
-3、仅支持moe模型
-
-4、仅支持max_num_batched_tokens: 1024
-
-5、仅支持单卡推理
-
-## 安装步骤
-
-### 1. 安装CUDA 12.9 ( 50系显卡注意https://github.com/guqiong96/Lvllm/issues/5 ）
-
-```bash
-# 卸载旧版本CUDA和NVIDIA驱动
-sudo /usr/local/cuda/bin/cuda-uninstaller
-sudo nvidia-uninstall
-
-# 下载并安装CUDA 12.9 
-wget https://developer.download.nvidia.com/compute/cuda/12.9.1/local_installers/cuda_12.9.1_575.57.08_linux.run
-sudo sh cuda_12.9.1_575.57.08_linux.run
-
-
-```
-
-### 2. 创建并激活Python环境及一些系统库
-
-```bash
-conda create -n Lvllm python==3.12.11
-conda activate Lvllm
-
-# 升级libstdcxx-ng  （避免glibcxx_3.4.32 not found， 新增的vllm._lk_C模块无法加载退回到原始vllm模式，最后显存溢出）
-conda install -c conda-forge libstdcxx-ng
-
-# 安装NUMA库 ubuntu
-sudo apt-get install libnuma-dev
-# 安装NUMA库 rocky linux
-sudo dnf install numactl-devel
-```
-
-### 3. 克隆仓库并安装依赖
-
-```bash
-# 克隆Lvllm仓库
-git clone https://github.com/guqiong96/Lvllm.git
-
-
-# 安装PyTorch 2.8.0 （可选 Qwen3-VL 需要安装 xformers、torchvision）
-pip uninstall torch
-pip install triton xformers torchvision torch==2.8.0
-
-# 50 系列 GPU 需要安装 xformers==0.0.33.dev1086 
-pip install xformers==0.0.33.dev1086 
- 
-
-# 使用现有PyTorch
-python use_existing_torch.py
-
-# 安装构建依赖
-pip install -r requirements/build.txt
-```
-
-### 4. 克隆第三方依赖库(可选,github网络好可以直接第5步)
-
-```bash
-
-mkdir -p .deps
-cd .deps
-
-git clone https://github.com/nvidia/cutlass.git cutlass-src
-cd cutlass-src
-git checkout v4.0.0
-cd ..
-
-git clone https://github.com/oneapi-src/oneDNN.git oneDNN-src
-cd oneDNN-src
-git checkout v3.9
-cd ..
-
-git clone https://github.com/vllm-project/FlashMLA flashmla-src
-cd flashmla-src
-git checkout a757314c04eedd166e329e846c820eb1bdd702de
-cd ..
-
-git clone https://github.com/vllm-project/flash-attention.git vllm-flash-attn-src
-cd vllm-flash-attn-src
-git checkout ee4d25bd84e0cbc7e0b9b9685085fd5db2dcb62a
-cd ..
-
-# 安装指定版本的llama.cpp
-git clone https://github.com/ggerganov/llama.cpp.git llama_cpp-src
-cd llama_cpp-src
-git checkout a94e6ff8774b7c9f950d9545baf0ce35e8d1ed2f
-cd ..
-
-# 安装flashinfer-python
-pip install flashinfer-python==0.4.1 
-```
-
-### 5. 安装Lvllm
-
-```bash
-# 一般安装
-MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
-```
-
-```bash 
-# AMX指令集支持安装
-ENABLE_AMX_INT8=1  MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
-```
-ENABLE_AMX_INT8 
-
-MAX_JOBS=32 NVCC_THREADS=1 减少编译时内存占用，避免卡死
-CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" 性能选项
-
-## 启动命令
-
-使用以下命令启动Lvllm服务: 
-```bash 
-LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS="88" OMP_NUM_THREADS="88" vllm serve --config ~/Downloads/Lvllm/config.yaml
-```
-VLLM_ATTENTION_BACKEND="FLASHINFER": 这个环境变量已不是最优选项[2025-10-21]
-修改config.yaml里面配置参数
-LK_THREADS: 总计使用的CPU线程数，一般比总的线程数少10%，例如48核心96线程，LK_THREADS="88"
-OMP_NUM_THREADS：torch并发线程数，保持与LK_THREADS一致
-
-### 错误排查
-运行以下命令，将错误输出提交至Issues或微信群
-```bash 
-python -c "import  vllm._lk_C"
-```
-
-### 更新已有Lvllm
-
-如果已安装Lvllm，需要更新到最新版本，请执行以下命令：
-
-```bash
-git pull --force
-python use_existing_torch.py 
-pip install -r requirements/build.txt
-MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
-```
-
-### 配置说明
-
-配置文件 `config.yaml` 包含以下主要参数：
-
-- `model`: 模型路径 (`/Downloads/Qwen3-Next-80B-A3B-Instruct`)
-- `host`: 主机地址 (`0.0.0.0`，表示监听所有IPv4地址)
-- `port`: 服务端口 (`8070`)
-- `tensor-parallel-size`: 张量并行大小 (`1`)
-- `max-model-len`: 最大模型序列长度 (`66000`)
-- `gpu-memory-utilization`: GPU内存利用率 (`0.8`)
-- `trust-remote-code`: 信任远程代码 (`true`) 
-- `enable_prefix_caching`: 启用前缀缓存 (`true`)
-- `enable-chunked-prefill`: 启用分块预填充 (`true`)
-- `max_num_batched_tokens`: 最大批处理令牌数 (`1024`)
-
- GGUF模型重要参数：
-- `hf-config-path`: HF模型配置路径 (`/home/guqiong/Downloads/Qwen3-Coder-30B-A3B-Instruct`)
-- `tokenizer`: 分词器路径 (`/home/guqiong/Downloads/Qwen3-Coder-30B-A3B-Instruct`)
-
-根据实际环境需求，可以修改配置文件中的参数或调整环境变量值。
-
-# LvLLM GPU+NUMA Hybrid Inference for MOE Large Models!!! Run qwen3-next-80b on a single RTX 3090, with 590 tokens/s prefill and 40 tokens/s decoding!
-
-# 2025-11-1: Model serial and tensor parallel support for multi-card inference
-```bash
-Set LK_THREADS and OMP_NUM_THREADS to the number of cores of a single CPU minus 2
-```
-
-## October 30, 2025: Supports some GGUF model hybrid inference [view new params in config.yaml]
+## October 30, 2025:Support Qwen3 series models GGUF hybrid inference (excluding Qwen3-Coder-30B-A3B-Instruct GGUF) [view new params in config.yaml]
 
 <img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/b95902d5-4ce8-4bdb-9bc8-68f9e74acaaf" />
 
@@ -243,6 +45,8 @@ Setting dtype: "float16" in config.yaml provides a 1.5x prefill speed increase c
 
 4. Only supports max_num_batched_tokens: 1024
 
+5. Only supports single-card inference (support for multi-GPU tensor parallelism (TP) and pipeline parallelism (PP) inference will be available from 2025-11-1)
+
 ## Installation Steps
 
 ### 1. Install CUDA 12.9  ( Attention to 50 series GPUs https://github.com/guqiong96/Lvllm/issues/5 ）
@@ -251,6 +55,10 @@ Setting dtype: "float16" in config.yaml provides a 1.5x prefill speed increase c
 # Uninstall old CUDA and NVIDIA drivers
 sudo /usr/local/cuda/bin/cuda-uninstaller
 sudo nvidia-uninstall
+
+# To completely uninstall and clean:
+https://www.bilibili.com/opus/1131154984017068033?spm_id_from=333.1387.0.0
+[https://github.com/guqiong96/Lvllm/issues/5 ](https://github.com/guqiong96/Lvllm/issues/8)
 
 # Download and install CUDA 12.9
 wget https://developer.download.nvidia.com/compute/cuda/12.9.1/local_installers/cuda_12.9.1_575.57.08_linux.run
@@ -280,11 +88,11 @@ sudo dnf install numactl-devel
 git clone https://github.com/guqiong96/Lvllm.git 
  
 # Install PyTorch 2.8.0 Optional（Qwen3 Qwen3-VL models need install xformers、torchvisionn）
-pip uninstall torch
-pip install triton xformers torchvision torch==2.8.0
+pip uninstall torchaudio triton xformers torchvision torch
+pip install torchaudio triton xformers torchvision torch==2.8.0
 
-# 50 series GPUs require installing xformers==0.0.33.dev1086 for Qwen3 Qwen3-VL models
-pip install xformers==0.0.33.dev1086 
+# 50 series GPUs require installing xformers==0.0.33.dev1090 for Qwen3 Qwen3-VL models
+pip install xformers==0.0.33.dev1090
 
 # Use existing PyTorch
 python use_existing_torch.py
@@ -399,9 +207,239 @@ Important parameters of the GGUF model:
 Depending on the actual environment 
 You can modify the parameters in the configuration file or adjust the environment variable values according to your actual environment needs.
 
-
-![72f4f64bb882bfa6fed572f121034a63](https://github.com/user-attachments/assets/91feba79-21d4-4f69-ba84-47a4d7425473)
-
+ 
 
 
+# This project is a branch of vLLM and incorporates source code from the following open-source projects:
+1. **llama.cpp**- Project URL: [https://github.com/ggerganov/llama.cpp](https://github.com/ggerganov/llama.cpp)- Purpose: GGML related definitions
+2. **llamafile**- Project URL: [https://github.com/Mozilla-Ocho/llamafile](https://github.com/Mozilla-Ocho/llamafile)- Purpose: GGUF weight quantization, dequantization, and matrix multiplication
+3. **bestla**- Project URL: [https://github.com/bestla-org/bestla](https://github.com/bestla-org/bestla)- Purpose: Low-bit quantization, dequantization, and matrix multiplication
+
+
+
+# LvLLM GPU、NUMA双并行
+
+​LvLLM是vllm的特别扩展，充分利用cpu和内存资源，降低显卡显存要求，高效的GPU并行+NUMA并行架构，支持混合推理MOE大模型 
+
+# 2025-11-1： 支持张量并行、流水线多卡推理 https://b23.tv/xzHieMs
+```bash
+LK_THREADS、OMP_NUM_THREADS设置规则：
+1、单GPU推理(N)：LK_THREADS、OMP_NUM_THREADS 设置为总的核心数量-4 , 开启超线程则设置为总的线程数量-8
+2、多GPU推理(N/GPU数量)：每个GPU的LK_THREADS、OMP_NUM_THREADS 设置为N/(GPU数量)
+```
+
+## 2025-10-31: 更新
+
+<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/66c48cf8-ac00-4928-90db-7519ff349fd8" />
+
+
+## 2025-10-30: 支持Qwen3系列模型GGUF混合推理（不包含Qwen3-Coder-30B-A3B-Instruct GGUF） [查看config.yaml里面的新参数]
+
+<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/898ad4e5-a562-43c5-a10f-d130ec8ba0a0" />
+
+```bash
+# 需要合并GGUF为单个文件： 
+llama-gguf-split --merge ~/Models/XXXXX-00001-of-00005.gguf ~/Models/XXXX-merged.gguf
+```
+
+## 2025-10-19: FP8支持GPU+NUMA 混合推理MOE模型！！ [显存FP8精度，内存FP16精度] 已验证GLM-4.5-Air-FP8
+<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/272b4e89-48e8-4cb5-8b8c-a892725dfe06" />
+
+
+## 2025-10-14: 开启cuda graph , decode 速度翻倍！！ 输出质量提高！！
+
+config.yaml里面设置dtype: "float16"相比不设置或设置为dtype: "bfloat16" 有1.5倍prefill速度提升，带amx的至强可能不受影响
+
+<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/b9760c71-d07b-423a-9e8d-f70c3a007a1b" />
+
+
+
+
+## 2025-09-30 已验证：Qwen3-Next-80B-A3B-Instruct、Qwen3-Coder-30B-A3B-Instruct 
+<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/c37da729-a692-4b20-b7f5-b7798acd22c4" />
+ 
+
+# 当前限制：
+1、仅支持原版BF16模型、FP8原版或FP8量化模型 [2025-10-19: FP8支持GPU+NUMA 混合推理MOE模型, 2025.10.30 支持GGUF单文件模型]
+
+2、仅支持compilation_config.cudagraph_mode: "NONE" [2025.10.14已没有限制]
+
+3、仅支持moe模型
+
+4、仅支持max_num_batched_tokens: 1024
+
+5、仅支持单卡推理(2025-11-1支持多GPU张量并行(TP)、流水线并行(PP)推理)
+
+## 安装步骤
+
+### 1. 安装CUDA 12.9 ( 50系显卡注意https://github.com/guqiong96/Lvllm/issues/5 ）
+
+```bash
+# 卸载旧版本CUDA和NVIDIA驱动
+sudo /usr/local/cuda/bin/cuda-uninstaller   
+sudo nvidia-uninstall
+
+# 如需彻底卸载清理：
+https://www.bilibili.com/opus/1131154984017068033?spm_id_from=333.1387.0.0
+[https://github.com/guqiong96/Lvllm/issues/5 ](https://github.com/guqiong96/Lvllm/issues/8)
+ 
+# 下载并安装CUDA 12.9 
+wget https://developer.download.nvidia.com/compute/cuda/12.9.1/local_installers/cuda_12.9.1_575.57.08_linux.run
+sudo sh cuda_12.9.1_575.57.08_linux.run
+
+
+```
+
+### 2. 创建并激活Python环境及一些系统库
+
+```bash
+conda create -n Lvllm python==3.12.11
+conda activate Lvllm
+
+# 升级libstdcxx-ng  （避免glibcxx_3.4.32 not found， 新增的vllm._lk_C模块无法加载退回到原始vllm模式，最后显存溢出）
+conda install -c conda-forge libstdcxx-ng
+
+# 安装NUMA库 ubuntu
+sudo apt-get install libnuma-dev
+# 安装NUMA库 rocky linux
+sudo dnf install numactl-devel
+```
+
+### 3. 克隆仓库并安装依赖
+
+```bash
+# 克隆Lvllm仓库
+git clone https://github.com/guqiong96/Lvllm.git
+
+
+# 安装PyTorch 2.8.0 （可选 Qwen3-VL 需要安装 xformers、torchvision）
+pip uninstall torchaudio triton xformers torchvision torch
+pip install torchaudio triton xformers torchvision torch==2.8.0
+
+# 50 系列 GPU 需要安装 xformers==0.0.33.dev1090 
+pip install xformers==0.0.33.dev1090 
+ 
+
+# 使用现有PyTorch
+python use_existing_torch.py
+
+# 安装构建依赖
+pip install -r requirements/build.txt
+```
+
+### 4. 克隆第三方依赖库(可选,github网络好可以直接第5步)
+
+```bash
+
+mkdir -p .deps
+cd .deps
+
+git clone https://github.com/nvidia/cutlass.git cutlass-src
+cd cutlass-src
+git checkout v4.0.0
+cd ..
+
+git clone https://github.com/oneapi-src/oneDNN.git oneDNN-src
+cd oneDNN-src
+git checkout v3.9
+cd ..
+
+git clone https://github.com/vllm-project/FlashMLA flashmla-src
+cd flashmla-src
+git checkout a757314c04eedd166e329e846c820eb1bdd702de
+cd ..
+
+git clone https://github.com/vllm-project/flash-attention.git vllm-flash-attn-src
+cd vllm-flash-attn-src
+git checkout ee4d25bd84e0cbc7e0b9b9685085fd5db2dcb62a
+cd ..
+
+# 安装指定版本的llama.cpp
+git clone https://github.com/ggerganov/llama.cpp.git llama_cpp-src
+cd llama_cpp-src
+git checkout a94e6ff8774b7c9f950d9545baf0ce35e8d1ed2f
+cd ..
+
+# 安装flashinfer-python
+pip install flashinfer-python==0.4.1 
+```
+
+### 5. 安装Lvllm
+
+```bash
+# 一般安装
+MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
+```
+
+```bash 
+# AMX指令集支持安装
+ENABLE_AMX_INT8=1  MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
+```
+ENABLE_AMX_INT8 
+
+MAX_JOBS=32 NVCC_THREADS=1 减少编译时内存占用，避免卡死
+CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" 性能选项
+
+## 启动命令
+
+使用以下命令启动Lvllm服务: 
+```bash 
+LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS="88" OMP_NUM_THREADS="88" vllm serve --config ~/Downloads/Lvllm/config.yaml
+```
+VLLM_ATTENTION_BACKEND="FLASHINFER": 这个环境变量已不是最优选项[2025-10-21]
+修改config.yaml里面配置参数
+LK_THREADS: 总计使用的CPU线程数，一般比总的线程数少10%，例如48核心96线程，LK_THREADS="88" 
+OMP_NUM_THREADS：torch并发线程数，保持与LK_THREADS一致
+
+### 错误排查
+运行以下命令，将错误输出提交至Issues或微信群
+```bash 
+python -c "import  vllm._lk_C"
+```
+
+### 更新已有Lvllm
+
+如果已安装Lvllm，需要更新到最新版本，请执行以下命令：
+
+```bash
+git pull --force
+python use_existing_torch.py 
+pip install -r requirements/build.txt
+MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
+```
+
+### 配置说明
+
+配置文件 `config.yaml` 包含以下主要参数：
+
+- `model`: 模型路径 (`/Downloads/Qwen3-Next-80B-A3B-Instruct`)
+- `host`: 主机地址 (`0.0.0.0`，表示监听所有IPv4地址)
+- `port`: 服务端口 (`8070`)
+- `tensor-parallel-size`: 张量并行大小 (`1`)
+- `max-model-len`: 最大模型序列长度 (`66000`)
+- `gpu-memory-utilization`: GPU内存利用率 (`0.8`)
+- `trust-remote-code`: 信任远程代码 (`true`) 
+- `enable_prefix_caching`: 启用前缀缓存 (`true`)
+- `enable-chunked-prefill`: 启用分块预填充 (`true`)
+- `max_num_batched_tokens`: 最大批处理令牌数 (`1024`)
+
+ GGUF模型重要参数：
+- `hf-config-path`: HF模型配置路径 (`/home/guqiong/Downloads/Qwen3-Coder-30B-A3B-Instruct`)
+- `tokenizer`: 分词器路径 (`/home/guqiong/Downloads/Qwen3-Coder-30B-A3B-Instruct`)
+
+根据实际环境需求，可以修改配置文件中的参数或调整环境变量值。
+
+# 本项目为vLLM的分支，引用了以下开源项目的源代码：
+
+1. **llama.cpp**
+   - 项目地址：[https://github.com/ggerganov/llama.cpp](https://github.com/ggerganov/llama.cpp)
+   - 用途：GGML相关定义
+
+2. **llamafile**
+   - 项目地址：[https://github.com/Mozilla-Ocho/llamafile](https://github.com/Mozilla-Ocho/llamafile)
+   - 用途：GGUF权重量化、反量化及矩阵乘法
+
+3. **bestla**
+   - 项目地址：[https://github.com/bestla-org/bestla](https://github.com/bestla-org/bestla)
+   - 用途：低位量化、反量化及矩阵乘法
 

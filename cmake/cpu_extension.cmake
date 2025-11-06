@@ -110,6 +110,7 @@ endif()
 
 if (AVX512_FOUND AND NOT AVX512_DISABLED)
     list(APPEND CXX_COMPILE_FLAGS
+        "-mavx2"
         "-mavx512f"
         "-mavx512vl"
         "-mavx512bw"

@@ -24,12 +24,15 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
     check_cxx_compiler_flag("-mavx512vnni" COMPILER_SUPPORTS_AVX512VNNI)
      
     execute_process(
-        COMMAND grep -q "^flags.* amx_" /proc/cpuinfo
-        RESULT_VARIABLE GREP_RESULT
-        ERROR_QUIET
+      COMMAND lscpu --extended --parse=feature
+      OUTPUT_VARIABLE LSCUP_OUTPUT
+      ERROR_QUIET
     )
+    string(FIND "${LSCUP_OUTPUT}" "amx_tile" AMX_TILE_FOUND)
+    string(FIND "${LSCUP_OUTPUT}" "amx_int8" AMX_INT8_FOUND)
+    string(FIND "${LSCUP_OUTPUT}" "amx_bf16" AMX_BF16_FOUND)
      
-    if(GREP_RESULT EQUAL 0)
+    if(AMX_TILE_FOUND GREATER_EQUAL 0 OR AMX_INT8_FOUND GREATER_EQUAL 0 OR AMX_BF16_FOUND GREATER_EQUAL 0)
         set(CPU_SUPPORTS_AMX TRUE)
         message(STATUS "CPU supports AMX: yes")
     else()
@@ -37,14 +40,9 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
         message(STATUS "CPU supports AMX: no")
     endif()
      
-    if(DEFINED ENV{VLLM_CPU_AMX_INT8} AND "$ENV{VLLM_CPU_AMX_INT8}")
-        set(ENABLE_AMX_INT8 TRUE)
-    else()
-        set(ENABLE_AMX_INT8 FALSE)
-    endif()
      
-    if(CPU_SUPPORTS_AMX AND COMPILER_SUPPORTS_AMX_INT8 AND COMPILER_SUPPORTS_AMX_TILE AND COMPILER_SUPPORTS_AVX512VNNI AND ENABLE_AMX_INT8)
-        set(AMX_COMPILE_FLAGS "-mamx-int8;-mamx-tile;-mavx512vnni")
+    if(CPU_SUPPORTS_AMX AND (NOT DEFINED ENV{VLLM_CPU_AMX_INT8} OR ENV{VLLM_CPU_AMX_INT8} GREATER 0))
+        set(AMX_COMPILE_FLAGS "-mamx-int8 -mamx-tile -mavx512vnni -mavx512f -mavx512bw -mavx512dq")
         message(STATUS "AMX support detected and enabled for all modules")
     else()
         set(AMX_COMPILE_FLAGS "")
