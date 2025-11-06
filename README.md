@@ -180,7 +180,12 @@ python -c "import  vllm._lk_C"
 Lvllm is already installed and needs to be updated to the latest version, please execute the following command:
 
 ```bash
+# Normal situation
 git pull --force
+# When a conflict occurs
+git fetch origin
+git reset --hard origin/main
+
 python use_existing_torch.py 
 pip install -r requirements/build.txt
 MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
@@ -402,7 +407,12 @@ python -c "import  vllm._lk_C"
 如果已安装Lvllm，需要更新到最新版本，请执行以下命令：
 
 ```bash
+# 正常情况
 git pull --force
+# 出现冲突
+git fetch origin
+git reset --hard origin/main
+
 python use_existing_torch.py 
 pip install -r requirements/build.txt
 MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
