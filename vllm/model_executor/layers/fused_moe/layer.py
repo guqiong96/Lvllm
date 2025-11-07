@@ -1203,11 +1203,6 @@ class FusedMoE(CustomOp):
         self.layer_name = prefix
 
         self.enable_eplb = enable_eplb
-        if self.enable_eplb and self.use_lk_moe:
-            raise RuntimeError(
-                "EPLB (Expert Parallel Load Balancing) is not compatible with LK-MoE NUMA mode. "
-                "Please disable either EPLB or set environment variable LVLLM_MOE_NUMA_ENABLED to 0."
-            )
         self.expert_load_view: torch.Tensor | None = None
         self.logical_to_physical_map: torch.Tensor | None = None
         self.logical_replica_count: torch.Tensor | None = None
@@ -1463,10 +1458,9 @@ class FusedMoE(CustomOp):
     @property
     def use_dp_chunking(self) -> bool:
         return (
-            (self.moe_parallel_config.use_pplx_kernels
+            self.moe_parallel_config.use_pplx_kernels
             or self.moe_parallel_config.use_deepep_ll_kernels
-            or (self.dp_size > 1 and self.use_flashinfer_cutlass_kernels))
-            and not self.use_lk_moe
+            or (self.dp_size > 1 and self.use_flashinfer_cutlass_kernels)
         )
 
     @property
@@ -2041,7 +2035,7 @@ class FusedMoE(CustomOp):
             self.moe_quant_config = self.quant_method.moe_quant_config
 
     def ensure_dp_chunking_init(self):
-        if not self.use_dp_chunking or self.batched_hidden_states is not None and self.use_lk_moe:
+        if not self.use_dp_chunking or self.batched_hidden_states is not None:
             return
 
         states_shape: tuple[int, ...]
@@ -2171,7 +2165,7 @@ class FusedMoE(CustomOp):
             if indices_type is not None:
                 topk_ids = topk_ids.to(dtype=indices_type)
 
-        if enable_eplb and not is_lk_moe_numa_enabled():
+        if enable_eplb:
             assert expert_load_view is not None
             assert logical_to_physical_map is not None
             assert logical_replica_count is not None
@@ -2467,7 +2461,7 @@ class FusedMoE(CustomOp):
             and self.shared_experts is not None
         )
 
-        use_chunked_impl = self.use_dp_chunking and not self.use_lk_moe
+        use_chunked_impl = self.use_dp_chunking
 
         if (
             has_separate_shared_experts
@@ -2485,13 +2479,13 @@ class FusedMoE(CustomOp):
         if self.gate is not None:
             router_logits, _ = self.gate(hidden_states)
 
-        if use_chunked_impl and not self.use_lk_moe:
+        if use_chunked_impl:
             return self.forward_impl_chunked(
                 hidden_states, router_logits, has_separate_shared_experts
             )
 
         do_naive_dispatch_combine: bool = (
-            self.dp_size > 1 and not self.quant_method.using_modular_kernel and not self.use_lk_moe
+            self.dp_size > 1 and not self.quant_method.using_modular_kernel
         )
 
         # If there are shared experts but we are not using a modular kernel, the
@@ -2513,12 +2507,12 @@ class FusedMoE(CustomOp):
         ctx = get_forward_context()
         sp_ctx = (
             ctx.dp_metadata.sp_local_sizes(self.sp_size)
-            if ctx.dp_metadata and not self.use_lk_moe
+            if ctx.dp_metadata
             else nullcontext()
         )
 
         with sp_ctx:
-            if do_naive_dispatch_combine and not self.use_lk_moe:
+            if do_naive_dispatch_combine:
                 hidden_states, router_logits = get_ep_group().dispatch(
                     hidden_states, router_logits, self.is_sequence_parallel
                 )
@@ -2574,14 +2568,13 @@ class FusedMoE(CustomOp):
             def reduce_output(
                 states: torch.Tensor, do_combine: bool = True
             ) -> torch.Tensor:
-                if do_naive_dispatch_combine and do_combine and not self.use_lk_moe:
+                if do_naive_dispatch_combine and do_combine:
                     states = get_ep_group().combine(states, self.is_sequence_parallel)
 
                 if (
                     not self.is_sequence_parallel
                     and self.reduce_results
                     and (self.tp_size > 1 or self.ep_size > 1)
-                    and not self.use_lk_moe
                 ):
                     states = self.maybe_all_reduce_tensor_model_parallel(states)
 
