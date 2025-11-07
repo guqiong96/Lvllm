@@ -10,6 +10,16 @@ LK_THREADS and OMP_NUM_THREADS Configuration Rules:
 1. Single GPU Inference (N): LK_THREADS and OMP_NUM_THREADS should be set to total number of cores minus 4. If hyper-threading is enabled, set it to total number of threads minus 8.
 2. Multi-GPU Inference (N/number of GPUs): For each GPU, set LK_THREADS and OMP_NUM_THREADS to N divided by the number of GPUs.
 ```
+```bash
+Tensor parallelism on the old machine, prefill speed 555 tokens/s, decoding speed 47 tokens/s, 80B BF16 model
+```
+
+<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/d6751a1a-3cf6-451e-9915-4a617af72a15" />
+
+```bash
+Pipeline parallelism on the old machine, prefill speed 689 tokens/s, decoding speed 40 tokens/s, 80B BF16 model
+```
+<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/72b0b0d5-f4eb-459b-a777-519bf470b3d6" />
 
 ## October 30, 2025:Support Qwen3 series models GGUF hybrid inference (excluding Qwen3-Coder-30B-A3B-Instruct GGUF) [view new params in config.yaml]
 
