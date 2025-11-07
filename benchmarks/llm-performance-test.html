@@ -1,0 +1,1823 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Local LLM Inference Performance Testing Tool</title>
+    <style>
+        html,
+        body {
+            padding: 0;
+            box-sizing: border-box;
+
+            background-color: #ffffff;
+
+            font-family: "Microsoft YaHei", "微软雅黑", sans-serif;
+            font-size: 15px;
+        }
+
+        *,
+        *::before,
+        *::after {
+            box-sizing: inherit;
+        }
+
+        input,
+        button,
+        textarea,
+        select {
+            font-family: inherit;
+        }
+
+        .page-container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .page-header {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .page-title {
+            color: #000;
+
+            font-size: 36px;
+            font-weight: bold;
+        }
+
+        .page-desc {
+            color: #555;
+
+            font-size: 24px;
+        }
+
+        .page-content {
+            display: flex;
+            gap: 15px;
+        }
+
+        .left-panel,
+        .center-panel,
+        .right-panel {
+            box-sizing: border-box;
+            padding: 10px;
+
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+
+            border-radius: 8px;
+            box-shadow: 0 0 2px 2px rgba(0, 0, 0, 0.1);
+        }
+
+        .left-panel {
+            min-width: 470px;
+            max-width: 470px;
+
+            flex: 1;
+        }
+
+        .center-panel {
+            min-width: 1000px;
+            max-width: 1000px;
+
+            flex: 2;
+        }
+
+        .right-panel {
+            min-width: 1020px;
+            max-width: 1020px;
+
+            flex: 2;
+        }
+
+        .input-header {
+            padding: 8px 0;
+
+            border-radius: 4px;
+            background-color: #e6f7ff;
+
+            font-size: 16px;
+            font-weight: bold;
+        }
+
+        .input-field {
+            padding: 5px 0;
+
+            display: flex;
+            align-items: center;
+        }
+
+        .input-field label {
+            padding: 4px 8px 4px 0;
+
+            white-space: nowrap;
+            font-size: 15px;
+        }
+
+        .input-field input[type="text"],
+        .input-field input[type="password"],
+        .input-field input[type="number"] {
+            box-sizing: border-box;
+            padding: 5px;
+
+            flex: 1;
+
+            border: 1px solid #ddd;
+            border-radius: 4px;
+
+            font-size: 14px;
+        }
+
+        #lengthTip {
+            padding: 4px 0;
+
+            color: #888;
+
+            font-size: 14px;
+        }
+
+        .start-button,
+        .stop-button {
+            width: 100%;
+            padding: 14px 20px;
+
+            border: none;
+            border-radius: 5px;
+            color: #fff;
+
+            font-size: 20px;
+
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        .start-button {
+            background-color: #28a745;
+        }
+
+        .start-button:hover {
+            background-color: #1e7e34;
+        }
+
+        .stop-button {
+            background-color: #dc3545;
+        }
+
+        .stop-button:hover {
+            background-color: #c82333;
+        }
+
+        .center-buttons {
+            display: flex;
+            gap: 10px;
+        }
+
+        .center-buttons button {
+            min-width: 120px;
+            padding: 10px 15px;
+
+            flex-grow: 1;
+
+            border: none;
+            border-radius: 5px;
+            background-color: #007bff;
+            color: #fff;
+
+            font-size: 15px;
+
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        .center-buttons button:hover {
+            background-color: #0056b3;
+        }
+
+        .summary-display {
+            padding: 15px;
+
+            border: 1px solid #ddd;
+            border-bottom: 1.5px solid #e0e0e0;
+            border-radius: 8px 8px 0 0;
+            color: #000;
+
+            font-size: 15px;
+            font-weight: 500;
+        }
+
+        .table-container {
+            overflow-x: auto;
+
+            flex-grow: 1;
+        }
+
+        .result-table {
+            width: 100%;
+            min-width: 500px;
+
+            border-collapse: collapse;
+        }
+
+        .result-table th {
+            padding: 8px;
+
+            border: 1px solid #ddd;
+
+            font-size: 15px;
+            text-align: center;
+        }
+
+        .result-table td {
+            padding: 8px;
+
+            border: 1px solid #ddd;
+
+            font-size: 15px;
+            text-align: right;
+        }
+
+        .result-table th:last-child,
+        .result-table td:last-child {
+            min-width: 92px;
+
+            text-align: center;
+        }
+
+        .author-display {
+            padding: 15px 0;
+
+            color: #888;
+
+            font-size: 15px;
+            text-align: center;
+        }
+
+        .author-display a {
+            color: #007bff;
+
+            text-decoration: none;
+        }
+
+        .chart-canvas {
+            width: 1000px !important;
+            height: 500px !important;
+        }
+
+        .detail-button {
+            padding: 4px 8px;
+
+            font-size: 12px;
+
+            cursor: pointer;
+        }
+
+        .detail-overlay {
+            width: 100vw;
+            height: 100vh;
+
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: 1000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+
+            background-color: rgba(0, 0, 0, 0.2);
+        }
+
+        .detail-dialog {
+            min-width: 800px;
+            max-width: 80%;
+            max-height: 80%;
+            overflow: auto;
+            padding: 20px;
+
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+
+            border-radius: 8px;
+            background-color: #fff;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .detail-header {
+            padding: 0 0 10px 0;
+
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .detail-title {
+            color: #000;
+
+            font-size: 20px;
+            font-weight: bold;
+        }
+
+        .detail-close-button {
+            padding: 10px 20px;
+
+            border-radius: 4px;
+            border: none;
+            background-color: #dc3545;
+            color: #fff;
+
+            font-size: 15px;
+
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        .detail-close-button:hover {
+            background-color: #c82333;
+        }
+
+        .detail-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 24px;
+            align-items: center;
+        }
+
+        .detail-field {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .detail-field-label {
+            padding: 6px 0;
+
+            color: #000;
+
+            font-size: 15px;
+            font-weight: bold;
+        }
+
+        .detail-field-content {
+            padding: 0 10px;
+
+            background-color: #e9ecef;
+            color: #000;
+
+            font-size: 15px;
+        }
+
+        .detail-block-label {
+            padding: 6px 0;
+
+            color: #000;
+
+            font-size: 15px;
+            font-weight: bold;
+        }
+
+        .detail-block-content {
+            padding: 10px 15px;
+
+            border-left: 4px solid;
+            border-right: 4px solid;
+            border-radius: 6px;
+            background-color: #e9ecef;
+            color: #000;
+
+            font-family: 'Courier New', monospace;
+            font-size: 16px;
+            line-height: 1.2;
+            white-space: pre-wrap;
+        }
+
+        .system-prompt-block {
+            border-left-color: #ffc107;
+            border-right-color: #ffc107;
+        }
+
+        .user-prompt-block {
+            border-left-color: #007bff;
+            border-right-color: #007bff;
+        }
+
+        .output-block {
+            border-left-color: #28a745;
+            border-right-color: #28a745;
+        }
+
+        .alert-overlay {
+            width: 100vw;
+            height: 100vh;
+
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: 2000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            background-color: rgba(0, 0, 0, 0.3);
+        }
+
+        .alert-dialog {
+            min-width: 400px;
+            max-width: 40%;
+            max-height: 40%;
+            overflow: auto;
+            padding: 20px;
+
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+
+            border-radius: 8px;
+            background-color: #fff;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.18);
+
+            text-align: center;
+        }
+
+        .alert-header {
+            padding: 0 0 10px 0;
+
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .alert-title {
+            color: #000;
+
+            font-size: 20px;
+            font-weight: bold;
+        }
+
+        .alert-content {
+            padding: 10px 0;
+
+            background-color: #f8f9fa;
+            color: #000;
+
+            font-size: 15px;
+            line-height: 1.2;
+            white-space: pre-wrap;
+        }
+
+        .alert-confirm-button {
+            padding: 10px 20px;
+
+            border-radius: 4px;
+            border: none;
+            background-color: #007bff;
+            color: #fff;
+
+            font-size: 15px;
+
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        .alert-confirm-button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="page-container">
+        <div class="page-header">
+            <h1 class="page-title">Local LLM Inference Performance Testing Tool</h1>
+            <div class="page-desc">
+                Used to test the reasoning speed of local large language models with different input lengths, supporting result visualization and export.
+            </div>
+        </div>
+        <div class="page-content">
+            <div class="left-panel">
+                <!-- Server Information -->
+                <div>
+                    <div class="input-header">Server Information</div>
+                    <div class="input-field">
+                        <label for="processor">Processor: </label>
+                        <input type="text" id="processor" value="AMD EPYC 7642 * 2 NPS4 8 NUMA NODE">
+                    </div>
+                    <div class="input-field">
+                        <label for="mainboard">Motherboard: </label>
+                        <input type="text" id="mainboard" value="T1DEEP">
+                    </div>
+                    <div class="input-field">
+                        <label for="memory">Memory: </label>
+                        <input type="text" id="memory" value="DDR4 3200 1TB">
+                    </div>
+                    <div class="input-field">
+                        <label for="gpu">GPU：</label>
+                        <input type="text" id="gpu" value="NVIDIA RTX 3090 * 2">
+                    </div>
+                    <div class="input-field">
+                        <label for="system">Operating System: </label>
+                        <input type="text" id="system" value="Rocky Linux 9.5">
+                    </div>
+                </div>
+                <!-- Inference Engine Information -->
+                <div>
+                    <div class="input-header">Inference Engine Information</div>
+                    <div class="input-field">
+                        <label for="engineName">Engine Name: </label>
+                        <input type="text" id="engineName" value="Lvllm">
+                    </div>
+                    <div class="input-field">
+                        <label for="engineModelName">Model Information: </label>
+                        <input type="text" id="engineModelName" value="Qwen3-Next-80B-A3B-Instruct">
+                    </div>
+                </div>
+                <!-- Interface Information -->
+                <div>
+                    <div class="input-header">Interface Information</div>
+                    <div class="input-field">
+                        <label for="requestUrl">Request URL: </label>
+                        <input type="text" id="requestUrl" value="https://ai.gfire.cn:9005/v1/chat/completions">
+                    </div>
+                    <div class="input-field">
+                        <label for="modelName">Model Name: </label>
+                        <input type="text" id="modelName" value="Qwen3-Next-80B-A3B-Instruct">
+                    </div>
+                    <div class="input-field">
+                        <label for="apiKey">Request key: </label>
+                        <input type="password" id="apiKey" placeholder="If not required, please leave blank">
+                    </div>
+                </div>
+                <!-- Test information -->
+                <div>
+                    <div class="input-header">Test information</div>
+                    <div class="input-field">
+                        <label for="minInputLength">Minimum input length: </label>
+                        <input type="number" id="minInputLength" value="128">
+                    </div>
+                    <div class="input-field">
+                        <label for="maxInputLength">Maximum input length: </label>
+                        <input type="number" id="maxInputLength" value="16384">
+                    </div>
+                    <div class="input-field">
+                        <label for="step">Input length step size: </label>
+                        <input type="number" id="step" value="2">
+                    </div>
+                    <div class="input-field">
+                        <label for="maxOutputLength">Output length: </label>
+                        <input type="number" id="maxOutputLength" value="128">
+                    </div>
+                    <div class="input-field">
+                        <label for="structureLength">Model structure length: </label>
+                        <input type="number" id="structureLength" value="16" placeholder="It is recommended to fill in, common value is 4.">
+                    </div>
+                    <div id="lengthTip">
+                        Input length = System prompt length + User prompt length + Model structure length
+                    </div>
+                </div>
+            </div>
+            <div class="center-panel">
+                <!-- The upper middle part -->
+                <div>
+                    <button id="startButton" class="start-button">Start testing</button>
+                </div>
+                <div class="center-buttons">
+                    <button id="downloadChartButton">Download line chart</button>
+                    <button id="downloadCsvButton">Download CSV file</button>
+                    <button id="downloadMarkdownButton">Download Markdown file</button>
+                </div>
+                <!-- The middle lower part -->
+                <div class="table-container"> 
+                    <div id="summaryDisplay" class="summary-display"></div> <!-- Summary display area --> 
+                    <table id="resultTable" class="result-table"> <!-- Results table --> 
+                        <thead> 
+                            <tr> 
+                                <th>Input Length</th> <!-- Number of tokens in input text --> 
+                                <th>Prefill Time (ms)</th> <!-- Time taken for model to process input text (milliseconds) --> 
+                                <th>Prefill Speed (token/s)</th> <!-- Speed at which model processes input text (tokens per second) --> 
+                                <th>Output Length</th> <!-- Number of tokens in model-generated output text --> 
+                                <th>Output Time (ms)</th> <!-- Time taken for model to generate output text (milliseconds) --> 
+                                <th>Output Speed (token/s)</th> <!-- Speed at which model generates output text (tokens per second) --> 
+                                <th>Details</th> <!-- Link or button for detailed test results --> 
+                            </tr> 
+                        </thead> 
+                        <tbody> 
+                            <!-- Table content will be dynamically populated here --> 
+                        </tbody> 
+                    </table> 
+                </div> 
+                <div id="authorDisplay" class="author-display"> 
+                    This tool was developed by chaoshen999. Please visit <a href="https://github.com/chaoshen999" target="_blank">GitHub</a> and give it a ⭐ 
+                    to show your support! 
+                </div>
+            </div>
+            <div class="right-panel">
+                <div>
+                    <canvas id="prefillChart" class="chart-canvas"></canvas>
+                    <canvas id="outputChart" class="chart-canvas"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+        const words = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+        let isTesting = false;
+        let testStartTime = null;
+        let testResults = [];
+        let abortController = null;
+
+        // Get DOM elements
+        const startButton = document.getElementById('startButton');
+        const downloadChartButton = document.getElementById('downloadChartButton');
+        const downloadCsvButton = document.getElementById('downloadCsvButton');
+        const downloadMarkdownButton = document.getElementById('downloadMarkdownButton');
+        const resultTableBody = document.querySelector('#resultTable tbody');
+        const prefillChartCanvas = document.getElementById('prefillChart');
+        const outputChartCanvas = document.getElementById('outputChart');
+        const summaryDisplayEl = document.getElementById('summaryDisplay');
+        const lengthTipEl = document.getElementById('lengthTip');
+
+        startButton.addEventListener('click', () => {
+            if (isTesting) {
+                stopTest();
+            } else {
+                startTest();
+            }
+        });
+
+        downloadChartButton.addEventListener('click', downloadChart);
+        downloadCsvButton.addEventListener('click', downloadCsv);
+        downloadMarkdownButton.addEventListener('click', downloadMarkdown);
+
+        // Update summary display area
+        updateSummaryDisplay();
+
+        // Real-time update of summary display area
+        ['processor', 'mainboard', 'memory', 'gpu', 'system', 'engineName', 'engineModelName'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) {
+                el.addEventListener('input', updateSummaryDisplay);
+            }
+        });
+
+        console.log("This tool is developed by chaoshen999. Welcome to https://github.com/chaoshen999 to give a ⭐ support!");
+
+        /**
+         * Start performance test
+         */
+        async function startTest() {
+            // console.log('Start testing.');
+
+            startButton.textContent = 'Stop Test';
+            startButton.classList.add('stop-button');
+            resultTableBody.innerHTML = '';
+            clearChart();
+
+            isTesting = true;
+            testStartTime = new Date();
+            testResults = [];
+
+            // Get input values
+            const requestUrl = document.getElementById('requestUrl').value;
+            const modelName = document.getElementById('modelName').value;
+            const apiKey = document.getElementById('apiKey').value;
+            const minInputLength = parseInt(document.getElementById('minInputLength').value);
+            const maxInputLength = parseInt(document.getElementById('maxInputLength').value);
+            const step = parseInt(document.getElementById('step').value);
+            const maxOutputLength = parseInt(document.getElementById('maxOutputLength').value);
+            const structureLengthInput = document.getElementById('structureLength');
+            const structureLength = structureLengthInput.value === '' ? 0 : parseInt(structureLengthInput.value);
+
+            // Validate input values
+            if (!requestUrl || !modelName || isNaN(minInputLength) || isNaN(maxInputLength) || isNaN(step) || isNaN(maxOutputLength) || isNaN(structureLength)) {
+                showAlert('Please fill in the interface information and test information.');
+                stopTest();
+                return;
+            }
+            if (minInputLength <= 0 || maxInputLength < minInputLength || step <= 0 || maxOutputLength <= 0 || structureLength < 0) {
+                showAlert('Please fill in reasonable test information.');
+                stopTest();
+                return;
+            }
+
+            if (minInputLength < 20) {
+                showAlert('The minimum input length needs to be greater than or equal to 20.');
+                stopTest();
+                return;
+            }
+
+            if (maxOutputLength < 3) {
+                showAlert('The output length needs to be greater than or equal to 3.');
+                stopTest();
+                return;
+            }
+
+            // Establish HTTP link before starting test
+            try {
+                const systemPrompt = generateSystemPrompt();
+                const userPrompt = generateUserPrompt(10);
+                const headers = {
+                    'Content-Type': 'application/json'
+                };
+                if (apiKey) {
+                    headers['Authorization'] = `Bearer ${apiKey}`;
+                }
+                const requestBody = JSON.stringify({
+                    model: modelName,
+                    messages: [
+                        { role: 'system', content: systemPrompt },
+                        { role: 'user', content: userPrompt }
+                    ],
+                    max_tokens: 3,
+                    temperature: 0.1,
+                    top_p: 0.1,
+                    stream: true
+                });
+                const response = await fetch(requestUrl, {
+                    method: 'POST',
+                    headers: headers,
+                    body: requestBody
+                });
+                if (response.body && response.body.getReader) {
+                    const reader = response.body.getReader();
+                    while (true) {
+                        const { done } = await reader.read();
+                        if (done) break;
+                    }
+                }
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            } catch (e) {
+                // Ignore error
+            }
+
+            // Batch testing
+            for (let inputLength = minInputLength; inputLength <= maxInputLength; inputLength *= step) {
+                console.log('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>');
+                console.log(logTime(), 'Input length:', inputLength);
+
+                if (!isTesting) {
+                    return;
+                }
+
+                let testRowData = {};
+                let serverCompletionTokens = 0;
+                let streamTokens = 0;
+                let output = '';
+
+                let requestTime = undefined;
+                let responseTime = undefined;
+                let firstTokenTime = undefined;
+                let outputFinishTime = undefined;
+
+                let prefillTime = undefined;
+                let prefillSpeed = undefined;
+                let outputLength = undefined;
+                let outputTime = undefined;
+                let outputSpeed = undefined;
+
+                // Generate system prompt
+                const systemPrompt = generateSystemPrompt();
+                const systemPromptLength = countTokensByRule(systemPrompt);
+                // console.log('System prompt content:', systemPrompt);
+                // console.log('System prompt length:', systemPromptLength);
+
+                // Generate user prompt
+                // User prompt length = input length - system prompt length - model structure length
+                const userPromptLength = inputLength - systemPromptLength - structureLength;
+                const userPrompt = generateUserPrompt(userPromptLength);
+                // console.log('User prompt content:', userPrompt);
+                // console.log('User prompt length:', userPromptLength);
+
+                try {
+                    // Request headers
+                    const headers = {
+                        'Content-Type': 'application/json'
+                    };
+                    if (apiKey) {
+                        headers['Authorization'] = `Bearer ${apiKey}`;
+                    }
+                    // Request body
+                    const requestBody = JSON.stringify({
+                        model: modelName,
+                        messages: [
+                            { role: 'system', content: systemPrompt },
+                            { role: 'user', content: userPrompt }
+                        ],
+                        max_tokens: maxOutputLength,
+                        temperature: 1,
+                        top_p: 0.1,
+                        stream: true
+                    });
+
+                    // Initialize AbortController
+                    abortController = new AbortController();
+                    const signal = abortController.signal;
+
+                    requestTime = performance.now();
+                    console.log(logTime(), 'Request sent time:', formatTime(requestTime));
+
+                    const response = await fetch(requestUrl, {
+                        method: 'POST',
+                        headers: headers,
+                        body: requestBody,
+                        signal: signal
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP request error, status code: ${response.status}`);
+                    }
+
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder('utf-8');
+                    let buffer = '';
+
+                    while (true) {
+                        console.log('==================================================');
+
+                        const { done, value } = await reader.read();
+
+                        responseTime = performance.now();
+                        console.log(logTime(), 'Response received time:', formatTime(responseTime));
+                        console.log(logTime(), 'Stream status:', { done, hasValue: !!value, valueLength: value?.length });
+
+                        if (done) {
+                            console.log(logTime(), 'done');
+
+                            if (!outputFinishTime) {
+                                outputFinishTime = responseTime;
+                                console.log(logTime(), 'Output finish time:', formatTime(outputFinishTime));
+                            }
+                            break;
+                        }
+
+                        buffer += decoder.decode(value, { stream: true });
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop();
+
+                        for (const line of lines) {
+                            console.log(logTime(), 'Stream content:', line);
+
+                            if (line.trim() === '') {
+                                continue;
+                            }
+                            if (!line.startsWith('data:')) {
+                                continue;
+                            }
+
+                            const data = line.substring(5).trim();
+                            if (data === '[DONE]') {
+                                console.log(logTime(), '[DONE]');
+
+                                outputFinishTime = responseTime;
+                                console.log(logTime(), 'Output finish time:', formatTime(outputFinishTime));
+                                break;
+                            }
+
+                            const json = JSON.parse(data);
+                            if (json.choices && json.choices[0] && json.choices[0].delta) {
+                                // console.log(logTime(), 'delta:', json.choices[0].delta);
+
+                                if (json.choices[0].delta.content) {
+                                    output += json.choices[0].delta.content;
+                                    streamTokens++;
+
+                                    // console.log(logTime(), 'content:', streamTokens, json.choices[0].delta.content);
+
+                                    if (!firstTokenTime) {
+                                        firstTokenTime = responseTime;
+                                        console.log(logTime(), 'First token received time:', formatTime(firstTokenTime));
+                                    }
+                                }
+                            }
+                            if (json.usage) {
+                                // console.log(logTime(), 'usage:', json.usage);
+
+                                if (json.usage.completion_tokens) {
+                                    serverCompletionTokens = json.usage.completion_tokens;
+                                }
+                            }
+                        }
+                    }
+
+                    // Prefill time: time from sending request to receiving first token
+                    prefillTime = firstTokenTime - requestTime;
+                    // Output time: time from receiving first token to output finish
+                    outputTime = outputFinishTime - firstTokenTime;
+
+                    // Get output length, prioritize server returned token count;
+                    //     then use stream token count (may be inaccurate as one stream may contain multiple tokens);
+                    //     finally count received output content to calculate token count
+                    outputLength = 0;
+                    if (serverCompletionTokens > 0) {
+                        outputLength = serverCompletionTokens;
+                    } else if (streamTokens > 0) {
+                        outputLength = streamTokens;
+                    } else {
+                        outputLength = countTokensByRule(output);
+                    }
+                    // console.log('Output content:', output);
+                    // console.log('Output length:', outputLength);
+
+                    // Calculate prefill speed and output speed, keep 2 decimal places
+                    prefillSpeed = prefillTime > 0 ? (inputLength / (prefillTime / 1000)).toFixed(2) : 'N/A';
+                    outputSpeed = outputTime > 0 ? (outputLength / (outputTime / 1000)).toFixed(2) : 'N/A';
+
+                    testRowData = {
+                        inputLength: inputLength,
+                        prefillTime: prefillTime.toFixed(2),
+                        prefillSpeed: prefillSpeed,
+                        outputLength: outputLength,
+                        outputTime: outputTime.toFixed(2),
+                        outputSpeed: outputSpeed,
+                        systemPrompt: systemPrompt,
+                        systemPromptLength: systemPromptLength,
+                        userPrompt: userPrompt,
+                        userPromptLength: userPromptLength,
+                        output: output,
+                        error: false
+                    };
+                } catch (error) {
+                    if (error.name === 'AbortError') {
+                        console.error(logTime(), error);
+
+                    } else {
+                        console.error(logTime(), error);
+
+                        // Provide more detailed error information based on error type
+                        let errorMessage = 'Unknown error';
+                        if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                            errorMessage = 'Network connection failed, please check server address and network connection';
+                        } else if (error.message.includes('Failed to fetch')) {
+                            errorMessage = 'Unable to connect to server, please check if server is running';
+                        } else if (error.message.includes('Unexpected token')) {
+                            errorMessage = 'Server returned data format error';
+                        } else if (error.message.includes('timeout')) {
+                            errorMessage = 'Request timeout, please check server response time';
+                        }
+
+                        testRowData = {
+                            inputLength: inputLength,
+                            prefillTime: 0,
+                            prefillSpeed: 0,
+                            outputLength: 0,
+                            outputTime: 0,
+                            outputSpeed: 0,
+                            systemPrompt: systemPrompt || '',
+                            systemPromptLength: systemPromptLength || 0,
+                            userPrompt: userPrompt || '',
+                            userPromptLength: userPromptLength || 0,
+                            output: '',
+                            error: true,
+                            errorMessage: errorMessage
+                        };
+                    }
+                }
+
+                // Display data in table
+                const row = resultTableBody.insertRow();
+                row.insertCell().textContent = testRowData.inputLength;
+                row.insertCell().textContent = testRowData.error ? 'Error' : testRowData.prefillTime;
+                row.insertCell().textContent = testRowData.error ? 'Error' : testRowData.prefillSpeed;
+                row.insertCell().textContent = testRowData.error ? 'Error' : testRowData.outputLength;
+                row.insertCell().textContent = testRowData.error ? 'Error' : testRowData.outputTime;
+                row.insertCell().textContent = testRowData.error ? 'Error' : testRowData.outputSpeed;
+
+                // Add detail button
+                const detailCell = row.insertCell();
+                const detailButton = document.createElement('button');
+                detailButton.textContent = 'Details';
+                detailButton.className = 'detail-button';
+                detailButton.onclick = () => showDetail(
+                    testRowData.inputLength,
+                    testRowData.systemPrompt,
+                    testRowData.systemPromptLength,
+                    testRowData.userPrompt,
+                    testRowData.userPromptLength,
+                    testRowData.output,
+                    testRowData.outputLength
+                );
+                detailCell.appendChild(detailButton);
+
+                // Store result
+                testResults.push(testRowData);
+
+                // Redraw line chart after each request
+                drawChart();
+
+                // Wait 1000 ms after each request
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+
+            // Reset button status after batch testing completes
+            stopTest();
+        }
+
+        /**
+         * Stop performance test
+         */
+        function stopTest() {
+            // console.log('Stop testing.');
+
+            isTesting = false;
+            if (abortController) {
+                abortController.abort();
+                abortController = null;
+            }
+            startButton.textContent = 'Start Test';
+            startButton.classList.remove('stop-button');
+        }
+
+        function logTime() {
+            return `\x1b[34m[${new Date().toISOString()}]\x1b[0m`;
+        }
+
+        function formatTime(time) {
+            const fixed = time.toFixed(3);
+            const [intPart, fracPart] = fixed.split('.');
+            const intPartPadded = intPart.padStart(10, ' ');
+            return `${intPartPadded}.${fracPart}`;
+        }
+
+        /**
+         * Tokenize by rules, return token count
+         * @param {string} text - Text to tokenize
+         * @returns {number} token count
+         */
+        function countTokensByRule(text) {
+            // 1. Identify abbreviations with apostrophes
+            const specialApostropheWords = [
+                "'cause", "'em", "'kay", "'nother", "'round", "'scuse", "'sup", "'til"
+            ];
+
+            // 2. Identify abbreviations that count as 1 token
+            const oneTokenWords = [
+                "don't", "can't", "won't"
+            ];
+
+            // 3. Identify abbreviations that count as 2 tokens
+            const twoTokenWords = [
+                // 'm series
+                "I'm",
+                // 're series
+                "we're", "you're", "they're",
+                // 've series
+                "I've", "we've", "you've", "they've",
+                // 'd series
+                "I'd", "we'd", "you'd", "he'd", "she'd", "they'd",
+                // 'll series
+                "I'll", "we'll", "you'll", "he'll", "she'll", "they'll",
+                // n't series
+                "isn't", "aren't", "wasn't", "weren't", "doesn't", "didn't", "hasn't", "haven't", "shouldn't", "wouldn't", "couldn't",
+                // 's series
+                "it's", "he's", "she's", "that's", "there's", "who's"
+            ];
+
+            let tokens = [];
+            let t = text;
+
+            specialApostropheWords.forEach(word => {
+                let reg = new RegExp(word.replace("'", "\\'"), 'gi');
+                t = t.replace(reg, m => {
+                    tokens.push(m);
+                    return ' '.repeat(m.length);
+                });
+            });
+
+            oneTokenWords.forEach(word => {
+                let reg = new RegExp(word.replace("'", "\\'"), 'gi');
+                t = t.replace(reg, m => {
+                    tokens.push(m);
+                    return ' '.repeat(m.length);
+                });
+            });
+
+            twoTokenWords.forEach(word => {
+                let reg = new RegExp(word.replace("'", "\\'"), 'gi');
+                t = t.replace(reg, m => {
+                    const parts = m.split(/'/);
+                    tokens.push(parts[0]);
+                    tokens.push("'" + parts[1]);
+                    return ' '.repeat(m.length);
+                });
+            });
+
+            // 4. Use normal rules for remaining content
+            const enPunct = /[,.!?;:'"()\[\]{}]/;
+            const cnPunct = /[，。！？；：‘'""（）【】｛｝]/;
+
+            const isSeparator = (ch) => ch === ' ' || enPunct.test(ch) || cnPunct.test(ch) || ch === '\n' || ch === '\t' || ch === '\r';
+            const isDigit = (ch) => /[0-9]/.test(ch);
+
+            let buffer = '';
+            let i = 0;
+            while (i < t.length) {
+                const ch = t[i];
+
+                // If it's a separator
+                if (isSeparator(ch)) {
+                    // If there's buffer, add buffer to tokens first
+                    if (buffer.length > 0) {
+                        tokens.push(buffer);
+                        buffer = '';
+                    }
+                    // Separator itself counts as one token (except space, tab, carriage return)
+                    if (ch !== ' ' && ch !== '\t' && ch !== '\r') {
+                        tokens.push(ch);
+                    }
+                    i++;
+                    continue;
+                }
+
+                // If it's a digit
+                if (isDigit(ch)) {
+                    // If there's buffer, add buffer to tokens first
+                    if (buffer.length > 0) {
+                        tokens.push(buffer);
+                        buffer = '';
+                    }
+                    // Digit itself counts as one token
+                    tokens.push(ch);
+                    i++;
+                    continue;
+                }
+
+                // Other characters append to buffer
+                buffer += ch;
+                i++;
+            }
+
+            // Last word, add to tokens
+            if (buffer.length > 0) {
+                tokens.push(buffer);
+            }
+
+            // Filter out empty strings
+            tokens = tokens.filter(t => t && t.length > 0);
+            return tokens.length;
+        }
+
+        /**
+         * Generate system prompt
+         * @returns {string} system prompt content
+         */
+        function generateSystemPrompt() {
+            return 'You are a assistant.';
+        }
+
+        /**
+         * Generate user prompt
+         * @param {number} length - length
+         * @returns {string} user prompt content
+         */
+        function generateUserPrompt(length) {
+            const fixedPrompt = `\nRepeat the above content one hundred times.`;
+            const fixedPromptLength = countTokensByRule(fixedPrompt);
+
+            const needWordLength = length - fixedPromptLength;
+            let userPrompt = '';
+            for (let i = 0; i < needWordLength; i++) {
+                const randomWord = words[Math.floor(Math.random() * words.length)];
+                if (i > 0) {
+                    userPrompt += ' ';
+                }
+                userPrompt += randomWord;
+            }
+            userPrompt += fixedPrompt;
+            return userPrompt;
+        }
+
+        /**
+         * Draw line chart for performance test results
+         */
+        function drawChart() {
+            const inputLengths = testResults.map(r => r.inputLength);
+            const prefillSpeeds = testResults.map(r => r.prefillSpeed);
+            const outputSpeeds = testResults.map(r => r.outputSpeed);
+
+            drawLineChart(prefillChartCanvas, inputLengths, prefillSpeeds, 'Prefill Speed', 'Input Length', 'Prefill Speed (token/s)', '#4bc0c0');
+            drawLineChart(outputChartCanvas, inputLengths, outputSpeeds, 'Output Speed', 'Input Length', 'Output Speed (token/s)', '#ff6384');
+        }
+
+        /**
+         * Draw line chart using native canvas
+         * @param {HTMLCanvasElement} canvas - canvas
+         * @param {Array} xData - X-axis data
+         * @param {Array} yData - Y-axis data
+         * @param {string} title - chart title
+         * @param {string} xLabel - X-axis title
+         * @param {string} yLabel - Y-axis title
+         * @param {string} lineColor - line color
+         */
+        function drawLineChart(canvas, xData, yData, title, xLabel, yLabel, lineColor) {
+            // Fix canvas to 1000*500
+            canvas.width = 1000;
+            canvas.height = 500;
+
+            const cssWidth = 1000;
+            const cssHeight = 500;
+            const ctx = canvas.getContext('2d');
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+            // Spacing
+            const titleTop = 15; // Top margin for title
+            const chartTop = 80; // Top margin for line chart itself
+            const chartBottom = 50; // Bottom margin for line chart itself
+            const chartLeft = 100; // Left margin for line chart itself
+            const chartRight = 100; // Right margin for line chart itself
+            const xLabelOffset = 15; // X-axis title distance from line chart X-axis right end
+            const yLabelOffset = 15; // Y-axis title distance from line chart Y-axis top end
+
+            // Font sizes
+            const titleFont = 20; // Title font
+            const xTickFont = 16; // X-axis tick number font
+            const yTickFont = 15; // Y-axis tick number font
+            const xLabelFont = 16; // X-axis title font
+            const yLabelFont = 16; // Y-axis title font
+            const dataPointFont = 15; // Data point value font
+
+            // Ticks
+            const yTickCount = 5; // Y-axis tick count
+
+            // Chart area range
+            const chartWidth = cssWidth - chartLeft - chartRight;
+            const chartHeight = cssHeight - chartTop - chartBottom;
+
+            // Add 0 tick to X-axis, generate X-axis array
+            const chartXStart = chartLeft;
+            const chartXEnd = chartLeft + chartWidth;
+            const xTicks = [0, ...xData];
+            const xTickCount = xTicks.length;
+
+            function getX(i) {
+                return chartXStart + (chartWidth / (xTickCount - 1)) * i;
+            }
+
+            // Add 0 tick to Y-axis, generate Y-axis array
+            const chartYStart = chartTop + chartHeight;
+            const chartYEnd = chartTop;
+            let yMax = Math.max(...yData);
+            yMax = getNiceMaxValue(yMax);
+
+            const yTicks = [];
+            for (let i = 0; i < yTickCount; i++) {
+                yTicks.push((yMax / (yTickCount - 1)) * i);
+            }
+
+            // Get the closest integer magnitude greater than or equal to max (e.g., 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, etc.)
+            function getNiceMaxValue(max) {
+                if (max <= 0) {
+                    return 1
+                };
+
+                const exp = Math.floor(Math.log10(max));
+                const base = Math.pow(10, exp);
+                let niceMax = base;
+                if (max > base) {
+                    // Take 1, 2, 5, 10 times base
+                    if (max <= 2 * base) {
+                        niceMax = 2 * base;
+                    } else if (max <= 5 * base) {
+                        niceMax = 5 * base;
+                    } else {
+                        niceMax = 10 * base;
+                    }
+                }
+                return niceMax;
+            }
+
+            function getY(i) {
+                return chartYStart - (chartHeight / (yTickCount - 1)) * i;
+            }
+
+            function getYByValue(value) {
+                return chartYStart - (value / yMax) * chartHeight;
+            }
+
+            // Background
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(0, 0, cssWidth, cssHeight);
+
+            // Title
+            ctx.font = `bold ${titleFont}px "Microsoft YaHei", "微软雅黑", sans-serif`;
+            ctx.fillStyle = '#000';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.fillText(title, cssWidth / 2, titleTop);
+
+            // Draw grid lines
+            ctx.strokeStyle = '#e0e0e0';
+            ctx.lineWidth = 1;
+            for (let i = 0; i < xTickCount; i++) {
+                const x = getX(i);
+                ctx.beginPath();
+                ctx.moveTo(x, chartYStart);
+                ctx.lineTo(x, chartYEnd);
+                ctx.stroke();
+            }
+            for (let i = 0; i < yTickCount; i++) {
+                const y = getY(i);
+                ctx.beginPath();
+                ctx.moveTo(chartXStart, y);
+                ctx.lineTo(chartXEnd, y);
+                ctx.stroke();
+            }
+
+            // Draw coordinate axes
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 2;
+            // X-axis
+            ctx.beginPath();
+            ctx.moveTo(chartXStart, chartYStart);
+            ctx.lineTo(chartXEnd, chartYStart);
+            ctx.stroke();
+            // Y-axis
+            ctx.beginPath();
+            ctx.moveTo(chartXStart, chartYStart);
+            ctx.lineTo(chartXStart, chartYEnd);
+            ctx.stroke();
+
+            // Draw X-axis ticks and numbers
+            ctx.font = `${xTickFont}px "Microsoft YaHei", "微软雅黑", sans-serif`;
+            ctx.fillStyle = '#000';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            for (let i = 0; i < xTickCount; i++) {
+                const x = getX(i);
+                ctx.beginPath();
+                ctx.moveTo(x, chartYStart);
+                ctx.lineTo(x, chartYStart + 8);
+                ctx.stroke();
+                ctx.fillText(xTicks[i], x, chartYStart + 12);
+            }
+
+            // Draw Y-axis ticks and numbers
+            ctx.font = `${yTickFont}px "Microsoft YaHei", "微软雅黑", sans-serif`;
+            ctx.fillStyle = '#000';
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'middle';
+            for (let i = 0; i < yTickCount; i++) {
+                const y = getY(i);
+                ctx.beginPath();
+                ctx.moveTo(chartXStart - 8, y);
+                ctx.lineTo(chartXStart, y);
+                ctx.stroke();
+                ctx.fillText(yTicks[i].toFixed(2), chartXStart - 12, y);
+            }
+
+            // X-axis title, left boundary 15 px from line chart X-axis right end
+            ctx.font = `bold ${xLabelFont}px "Microsoft YaHei", "微软雅黑", sans-serif`;
+            ctx.fillStyle = '#000';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(xLabel, chartXEnd + xLabelOffset, chartYStart);
+
+            // Y-axis title, bottom boundary 15 px from line chart Y-axis top end
+            ctx.font = `bold ${yLabelFont}px "Microsoft YaHei", "微软雅黑", sans-serif`;
+            ctx.fillStyle = '#000';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.fillText(yLabel, chartXStart, chartYEnd - yLabelOffset - yLabelFont);
+
+            // Draw line
+            ctx.strokeStyle = lineColor;
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            for (let i = 0; i < xData.length; i++) {
+                const x = getX(i + 1);
+                const y = getYByValue(yData[i]);
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            }
+            ctx.stroke();
+
+            // Draw data points and values
+            for (let i = 0; i < xData.length; i++) {
+                const x = getX(i + 1);
+                const y = getYByValue(yData[i]);
+
+                // Shadow
+                ctx.save();
+                ctx.shadowColor = 'rgba(0,0,0,0.15)';
+                ctx.shadowBlur = 6;
+                ctx.fillStyle = '#fff';
+                ctx.beginPath();
+                ctx.arc(x, y, 6, 0, 2 * Math.PI);
+                ctx.fill();
+                ctx.restore();
+
+                // Outer circle
+                ctx.strokeStyle = lineColor;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(x, y, 6, 0, 2 * Math.PI);
+                ctx.stroke();
+
+                // Inner circle
+                ctx.fillStyle = lineColor;
+                ctx.beginPath();
+                ctx.arc(x, y, 3, 0, 2 * Math.PI);
+                ctx.fill();
+
+                // Value
+                ctx.font = `${dataPointFont}px "Microsoft YaHei", "微软雅黑", sans-serif`;
+                ctx.fillStyle = '#000';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'bottom';
+                let value = yData[i];
+                let valueText = (typeof value === 'number')
+                    ? value.toFixed(2)
+                    : (typeof value === 'string' && !isNaN(Number(value)))
+                        ? Number(value).toFixed(2)
+                        : value;
+                ctx.fillText(valueText, x, y - 10);
+            }
+        }
+
+        /**
+         * Clear line chart
+         */
+        function clearChart() {
+            [prefillChartCanvas, outputChartCanvas].forEach(canvas => {
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            });
+        }
+
+        /**
+         * Download line chart
+         */
+        function downloadChart() {
+            if (!checkTestData('download')) return;
+
+            // Get title and summary information
+            const title = getTitle();
+            const summaryInfoText = getSummaryInfoText();
+            const testStartTimeText = getTestStartTimeText();
+
+            // Get two original canvases
+            const prefillCanvas = prefillChartCanvas;
+            const outputCanvas = outputChartCanvas;
+
+            // Calculate title and summary information area height
+            const titleFontSize = 36;
+            const titleLineHeight = 36;
+            const titlePadding = 24;
+
+            const infoFontSize = 15;
+            const infoLineHeight = 30;
+            const infoPadding = 20;
+
+            const titleHeight = titlePadding + titleLineHeight + titlePadding;
+            const infoHeight = infoPadding + summaryInfoText.length * infoLineHeight + infoPadding;
+            const timeHeight = testStartTimeText.length * infoLineHeight;
+            const headHeight = titleHeight + infoHeight + timeHeight;
+
+            // Calculate combined image width and height
+            const width = Math.max(prefillCanvas.width, outputCanvas.width);
+            const height = headHeight + prefillCanvas.height + outputCanvas.height;
+
+            // Create combined canvas
+            const combinedCanvas = document.createElement('canvas');
+            combinedCanvas.width = width;
+            combinedCanvas.height = height;
+            const ctx = combinedCanvas.getContext('2d');
+
+            // Fill white background
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(0, 0, width, height);
+
+            // Draw title
+            ctx.font = `bold ${titleFontSize}px "Microsoft YaHei", "微软雅黑", sans-serif`;
+            ctx.fillStyle = '#000';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.fillText(title, width / 2, titlePadding);
+
+            // Draw summary information
+            ctx.font = `bold ${infoFontSize}px "Microsoft YaHei", "微软雅黑", sans-serif`;
+            ctx.fillStyle = '#000';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+            let y = titleHeight + infoPadding;
+            summaryInfoText.forEach(line => {
+                ctx.fillText(line, infoPadding, y);
+                y += infoLineHeight;
+            });
+
+            // Draw test time information
+            testStartTimeText.forEach(line => {
+                ctx.fillText(line, infoPadding, y);
+                y += infoLineHeight;
+            });
+
+            // Draw two original canvases
+            ctx.drawImage(prefillCanvas, 0, headHeight);
+            ctx.drawImage(outputCanvas, 0, headHeight + prefillCanvas.height);
+
+            const imageDataUrl = combinedCanvas.toDataURL('image/png');
+            const baseName = getExportBaseName();
+            downloadFile(imageDataUrl, `${baseName}.png`, 'image/png');
+        }
+
+        /**
+         * Download CSV format file
+         */
+        function downloadCsv() {
+            if (!checkTestData('download')) return;
+
+            let csvContent = getTestReportHeader();
+
+            csvContent += '\n' + getCsvColumnHeader() + '\n';
+
+            testResults.forEach(row => {
+                csvContent += `${row.inputLength},${row.prefillTime},${row.prefillSpeed},${row.outputLength},${row.outputTime},${row.outputSpeed}\n`;
+            });
+
+            const baseName = getExportBaseName();
+            downloadFile(csvContent, `${baseName}.csv`, 'text/csv');
+        }
+
+        /**
+         * Download Markdown format file
+         */
+        function downloadMarkdown() {
+            if (!checkTestData('download')) return;
+
+            let markdownContent = getTestReportHeader();
+
+            markdownContent += '\n' + getMarkdownColumnHeader() + '\n';
+            markdownContent += '|---:|---:|---:|---:|---:|---:|\n';
+
+            testResults.forEach(row => {
+                markdownContent += `| ${row.inputLength} | ${row.prefillTime} | ${row.prefillSpeed} | ${row.outputLength} | ${row.outputTime} | ${row.outputSpeed} |\n`;
+            });
+
+            const baseName = getExportBaseName();
+            downloadFile(markdownContent, `${baseName}.md`, 'text/markdown');
+        }
+
+        // Check if there is test data
+        function checkTestData(operationName) {
+            if (testResults.length === 0) {
+                showAlert(`No data available to ${operationName}.`);
+                return false;
+            }
+            return true;
+        }
+
+        // Get header information
+        function getTestReportHeader() {
+            let header = getTitle() + '\n\n';
+
+            getSummaryInfoText().forEach(line => {
+                header += line + '\n';
+            });
+            getTestStartTimeText().forEach(line => {
+                header += line + '\n';
+            });
+
+            return header;
+        }
+
+        // Get title
+        function getTitle() {
+            return 'Local LLM Inference Performance';
+        }
+
+        // Get summary information
+        function getSummaryInfoText() {
+            const fields = ['processor', 'mainboard', 'memory', 'gpu', 'system', 'engineName', 'engineModelName'];
+
+            return fields.map(fieldId => {
+                const label = getFieldLabel(fieldId);
+                const value = getFieldValue(fieldId);
+                return `${label}${value}`;
+            });
+        }
+
+        // Get test time information
+        function getTestStartTimeText() {
+            const year = testStartTime.getFullYear();
+            const month = String(testStartTime.getMonth() + 1).padStart(2, '0');
+            const day = String(testStartTime.getDate()).padStart(2, '0');
+            const hours = String(testStartTime.getHours()).padStart(2, '0');
+            const minutes = String(testStartTime.getMinutes()).padStart(2, '0');
+            const seconds = String(testStartTime.getSeconds()).padStart(2, '0');
+            return [`Test time: ${year}-${month}-${day} ${hours}:${minutes}:${seconds}`];
+        }
+
+        // Get export file base name (GPU, engine name, model name, test start time)
+        function getExportBaseName() {
+            const gpu = getFieldValue('gpu', 'gpu');
+            const engineName = getFieldValue('engineName', 'engine');
+            const engineModelName = getFieldValue('engineModelName', 'model');
+
+            const safe = s => s.replace(/\s+/g, '_').replace(/[^\w\-\.]/g, '');
+
+            let timeText = '';
+            if (testStartTime) {
+                const year = testStartTime.getFullYear();
+                const month = String(testStartTime.getMonth() + 1).padStart(2, '0');
+                const day = String(testStartTime.getDate()).padStart(2, '0');
+                const hours = String(testStartTime.getHours()).padStart(2, '0');
+                const minutes = String(testStartTime.getMinutes()).padStart(2, '0');
+                const seconds = String(testStartTime.getSeconds()).padStart(2, '0');
+                timeText = `${year}${month}${day}_${hours}${minutes}${seconds}`;
+            }
+
+            return `${safe(gpu)},${safe(engineName)},${safe(engineModelName)},${timeText}`;
+        }
+
+        // Get CSV table column headers
+        function getCsvColumnHeader() {
+            return 'Input Length,Prefill Time (ms),Prefill Speed (token/s),Output Length,Output Time (ms),Output Speed (token/s)';
+        }
+
+        // Get Markdown table column headers
+        function getMarkdownColumnHeader() {
+            return '| Input Length | Prefill Time (ms) | Prefill Speed (token/s) | Output Length | Output Time (ms) | Output Speed (token/s) |';
+        }
+
+        // Update summary display area
+        function updateSummaryDisplay() {
+            const serverFields = ['processor', 'mainboard', 'memory', 'gpu', 'system'];
+            const engineFields = ['engineName', 'engineModelName'];
+
+            // Concatenate server information
+            const serverInfo = serverFields.map(fieldId => {
+                const label = getFieldLabel(fieldId);
+                const value = getFieldValue(fieldId);
+                return `${label}${value}`;
+            }).join(', ') + '.';
+
+            // Concatenate inference engine information
+            const engineInfo = engineFields.map(fieldId => {
+                const label = getFieldLabel(fieldId);
+                const value = getFieldValue(fieldId);
+                return `${label}${value}`;
+            }).join(', ') + '.';
+
+            summaryDisplayEl.innerHTML = `<div>${serverInfo}</div><div>${engineInfo}</div>`;
+        }
+
+        // Get form field label text
+        function getFieldLabel(fieldId) {
+            return document.querySelector(`label[for="${fieldId}"]`).textContent;
+        }
+
+        // Get form field value, return default value if empty
+        function getFieldValue(fieldId, defaultValue = 'None') {
+            return document.getElementById(fieldId).value || defaultValue;
+        }
+
+        // Generic file download function
+        function downloadFile(content, filename, mimeType) {
+            const link = document.createElement('a');
+
+            if (content.startsWith('data:')) {
+                link.href = content;
+            } else {
+                link.href = `data:${mimeType};charset=utf-8,` + encodeURIComponent(content);
+            }
+
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        /**
+         * Show detail popup
+         * @param {number} inputLength - input length
+         * @param {string} systemPrompt - system prompt
+         * @param {number} systemPromptLength - system prompt length
+         * @param {string} userPrompt - user prompt
+         * @param {number} userPromptLength - user prompt length
+         * @param {string} output - received output content
+         * @param {number} outputLength - received output length
+         */
+        function showDetail(inputLength, systemPrompt, systemPromptLength, userPrompt, userPromptLength, output, outputLength) {
+            // Prevent background page scrolling
+            document.body.style.overflow = 'hidden';
+
+            const detailOverlay = document.createElement('div');
+            detailOverlay.className = 'detail-overlay';
+
+            const detailDialog = document.createElement('div');
+            detailDialog.className = 'detail-dialog';
+
+            detailDialog.innerHTML = `
+                <div class="detail-header">
+                    <div class="detail-title">Details</div>
+                    <button type="button" class="detail-close-button">Close</button>
+                </div>
+                <div class="detail-row">
+                  <div class="detail-field">
+                    <div class="detail-field-label">Input Length:</div>
+                    <span class="detail-field-content">${inputLength}</span>
+                  </div>
+                  <div class="detail-field">
+                    <div class="detail-field-label">System Prompt Length:</div>
+                    <span class="detail-field-content">${systemPromptLength}</span>
+                  </div>
+                  <div class="detail-field">
+                    <div class="detail-field-label">User Prompt Length:</div>
+                    <span class="detail-field-content">${userPromptLength}</span>
+                  </div>
+                  <div class="detail-field">
+                    <div class="detail-field-label">Received Output Length:</div>
+                    <span class="detail-field-content">${outputLength}</span>
+                  </div>
+                </div>
+                <div class="detail-block">
+                    <div class="detail-block-label">System Prompt:</div>
+                    <div class="detail-block-content system-prompt-block">${systemPrompt.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+                </div>
+                <div class="detail-block">
+                    <div class="detail-block-label">User Prompt:</div>
+                    <div class="detail-block-content user-prompt-block">${userPrompt.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+                </div>
+                <div class="detail-block">
+                    <div class="detail-block-label">Received Output Content:</div>
+                    <div class="detail-block-content output-block">${output.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+                </div>
+            `;
+
+            detailOverlay.appendChild(detailDialog);
+            document.body.appendChild(detailOverlay);
+
+            // Click close button to close popup
+            const detailCloseBtn = detailDialog.querySelector('.detail-close-button');
+            detailCloseBtn.addEventListener('click', () => {
+                detailOverlay.remove();
+                document.body.style.overflow = '';
+            });
+
+            // Click background to close popup
+            detailOverlay.addEventListener('click', (e) => {
+                if (e.target === detailOverlay) {
+                    detailOverlay.remove();
+                    document.body.style.overflow = '';
+                }
+            });
+        }
+
+        /**
+         * Show custom alert popup
+         * @param {string} message - alert content
+         * @param {string} [title='Alert'] - popup title
+         */
+        function showAlert(message, title = 'Alert') {
+            if (document.querySelector('.alert-overlay')) {
+                return
+            };
+
+            // Prevent background page scrolling
+            document.body.style.overflow = 'hidden';
+
+            const alertOverlay = document.createElement('div');
+            alertOverlay.className = 'alert-overlay';
+
+            const alertDialog = document.createElement('div');
+            alertDialog.className = 'alert-dialog';
+
+            alertDialog.innerHTML = `
+                <div class="alert-header">
+                    <div class="alert-title">${title}</div>
+                </div>
+                <div class="alert-content">${message}</div>
+                <div>
+                    <button type="button" class="alert-confirm-button">OK</button>
+                </div>
+            `;
+
+            alertOverlay.appendChild(alertDialog);
+            document.body.appendChild(alertOverlay);
+
+            // Click OK button to close popup
+            const alertConfirmBtn = alertDialog.querySelector('.alert-confirm-button');
+            alertConfirmBtn.addEventListener('click', () => {
+                alertOverlay.remove();
+                document.body.style.overflow = '';
+            });
+
+            // Click background to close popup
+            alertOverlay.addEventListener('click', (e) => {
+                if (e.target === alertOverlay) {
+                    alertOverlay.remove();
+                    document.body.style.overflow = '';
+                }
+            });
+
+        }
+
+    </script>
+</body>
+
+</html>
