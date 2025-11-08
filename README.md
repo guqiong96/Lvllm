@@ -73,7 +73,7 @@ sudo sh cuda_12.9.1_575.57.08_linux.run
 conda create -n Lvllm python==3.12.11
 conda activate Lvllm
 
-# Upgrade libstdcxx-ng (to avoid glibcxx_3.4.32 not found error, which prevents loading vllm._lk_C module and causes memory overflow)
+# Upgrade libstdcxx-ng (to avoid glibcxx_3.4.32 not found error, which prevents loading lk_moe module and causes memory overflow)
 conda install -c conda-forge libstdcxx-ng
 # install libnuma-dev on ubuntu
 sudo apt-get install libnuma-dev
@@ -102,80 +102,33 @@ pip install -r requirements/build.txt
 
 ```
 
-### 4. Clone Third-party Dependencies (Optional, skip if GitHub connection is good)
 
-```bash
-
-mkdir -p .deps
-cd .deps
-
-git clone https://github.com/nvidia/cutlass.git cutlass-src
-cd cutlass-src
-git checkout v4.0.0
-cd ..
-
-git clone https://github.com/oneapi-src/oneDNN.git oneDNN-src
-cd oneDNN-src
-git checkout v3.9
-cd ..
-
-git clone https://github.com/vllm-project/FlashMLA flashmla-src
-cd flashmla-src
-git checkout a757314c04eedd166e329e846c820eb1bdd702de
-cd ..
-
-git clone https://github.com/vllm-project/flash-attention.git vllm-flash-attn-src
-cd vllm-flash-attn-src
-git checkout ee4d25bd84e0cbc7e0b9b9685085fd5db2dcb62a
-cd ..
-
-# Install specific version of llama.cpp
-git clone https://github.com/ggerganov/llama.cpp.git llama_cpp-src
-cd llama_cpp-src
-git checkout a94e6ff8774b7c9f950d9545baf0ce35e8d1ed2f
-cd ..
-
-# Install flashinfer-python
-pip install flashinfer-python==0.4.1 
-```
-
-### 5. Install Lvllm
+### 4. Install Lvllm
 
 ```bash
 # General Installation
 MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
 ```
-```bash 
-# AMX instruction set supports installation
-ENABLE_AMX_INT8=1  MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
-```
-MAX_JOBS=32 NVCC_THREADS=1 reduces memory usage during compilation to avoid freezing
-CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" for performance optimization
-
-## Startup Command Using FlashInfer
-
+MAX_JOBS=32 NVCC_THREADS=1 reduces memory usage during compilation to avoid freezing 
+ 
+### 5. Run Lvllm
 Use the following command to start the Lvllm service:
-(Running the Qwen3-Next-80B-A3B-Instruct-FP8 model, setting the environment variable VLLM_MARLIN_USE_ATOMIC_ADD=1 slightly increases decode speed but slightly decreases prefill speed) 
-```bash 
-LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS="88" OMP_NUM_THREADS="88" VLLM_ATTENTION_BACKEND="FLASHINFER" vllm serve --config ~/Downloads/Lvllm/config.yaml
-```
-
-Use the following command to start the Lvllm service (Qwen3-VL does not support VLLM_ATTENTION_BACKEND="FLASHINFER" ):
 ```bash 
 LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS="88" OMP_NUM_THREADS="88" vllm serve --config ~/Downloads/Lvllm/config.yaml
 ```
 
-Modify the configuration parameters in config.yaml
-LK_THREADS: Total CPU threads to use, typically 10% less than total threads (e.g., 88 for a 48-core 96-thread processor)
-OMP_NUM_THREADS: Torch concurrency threads, should be the same as LK_THREADS
+Modify the configuration parameters in config.yaml 
+LK_THREADS and OMP_NUM_THREADS Configuration Rules:
+1. Single GPU Inference (N): LK_THREADS and OMP_NUM_THREADS should be set to total number of cores minus 4. If hyper-threading is enabled, set it to total number of threads minus 8.
+2. Multi-GPU Inference (N/number of GPUs): For each GPU, set LK_THREADS and OMP_NUM_THREADS to N divided by the number of GPUs.
 
 ### Troubleshooting
-Run the following command and submit the error output to Issues or WeChat group
+Run the following command and submit the error output to GitHub Issues 
 ```bash 
-python -c "import  vllm._lk_C"
+python -c "import  lk_moe"
 ```
 
-### Update Existing LvllmIf 
+### Update Existing Lvllm
 
 Lvllm is already installed and needs to be updated to the latest version, please execute the following command:
 
@@ -301,7 +254,7 @@ sudo sh cuda_12.9.1_575.57.08_linux.run
 conda create -n Lvllm python==3.12.11
 conda activate Lvllm
 
-# 升级libstdcxx-ng  （避免glibcxx_3.4.32 not found， 新增的vllm._lk_C模块无法加载退回到原始vllm模式，最后显存溢出）
+# 升级libstdcxx-ng  （避免glibcxx_3.4.32 not found， 新增的lk_moe模块无法加载退回到原始vllm模式，最后显存溢出）
 conda install -c conda-forge libstdcxx-ng
 
 # 安装NUMA库 ubuntu
@@ -331,56 +284,13 @@ python use_existing_torch.py
 # 安装构建依赖
 pip install -r requirements/build.txt
 ```
-
-### 4. 克隆第三方依赖库(可选,github网络好可以直接第5步)
-
-```bash
-
-mkdir -p .deps
-cd .deps
-
-git clone https://github.com/nvidia/cutlass.git cutlass-src
-cd cutlass-src
-git checkout v4.0.0
-cd ..
-
-git clone https://github.com/oneapi-src/oneDNN.git oneDNN-src
-cd oneDNN-src
-git checkout v3.9
-cd ..
-
-git clone https://github.com/vllm-project/FlashMLA flashmla-src
-cd flashmla-src
-git checkout a757314c04eedd166e329e846c820eb1bdd702de
-cd ..
-
-git clone https://github.com/vllm-project/flash-attention.git vllm-flash-attn-src
-cd vllm-flash-attn-src
-git checkout ee4d25bd84e0cbc7e0b9b9685085fd5db2dcb62a
-cd ..
-
-# 安装指定版本的llama.cpp
-git clone https://github.com/ggerganov/llama.cpp.git llama_cpp-src
-cd llama_cpp-src
-git checkout a94e6ff8774b7c9f950d9545baf0ce35e8d1ed2f
-cd ..
-
-# 安装flashinfer-python
-pip install flashinfer-python==0.4.1 
-```
-
-### 5. 安装Lvllm
-
-```bash
-# 一般安装
-MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
-```
+ 
+### 4. 安装Lvllm
 
 ```bash 
-# AMX指令集支持安装
-ENABLE_AMX_INT8=1  MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
+MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
 ```
-ENABLE_AMX_INT8 
+  
 
 MAX_JOBS=32 NVCC_THREADS=1 减少编译时内存占用，避免卡死
 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" 性能选项
@@ -392,14 +302,14 @@ CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" 性能选项
 LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS="88" OMP_NUM_THREADS="88" vllm serve --config ~/Downloads/Lvllm/config.yaml
 ```
 VLLM_ATTENTION_BACKEND="FLASHINFER": 这个环境变量已不是最优选项[2025-10-21]
-修改config.yaml里面配置参数
-LK_THREADS: 总计使用的CPU线程数，一般比总的线程数少10%，例如48核心96线程，LK_THREADS="88" 
-OMP_NUM_THREADS：torch并发线程数，保持与LK_THREADS一致
+1、单GPU推理(N)：LK_THREADS、OMP_NUM_THREADS 设置为总的核心数量-4 , 开启超线程则设置为总的线程数量-8
+2、多GPU推理(N/GPU数量)：每个GPU的LK_THREADS、OMP_NUM_THREADS 设置为N/(GPU数量)
+ 
 
 ### 错误排查
-运行以下命令，将错误输出提交至Issues或微信群
+运行以下命令，将错误输出提交至GitHub Issues 
 ```bash 
-python -c "import  vllm._lk_C"
+python -c "import lk_moe"
 ```
 
 ### 更新已有Lvllm

@@ -113,6 +113,7 @@ import numpy as np
 import vllm
 from vllm.envs import is_lk_moe_numa_enabled
 if is_lk_moe_numa_enabled():
+    import  lk_moe
     GGML_TYPE_TO_TORCH_DTYPE = {
         0: torch.float32,    # GGML_TYPE_F32
         1: torch.float16,    # GGML_TYPE_F16
@@ -137,7 +138,7 @@ if is_lk_moe_numa_enabled():
             return True
         return False
 else:
-    logger.error("Failed to import vllm._lk_C module or LVLLM_MOE_NUMA_ENABLED is not set to 1, lk::MOE implementation will not be available")
+    logger.error("Failed to import lk_moe module or LVLLM_MOE_NUMA_ENABLED is not set to 1, lk::MOE implementation will not be available")
 
 
 
@@ -2717,7 +2718,7 @@ class FusedMoE(CustomOp):
             ctypes.cast(down_numpy.ctypes.data, ctypes.POINTER(ctypes.c_uint8)).contents
         ) 
             
-        moe_config = vllm._lk_C.MOEConfig(
+        moe_config = lk_moe.MOEConfig(
             self.local_num_experts,        # expert_num
             self.top_k,                    # routed_expert_num
             self.hidden_size,              # hidden_size
@@ -2735,7 +2736,7 @@ class FusedMoE(CustomOp):
         )
          
         self.lk_moe_config = moe_config 
-        self.lk_moe = vllm._lk_C.MOE(moe_config)
+        self.lk_moe = lk_moe.MOE(moe_config)
         
         del gate_numpy, up_numpy, down_numpy
         del gate_proj_view, up_proj_view 
@@ -2815,7 +2816,7 @@ class FusedMoE(CustomOp):
             ctypes.cast(down_numpy.ctypes.data, ctypes.POINTER(ctypes.c_uint8)).contents
         ) 
         
-        moe_config = vllm._lk_C.MOEConfig(
+        moe_config = lk_moe.MOEConfig(
             self.local_num_experts,        # expert_num
             self.top_k,                    # routed_expert_num
             self.hidden_size,              # hidden_size
@@ -2833,7 +2834,7 @@ class FusedMoE(CustomOp):
         )
          
         self.lk_moe_config = moe_config 
-        self.lk_moe = vllm._lk_C.MOE(moe_config)
+        self.lk_moe = lk_moe.MOE(moe_config)
            
         del gate_numpy, up_numpy, down_numpy
         del gate_proj_view, up_proj_view 
@@ -2948,7 +2949,7 @@ class FusedMoE(CustomOp):
             ctypes.cast(down_numpy.ctypes.data, ctypes.POINTER(ctypes.c_uint8)).contents
         ) 
         
-        moe_config = vllm._lk_C.MOEConfig(
+        moe_config = lk_moe.MOEConfig(
             self.local_num_experts,        # expert_num
             self.top_k,                    # routed_expert_num
             self.hidden_size,              # hidden_size
@@ -2966,7 +2967,7 @@ class FusedMoE(CustomOp):
         )
          
         self.lk_moe_config = moe_config 
-        self.lk_moe = vllm._lk_C.MOE(moe_config)
+        self.lk_moe = lk_moe.MOE(moe_config)
           
         del self.w13_weight_origin, self.w2_weight_origin
         del self.w13_weight_scale_inv_origin, self.w2_weight_scale_inv_origin
@@ -3074,7 +3075,7 @@ class FusedMoE(CustomOp):
             ctypes.cast(down_numpy.ctypes.data, ctypes.POINTER(ctypes.c_uint8)).contents
         ) 
         
-        moe_config = vllm._lk_C.MOEConfig(
+        moe_config = lk_moe.MOEConfig(
             self.local_num_experts,        # expert_num
             self.top_k,                    # routed_expert_num
             self.hidden_size,              # hidden_size
@@ -3092,7 +3093,7 @@ class FusedMoE(CustomOp):
         )
          
         self.lk_moe_config = moe_config 
-        self.lk_moe = vllm._lk_C.MOE(moe_config)
+        self.lk_moe = lk_moe.MOE(moe_config)
           
         del self.w13_weight_origin, self.w2_weight_origin
         del self.w13_weight_scale_origin, self.w2_weight_scale_origin
@@ -3218,7 +3219,7 @@ class FusedMoE(CustomOp):
             
         
         
-        moe_config = vllm._lk_C.MOEConfig(
+        moe_config = lk_moe.MOEConfig(
             self.local_num_experts,        # expert_num
             self.top_k,                    # routed_expert_num
             self.hidden_size,              # hidden_size
@@ -3236,7 +3237,7 @@ class FusedMoE(CustomOp):
         )
          
         self.lk_moe_config = moe_config 
-        self.lk_moe = vllm._lk_C.MOE(moe_config)
+        self.lk_moe = lk_moe.MOE(moe_config)
          
         
         if use_scale:
