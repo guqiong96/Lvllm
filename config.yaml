@@ -1,18 +1,18 @@
-model: "/home/guqiong/Downloads/Qwen3-Coder-30B-A3B-Instruct-GGUF/Qwen3-Coder-30B-A3B-Instruct-UD-Q4_K_XL.gguf"
+model: "/home/guqiong/Downloads/Qwen3-Coder-30B-A3B-Instruct"
 host: "0.0.0.0"
 port: 8070
-tensor-parallel-size: 1
+tensor-parallel-size: 2
 max-model-len: 22000 
 gpu-memory-utilization: 0.80
 trust-remote-code: true
 tokenizer-mode: "auto"
 swap-space: 0
-served-model-name: "Qwen3-Coder-30B-A3B-Instruct-UD-Q4_K_XL.gguf" 
+served-model-name: "Qwen3-Coder-30B-A3B-Instruct" 
 compilation_config.cudagraph_mode: "FULL_DECODE_ONLY"
 enable_prefix_caching: true
 enable-chunked-prefill: true
 max_num_batched_tokens: 1024
 dtype: "float16"
-hf-config-path: "/home/guqiong/Downloads/Qwen3-Coder-30B-A3B-Instruct"
-tokenizer: "/home/guqiong/Downloads/Qwen3-Coder-30B-A3B-Instruct"
+# hf-config-path: "/home/guqiong/Downloads/Qwen3-Coder-30B-A3B-Instruct"
+# tokenizer: "/home/guqiong/Downloads/Qwen3-Coder-30B-A3B-Instruct"
 # speculative-config: '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'

@@ -47,7 +47,7 @@ Setting dtype: "float16" in config.yaml provides a 1.5x prefill speed increase c
 
 
 # Current Limitations:
-1. Only supports dtype: "bfloat16" and "float16" "fp8" [October 19, 2025: FP8 supports GPU NUMA hybrid inference MOE models, October 30, 2025: Supports GGUF model hybrid inference single gguf file]
+1. Only supports dtype: "bfloat16" and "float16" "fp8" [October 19, 2025: FP8 supports GPU NUMA hybrid inference MOE models, October 30, 2025: Only supports GGUF model hybrid inference for Qwen3 series (excluding Qwen3 Next) in single gguf file]
 
 2. Only supports compilation_config.cudagraph_mode: "NONE" [No limitation as of October 14, 2025]
 
@@ -56,6 +56,8 @@ Setting dtype: "float16" in config.yaml provides a 1.5x prefill speed increase c
 4. Only supports max_num_batched_tokens: 1024
 
 5. Only supports single-card inference (support for multi-GPU tensor parallelism (TP) and pipeline parallelism (PP) inference will be available from 2025-11-1)
+
+6. **Known Issue**: Using torch2.9.0 will result in garbled output, which is a compatibility issue between torch2.9.0 and vllm
 
 ## Installation Steps
 
@@ -97,12 +99,12 @@ sudo dnf install numactl-devel
 # Clone Lvllm repository
 git clone https://github.com/guqiong96/Lvllm.git 
  
-# Install PyTorch 2.8.0 Optional（Qwen3 Qwen3-VL models need install xformers、torchvisionn）
+# Install PyTorch 2.9.1 (Optional: Qwen3-VL requires installation of xformers and torchvision)
 pip uninstall torchaudio triton xformers torchvision torch
-pip install torchaudio triton xformers torchvision torch==2.8.0
+pip install torchaudio triton torchvision torch==2.9.1
+pip install xformers
 
-# 50 series GPUs require installing xformers==0.0.33.dev1090 for Qwen3 Qwen3-VL models
-pip install xformers==0.0.33.dev1090
+# Previous generations before RTX 50 series GPUs needed to install xformers==0.0.33.dev1090 to run Qwen3-VL properly. Now we need to determine if newer versions of xformers have resolved this issue.
 
 # Use existing PyTorch
 python use_existing_torch.py
@@ -149,6 +151,13 @@ git pull --force
 git fetch origin
 git reset --hard origin/main
 
+# Install PyTorch 2.9.1 (Optional: Qwen3-VL requires installation of xformers and torchvision)
+pip uninstall torchaudio triton xformers torchvision torch
+pip install torchaudio triton torchvision torch==2.9.1
+pip install xformers
+
+# Previous generations before RTX 50 series GPUs needed to install xformers==0.0.33.dev1090 to run Qwen3-VL properly. Now we need to determine if newer versions of xformers have resolved this issue.
+
 python use_existing_torch.py 
 pip install -r requirements/build.txt
 MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
@@ -181,7 +190,7 @@ You can modify the parameters in the configuration file or adjust the environmen
 # This project is a branch of vLLM and incorporates source code from the following open-source projects:
 1. **llama.cpp**- Project URL: [https://github.com/ggerganov/llama.cpp](https://github.com/ggerganov/llama.cpp)- Purpose: GGML related definitions
 2. **llamafile**- Project URL: [https://github.com/Mozilla-Ocho/llamafile](https://github.com/Mozilla-Ocho/llamafile)- Purpose: GGUF weight quantization, dequantization, and matrix multiplication
-3. **bestla**- Project URL: [https://github.com/bestla-org/bestla](https://github.com/bestla-org/bestla)- Purpose: Low-bit quantization, dequantization, and matrix multiplication
+
 
 
 
@@ -228,7 +237,7 @@ config.yaml里面设置dtype: "float16"相比不设置或设置为dtype: "bfloat
  
 
 # 当前限制：
-1、仅支持原版BF16模型、FP8原版或FP8量化模型 [2025-10-19: FP8支持GPU+NUMA 混合推理MOE模型, 2025.10.30 支持GGUF单文件模型]
+1. 仅支下列类型的模型："bfloat16" 和 "float16" [2025年10月19日：FP8支持GPU NUMA混合推理MOE模型，2025年10月30日：仅支持Qwen3系列的GGUF模型混合推理（不包含Qwen3 Next）单个gguf文件]
 
 2、仅支持compilation_config.cudagraph_mode: "NONE" [2025.10.14已没有限制]
 
@@ -237,6 +246,8 @@ config.yaml里面设置dtype: "float16"相比不设置或设置为dtype: "bfloat
 4、仅支持max_num_batched_tokens: 1024
 
 5、仅支持单卡推理(2025-11-1支持多GPU张量并行(TP)、流水线并行(PP)推理)
+
+6. **已知问题**：使用torch2.9.0会导致输出乱码，这是torch2.9.0和vllm的兼容性问题
 
 ## 安装步骤
 
@@ -280,12 +291,13 @@ sudo dnf install numactl-devel
 git clone https://github.com/guqiong96/Lvllm.git
 
 
-# 安装PyTorch 2.8.0 （可选 Qwen3-VL 需要安装 xformers、torchvision）
+# 安装PyTorch 2.9.1 （可选 Qwen3-VL 需要安装 xformers、torchvision）
 pip uninstall torchaudio triton xformers torchvision torch
-pip install torchaudio triton xformers torchvision torch==2.8.0
+pip install torchaudio triton torchvision torch==2.9.1
+pip install xformers
 
-# 50 系列 GPU 需要安装 xformers==0.0.33.dev1090 
-pip install xformers==0.0.33.dev1090 
+# 50 系列 GPU 之前需要安装 xformers==0.0.33.dev1090 才能正常运行Qwen3-VL，现在需要确定xformers新版本是否解决了问题
+ 
  
 
 # 使用现有PyTorch
@@ -329,10 +341,17 @@ python -c "import lk_moe"
 ```bash
 # 正常情况
 git pull --force
-# 出现冲突
+# 如果出现冲突
 git fetch origin
 git reset --hard origin/main
 
+# 安装PyTorch 2.9.0 （可选 Qwen3-VL 需要安装 xformers、torchvision）
+pip uninstall torchaudio triton xformers torchvision torch
+pip install torchaudio triton torchvision torch==2.9.1
+pip install xformers
+
+# 50 系列 GPU 之前需要安装 xformers==0.0.33.dev1090 才能正常运行Qwen3-VL，现在需要确定xformers新版本是否解决了问题
+ 
 python use_existing_torch.py 
 pip install -r requirements/build.txt
 MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
@@ -369,7 +388,4 @@ MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TY
    - 项目地址：[https://github.com/Mozilla-Ocho/llamafile](https://github.com/Mozilla-Ocho/llamafile)
    - 用途：GGUF权重量化、反量化及矩阵乘法
 
-3. **bestla**
-   - 项目地址：[https://github.com/bestla-org/bestla](https://github.com/bestla-org/bestla)
-   - 用途：低位量化、反量化及矩阵乘法
 

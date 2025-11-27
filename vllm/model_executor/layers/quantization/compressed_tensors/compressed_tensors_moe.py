@@ -767,20 +767,6 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
             layer.w2_input_scale = None
 
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
-            
-        import copy   
-        if hasattr(layer, "w13_weight"):
-            layer.w13_weight_origin = torch.empty_like(layer.w13_weight, device="cpu")
-            layer.w13_weight_origin.copy_(layer.w13_weight, non_blocking=True)
-        if hasattr(layer, "w2_weight"):
-            layer.w2_weight_origin = torch.empty_like(layer.w2_weight, device="cpu")
-            layer.w2_weight_origin.copy_(layer.w2_weight, non_blocking=True)
-        if hasattr(layer, "w13_weight_scale"):
-            layer.w13_weight_scale_origin = torch.empty_like(layer.w13_weight_scale, device="cpu")
-            layer.w13_weight_scale_origin.copy_(layer.w13_weight_scale, non_blocking=True)
-        if hasattr(layer, "w2_weight_scale"):
-            layer.w2_weight_scale_origin = torch.empty_like(layer.w2_weight_scale, device="cpu")
-            layer.w2_weight_scale_origin.copy_(layer.w2_weight_scale, non_blocking=True)
 
         # Fp8 moe kernels require a single activation scale.
         # We take the max of all the scales in case they differ.
@@ -854,7 +840,7 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
             layer.w13_weight_scale = torch.nn.Parameter(
                 max_w13_scales, requires_grad=False
             )
-
+        from vllm.envs import is_lk_moe_numa_enabled  
         # Property to determine if AITER is used
         if self.rocm_aiter_moe_enabled:
             from vllm.model_executor.layers.fused_moe.rocm_aiter_fused_moe import (  # noqa E501
@@ -869,7 +855,7 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
             layer.w13_weight = torch.nn.Parameter(shuffled_w13, requires_grad=False)
             layer.w2_weight = torch.nn.Parameter(shuffled_w2, requires_grad=False)
 
-        elif self.use_marlin:
+        elif self.use_marlin and not is_lk_moe_numa_enabled():
             prepare_moe_fp8_layer_for_marlin(layer, False)
             # Activations not quantized for marlin.
             del layer.w13_input_scale

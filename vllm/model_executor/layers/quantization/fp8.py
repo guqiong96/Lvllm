@@ -854,19 +854,6 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         self.rocm_aiter_moe_enabled = False
 
     def process_weights_after_loading(self, layer: Module) -> None:
-        import copy   
-        if hasattr(layer, "w13_weight"):
-            layer.w13_weight_origin = torch.empty_like(layer.w13_weight, device="cpu")
-            layer.w13_weight_origin.copy_(layer.w13_weight, non_blocking=True)
-        if hasattr(layer, "w2_weight"):
-            layer.w2_weight_origin = torch.empty_like(layer.w2_weight, device="cpu")
-            layer.w2_weight_origin.copy_(layer.w2_weight, non_blocking=True)
-        if hasattr(layer, "w13_weight_scale_inv"):
-            layer.w13_weight_scale_inv_origin = torch.empty_like(layer.w13_weight_scale_inv, device="cpu")
-            layer.w13_weight_scale_inv_origin.copy_(layer.w13_weight_scale_inv, non_blocking=True)
-        if hasattr(layer, "w2_weight_scale_inv"):
-            layer.w2_weight_scale_inv_origin = torch.empty_like(layer.w2_weight_scale_inv, device="cpu")
-            layer.w2_weight_scale_inv_origin.copy_(layer.w2_weight_scale_inv, non_blocking=True)
         # Lazy import to avoid importing triton too early.
         from vllm.model_executor.layers.fused_moe.rocm_aiter_fused_moe import (
             is_rocm_aiter_moe_enabled,
@@ -1062,7 +1049,8 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                     rotate_flashinfer_fp8_moe_weights(w13_weight, w2_weight)
                 layer.w13_weight.data = w13_weight.data
 
-        if self.use_marlin:
+        from vllm.envs import is_lk_moe_numa_enabled  
+        if self.use_marlin and not is_lk_moe_numa_enabled():
             prepare_moe_fp8_layer_for_marlin(layer, False)
             # Activations not quantized for marlin.
             del layer.w13_input_scale
