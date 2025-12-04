@@ -2635,7 +2635,8 @@ class FusedMoE(CustomOp):
                 self._process_gguf_weights()
                 find_weight = True
             elif hasattr(self, 'w13_weight_scale_inv') and block_quant:
-                self._process_block_weights()
+                # self._process_block_weights()
+                self._process_fp8_weights()
                 find_weight = True
             elif hasattr(self, 'w13_weight_scale'):
                 self._process_channel_weights()
@@ -2649,9 +2650,9 @@ class FusedMoE(CustomOp):
                 return
             
             self._initialize_cuda_graph_buffers()
-            logger.info(f"Initialized lk::MOE with {self.local_num_experts} experts for layer {self.layer_name}")
+            logger.info(f"Initialized lk_moe with {self.local_num_experts} experts for layer {self.layer_name}")
         except Exception as e:
-            logger.error(f"Failed to initialize lk::MOE: {e}")
+            logger.error(f"Failed to initialize lk_moe: {e}")
             self.use_lk_moe = False
             self.lk_moe = None
             self.lk_moe_config = None
@@ -2663,10 +2664,6 @@ class FusedMoE(CustomOp):
                 return 1  # GGML_TYPE_F16
             elif dtype == torch.bfloat16:
                 return 30  # GGML_TYPE_BF16
-            elif dtype == torch.float8_e4m3fn:
-                return 1  # to GGML_TYPE_BF16
-            elif dtype == torch.int32:
-                return 1
             else:
                 raise ValueError(f"Unsupported dtype {dtype}")
             
@@ -2682,11 +2679,7 @@ class FusedMoE(CustomOp):
         gate_ggml_type = self._get_ggml_type_from_quant_config(self.quant_config, layer_idx, 'gate')
         up_ggml_type = self._get_ggml_type_from_quant_config(self.quant_config, layer_idx, 'up')
         down_ggml_type = self._get_ggml_type_from_quant_config(self.quant_config, layer_idx, 'down')
-         
-        def is_ggml_type_supported(ggml_type): 
-            supported_types = [0, 1, 2, 3, 8, 12, 13, 14, 23, 24, 30]
-            return ggml_type in supported_types
-            
+  
         if not is_ggml_type_supported(gate_ggml_type) or not is_ggml_type_supported(up_ggml_type) or not is_ggml_type_supported(down_ggml_type):  
             raise ValueError(f"GGML type {gate_ggml_type} or {up_ggml_type} or {down_ggml_type} is not supported for layer {layer_idx}")
              
@@ -2841,39 +2834,74 @@ class FusedMoE(CustomOp):
         del w13_dequant, w2_dequant
         import gc
         gc.collect()
-        
-    def torch_dtype_to_btla_dtype(self, torch_dtype):  
-        dtype_map = { 
-            torch.float64: 64,  # F64 = EleBits64 | TypeFloat
-            torch.float32: 32,  # F32 = EleBits32 | TypeFloat
-            torch.float16: 16,  # F16 = EleBits16 | TypeFloat
-            torch.bfloat16: 257,  # BF16 = EleBits16 | TypeFloat | SubType1
-            torch.float8_e4m3fn: 8,  # F8_E4M3 = EleBits8 | TypeFloat
-            "F8_E4M3": 8,  # F8_E4M3 = EleBits8 | TypeFloat
-            "F8_E5M2": 264,  # F8_E5M2 = EleBits8 | TypeFloat | SubType1
-            "F8_E3M4": 520,  # F8_E3M4 = EleBits8 | TypeFloat | SubType2
-            "F8_E8M0": 776,  # F8_E8M0 = EleBits8 | TypeFloat | SubType3 
-            torch.int8: 264,  # S8 = EleBits8 | TypeInt
-            torch.uint8: 520,  # U8 = EleBits8 | TypeInt | SubType1
-            torch.int32: 256,  # S32 = EleBits32 | TypeInt
-            torch.uint32: 512,  # U32 = EleBits32 | TypeInt | SubType1 
-            "S1_CLIP": 1,    # S1_CLIP = EleBits1 | TypeInt
-            "S2_CLIP": 2,    # S2_CLIP = EleBits2 | TypeInt
-            "S3_CLIP": 3,    # S3_CLIP = EleBits3 | TypeInt
-            "S4_CLIP": 4,    # S4_CLIP = EleBits4 | TypeInt
-            "S5_CLIP": 5,    # S5_CLIP = EleBits5 | TypeInt
-            "S6_CLIP": 6,    # S6_CLIP = EleBits6 | TypeInt
-            "S7_CLIP": 7,    # S7_CLIP = EleBits7 | TypeInt
-            "F4_E2M1": 4,    # F4_E2M1 = EleBits4 | TypeFloat
-            "F4_BNB": 260,   # F4_BNB = EleBits4 | TypeFloat | SubType1
-            "F4_NF4": 516,   # F4_NF4 = EleBits4 | TypeFloat | SubType2
-            "DQ8_BNB": 1032  # DQ8_BNB = EleBits8 | TypeFloat | SubType4
-        }
+ 
+    def _process_fp8_weights(self): 
+        w13_weight = self.w13_weight
+        w2_weight = self.w2_weight
+        w13_weight_scale_inv = self.w13_weight_scale_inv
+        w2_weight_scale_inv = self.w2_weight_scale_inv
          
-        if isinstance(torch_dtype, str):
-            return dtype_map.get(torch_dtype, 32)   
+        if not w13_weight.device.type == 'cpu' or not w2_weight.device.type == 'cpu' or not w13_weight_scale_inv.device.type == 'cpu' or not w2_weight_scale_inv.device.type == 'cpu':
+            logger.error("Weights are still on GPU, can't use lk moe ...")
+            return
+               
+        hidden_ggml_type = self.get_ggml_type_from_dtype(self.moe_config.in_dtype)
+        group_shape = self.quant_method.weight_block_size
+        groupN, groupK = group_shape
+          
         
-        return dtype_map.get(torch_dtype, 32)
+        intermediate_size = w13_weight.shape[1] // 2
+          
+        gate_proj_view = w13_weight.narrow(1, 0, intermediate_size).contiguous()
+        up_proj_view = w13_weight.narrow(1, intermediate_size, intermediate_size).contiguous()
+        down_proj_view = w2_weight.contiguous()
+        
+        gate_ptr = gate_proj_view.data_ptr()
+        up_ptr = up_proj_view.data_ptr()
+        down_ptr = down_proj_view.data_ptr()
+        
+        scale_intermediate_size = w13_weight_scale_inv.shape[1] // 2
+        gate_scale_view = w13_weight_scale_inv.narrow(1, 0, scale_intermediate_size).contiguous()
+        up_scale_view = w13_weight_scale_inv.narrow(1, scale_intermediate_size, scale_intermediate_size).contiguous()
+        down_scale_view = w2_weight_scale_inv.contiguous()
+        
+        gate_scale_ptr = gate_scale_view.data_ptr()
+        up_scale_ptr = up_scale_view.data_ptr()
+        down_scale_ptr = down_scale_view.data_ptr()
+        
+        moe_config = lk_moe.MOEFP8Config(
+            self.local_num_experts,        # expert_num
+            self.top_k,                    # routed_expert_num
+            self.hidden_size,              # hidden_size
+            intermediate_size,             # intermediate_size
+            32,                            # stride
+            10,                            # group_min_len
+            1024,                          # group_max_len
+            gate_ptr,                     # gate_proj
+            up_ptr,                       # up_proj
+            down_ptr,                     # down_proj
+            hidden_ggml_type,              # hidden_type 
+            gate_scale_ptr,               # gate_scale
+            up_scale_ptr,                 # up_scale
+            down_scale_ptr,               # down_scale
+            groupN,                        # groupN
+            groupK,                        # groupK
+        )
+         
+        self.lk_moe_config = moe_config 
+        self.lk_moe = lk_moe.MOEFP8(moe_config) 
+        
+        
+        
+        del gate_scale_view, up_scale_view, down_scale_view
+        del gate_proj_view, up_proj_view, down_proj_view
+        del w13_weight, w2_weight
+        del w13_weight_scale_inv, w2_weight_scale_inv
+        del self.w13_weight_scale_inv, self.w2_weight_scale_inv
+        del self.w13_weight, self.w2_weight
+ 
+        import gc
+        gc.collect()  
    
     def _process_block_weights(self): 
         w13_weight = self.w13_weight
@@ -3235,42 +3263,6 @@ class FusedMoE(CustomOp):
                 torch.zeros((1), device="cpu", dtype=torch.int32, pin_memory=True)
                 for _ in range(len(FusedMoE.cuda_graphs))
             ]
-            
-    def _initialize_device_buffers(self, device_id: int): 
-        from vllm.compilation.monitor import cudagraph_capturing_enabled 
-        if cudagraph_capturing_enabled:
-            import logging
-            logging.warning(f"CUDA graph capturing is enabled during buffer initialization for device {device_id}")
-        
-        num_experts_per_tok = self.top_k
-        hidden_size = self.hidden_size
-        buff_dtype = self.moe_config.in_dtype
-         
-        FusedMoE.output_gpu[device_id] = [
-            torch.zeros((batch_size, hidden_size), device=device_id, dtype=buff_dtype)
-            for batch_size in FusedMoE.cuda_graphs
-        ]
-        
-        FusedMoE.input_tensor_cpu[device_id] = [
-            torch.zeros((batch_size, self.hidden_size), device="cpu", dtype=buff_dtype, pin_memory=True)
-            for batch_size in FusedMoE.cuda_graphs
-        ]
-        FusedMoE.expert_ids_cpu[device_id] = [
-            torch.zeros((batch_size, num_experts_per_tok), device="cpu", dtype=torch.long, pin_memory=True)
-            for batch_size in FusedMoE.cuda_graphs
-        ]
-        FusedMoE.weights_cpu[device_id] = [
-            torch.zeros((batch_size, num_experts_per_tok), device="cpu", dtype=torch.float32, pin_memory=True)
-            for batch_size in FusedMoE.cuda_graphs
-        ]
-        FusedMoE.output_cpu[device_id] = [
-            torch.zeros((batch_size, hidden_size), device="cpu", pin_memory=True, dtype=buff_dtype)
-            for batch_size in FusedMoE.cuda_graphs
-        ]
-        FusedMoE.bsz_tensor_cpu[device_id] = [
-            torch.zeros((1), device="cpu", dtype=torch.int32, pin_memory=True)
-            for _ in range(len(FusedMoE.cuda_graphs))
-        ]
          
     def _find_best_graph_index(self, total_tokens: int) -> int:
         if not hasattr(FusedMoE, 'cuda_graphs') or not FusedMoE.cuda_graphs:
@@ -3355,9 +3347,7 @@ class FusedMoE(CustomOp):
         try:      
             graph_index = self._find_best_graph_index(batch_size)
             
-            current_device = torch.cuda.current_device() 
-            if current_device not in FusedMoE.input_tensor_cpu: 
-                self._initialize_device_buffers(current_device)
+            current_device = torch.cuda.current_device()  
             
             input_tensor_cpu = FusedMoE.input_tensor_cpu[current_device]
             expert_ids_cpu = FusedMoE.expert_ids_cpu[current_device]
