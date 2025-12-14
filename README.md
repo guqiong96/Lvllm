@@ -6,6 +6,8 @@ LvLLM is a special extension of vllm that makes full use of CPU and memory resou
 ## 2025-12-14: Added inference support for the AWQ-4bit quantized model (symmetric quantization - avx2 version), cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit and cpatonn/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit has passed verification
 
 torch version updated to 2.9.1(do not use torch 2.9.0)
+Qwen3-Next-80B-A3B-Instruct-AWQ-4bit currently only works properly with tensor-parallel-size: 2
+pip Using a mirror repository with pip requires waiting for synchronization lk_moe==1.1.2 ERROR: Could not find a version that satisfies the requirement lk_moe==1.1.2 (from versions: 1.1.0, 1.1.1)
 
 ## 2025-12-9: Added the LVLLM_MOE_USE_WEIGHT environment variable to support MOE modules using two modes to infer fp8 models
 

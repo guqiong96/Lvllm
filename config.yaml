@@ -1,7 +1,7 @@
 model: "/home/guqiong/Models/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit"
 host: "0.0.0.0"
 port: 8070
-tensor-parallel-size: 1
+tensor-parallel-size: 2
 #pipeline-parallel-size: 2
 max-model-len: 22000 
 gpu-memory-utilization: 0.80
