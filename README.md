@@ -2,9 +2,20 @@
 # LvLLM GPU and NUMA Dual Parallelism
 
 LvLLM is a special extension of vllm that makes full use of CPU and memory resources, reduces GPU memory requirements, and features an efficient GPU parallel and NUMA parallel architecture, supporting hybrid inference for MOE large models.
+ 
+## 2025-12-14: Added inference support for the AWQ-4bit quantized model (symmetric quantization - avx2 version), cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit and cpatonn/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit has passed verification
 
+torch version updated to 2.9.1(do not use torch 2.9.0)
 
-# 2025-11-1: Support tensor parallelism and pipeline for multi-card inference   https://b23.tv/xzHieMs
+## 2025-12-9: Added the LVLLM_MOE_USE_WEIGHT environment variable to support MOE modules using two modes to infer fp8 models
+
+LVLLM_MOE_USE_WEIGHT="KEEP": lk_moe inference uses the original weight format fp8_e4m3, reducing memory usage during inference.
+
+LVLLM_MOE_USE_WEIGHT="TO_DTYPE": lk_moe inference uses the configured parameter dtype: float16 or bfloat16, which increases fp8 model inference speed, but will increase memory usage and loading time. TO_DTYPE is the default value.
+
+torch version updated to 2.9.1(do not use torch 2.9.0)
+
+## 2025-11-1: Support tensor parallelism and pipeline for multi-card inference   https://b23.tv/xzHieMs
 ```bash
 LK_THREADS and OMP_NUM_THREADS Configuration Rules:
 1. Single GPU Inference (N): LK_THREADS and OMP_NUM_THREADS should be set to total number of cores minus 4. If hyper-threading is enabled, set it to total number of threads minus 8.
@@ -47,7 +58,7 @@ Setting dtype: "float16" in config.yaml provides a 1.5x prefill speed increase c
 
 
 # Current Limitations:
-1. Only supports dtype: "bfloat16" and "float16" "fp8" [October 19, 2025: FP8 supports GPU NUMA hybrid inference MOE models, October 30, 2025: Only supports GGUF model hybrid inference for Qwen3 series (excluding Qwen3 Next) in single gguf file]
+1. Only supports dtype: "bfloat16" and "float16" "fp8" [2025-12-14: Added inference support for the AWQ-4bit quantized model (symmetric quantization)，October 19, 2025: FP8 supports GPU NUMA hybrid inference MOE models, October 30, 2025: Only supports GGUF model hybrid inference for Qwen3 series (excluding Qwen3 Next) in single gguf file]
 
 2. Only supports compilation_config.cudagraph_mode: "NONE" [No limitation as of October 14, 2025]
 
@@ -58,6 +69,8 @@ Setting dtype: "float16" in config.yaml provides a 1.5x prefill speed increase c
 5. Only supports single-card inference (support for multi-GPU tensor parallelism (TP) and pipeline parallelism (PP) inference will be available from 2025-11-1)
 
 6. **Known Issue**: Using torch2.9.0 will result in garbled output, which is a compatibility issue between torch2.9.0 and vllm
+
+7. **Known Issue**: There seems to be a slight interference with output quality when multiple requests are made concurrently, which currently appears to be unrelated to LK MOE.
 
 ## Installation Steps
 
@@ -134,6 +147,10 @@ LK_THREADS and OMP_NUM_THREADS Configuration Rules:
 1. Single GPU Inference (N): LK_THREADS and OMP_NUM_THREADS should be set to total number of cores minus 4. If hyper-threading is enabled, set it to total number of threads minus 8.
 2. Multi-GPU Inference (N/number of GPUs): For each GPU, set LK_THREADS and OMP_NUM_THREADS to N divided by the number of GPUs.
 
+LVLLM_MOE_USE_WEIGHT="KEEP": lk_moe inference uses the original weight format fp8_e4m3, reducing memory usage during inference.
+
+LVLLM_MOE_USE_WEIGHT="TO_DTYPE": lk_moe inference uses the configured parameter dtype: float16 or bfloat16, which increases fp8 model inference speed, but will increase memory usage and loading time. TO_DTYPE is the default value.
+
 ### Troubleshooting
 Run the following command and submit the error output to GitHub Issues 
 ```bash 
@@ -153,14 +170,15 @@ git reset --hard origin/main
 
 # Install PyTorch 2.9.1 (Optional: Qwen3-VL requires installation of xformers and torchvision)
 pip uninstall torchaudio triton xformers torchvision torch
-pip install torchaudio triton torchvision torch==2.9.1
-pip install xformers
+pip install torchaudio triton torchvision torch==2.9.1 xformers 
 
 # Previous generations before RTX 50 series GPUs needed to install xformers==0.0.33.dev1090 to run Qwen3-VL properly. Now we need to determine if newer versions of xformers have resolved this issue.
 
 python use_existing_torch.py 
 pip install -r requirements/build.txt
 MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
+
+rm -rf ~/.cache/vllm
 ```
 
 ### Configuration Explanation
@@ -198,7 +216,19 @@ You can modify the parameters in the configuration file or adjust the environmen
 
 ​LvLLM是vllm的特别扩展，充分利用cpu和内存资源，降低显卡显存要求，高效的GPU并行+NUMA并行架构，支持混合推理MOE大模型 
 
-# 2025-11-1： 支持张量并行、流水线多卡推理 https://b23.tv/xzHieMs
+## 2025-12-14 增加AWQ-4bit量化模型（对称量化 avx2版本）推理支持 -，验证通过 cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit and cpatonn/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit
+
+torch 版本升级至 2.9.1(不要使用torch 2.9.0)
+
+## 2025-12-9: 增加LVLLM_MOE_USE_WEIGHT环境变量，支持MOE模块使用两种模式推理fp8模型：
+
+LVLLM_MOE_USE_WEIGHT="KEEP": lk_moe推理使用权重原始格式fp8_e4m3, 降低推理内存占用
+
+LVLLM_MOE_USE_WEIGHT="TO_DTYPE": lk_moe推理使用配置参数dtype：float16或bfloat16, 提高fp8模型推理速度， 但会增加内存占用延长加载时间，TO_DTYPE为默认值
+
+torch 版本升级至 2.9.1(不要使用torch 2.9.0)
+
+## 2025-11-1： 支持张量并行、流水线多卡推理 https://b23.tv/xzHieMs
 ```bash
 LK_THREADS、OMP_NUM_THREADS设置规则：
 1、单GPU推理(N)：LK_THREADS、OMP_NUM_THREADS 设置为总的核心数量-4 , 开启超线程则设置为总的线程数量-8
@@ -237,7 +267,7 @@ config.yaml里面设置dtype: "float16"相比不设置或设置为dtype: "bfloat
  
 
 # 当前限制：
-1. 仅支下列类型的模型："bfloat16" 和 "float16" [2025年10月19日：FP8支持GPU NUMA混合推理MOE模型，2025年10月30日：仅支持Qwen3系列的GGUF模型混合推理（不包含Qwen3 Next）单个gguf文件]
+1. 仅支下列类型的模型："bfloat16" 和 "float16" [2025-12-14：AWQ-4bit量化模型（对称量化）推理支持，2025年10月19日：FP8支持GPU NUMA混合推理MOE模型，2025年10月30日：仅支持Qwen3系列的GGUF模型混合推理（不包含Qwen3 Next）单个gguf文件]
 
 2、仅支持compilation_config.cudagraph_mode: "NONE" [2025.10.14已没有限制]
 
@@ -248,6 +278,8 @@ config.yaml里面设置dtype: "float16"相比不设置或设置为dtype: "bfloat
 5、仅支持单卡推理(2025-11-1支持多GPU张量并行(TP)、流水线并行(PP)推理)
 
 6. **已知问题**：使用torch2.9.0会导致输出乱码，这是torch2.9.0和vllm的兼容性问题
+
+7. **已知问题**：多个请求并发时似乎会轻微干扰输出质量，目前看与LK MOE无关
 
 ## 安装步骤
 
@@ -293,10 +325,9 @@ git clone https://github.com/guqiong96/Lvllm.git
 
 # 安装PyTorch 2.9.1 （可选 Qwen3-VL 需要安装 xformers、torchvision）
 pip uninstall torchaudio triton xformers torchvision torch
-pip install torchaudio triton torchvision torch==2.9.1
-pip install xformers
-
-# 50 系列 GPU 之前需要安装 xformers==0.0.33.dev1090 才能正常运行Qwen3-VL，现在需要确定xformers新版本是否解决了问题
+pip install torchaudio triton torchvision torch==2.9.1 xformers
+ 
+# 50 系列 GPU 之前需要安装 xformers==0.0.33.dev1090 以后版本才能正常运行Qwen3-VL，现在需要确定xformers新版本是否解决了问题
  
  
 
@@ -321,11 +352,15 @@ CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" 性能选项
 
 使用以下命令启动Lvllm服务: 
 ```bash 
-LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS="88" OMP_NUM_THREADS="88" vllm serve --config ~/Downloads/Lvllm/config.yaml
+LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS="88" OMP_NUM_THREADS="88" LVLLM_MOE_USE_WEIGHT="TO_DTYPE" vllm serve --config ~/Downloads/Lvllm/config.yaml
 ```
 VLLM_ATTENTION_BACKEND="FLASHINFER": 这个环境变量已不是最优选项[2025-10-21]
 1、单GPU推理(N)：LK_THREADS、OMP_NUM_THREADS 设置为总的核心数量-4 , 开启超线程则设置为总的线程数量-8
 2、多GPU推理(N/GPU数量)：每个GPU的LK_THREADS、OMP_NUM_THREADS 设置为N/(GPU数量)
+
+LVLLM_MOE_USE_WEIGHT="KEEP": lk_moe推理使用权重原始格式，例如fp8_e4m3, 降低推理内存占用
+
+LVLLM_MOE_USE_WEIGHT="TO_DTYPE": lk_moe推理使用配置文件格式float16或bfloat16, 提高fp8模型推理速度， 但会增加内存占用延长加载时间，默认TO_DTYPE
  
 
 ### 错误排查
@@ -345,16 +380,17 @@ git pull --force
 git fetch origin
 git reset --hard origin/main
 
-# 安装PyTorch 2.9.0 （可选 Qwen3-VL 需要安装 xformers、torchvision）
+# 安装PyTorch 2.9.1 （可选 Qwen3-VL 需要安装 xformers、torchvision）
 pip uninstall torchaudio triton xformers torchvision torch
-pip install torchaudio triton torchvision torch==2.9.1
-pip install xformers
+pip install torchaudio triton torchvision torch==2.9.1 xformers 
 
 # 50 系列 GPU 之前需要安装 xformers==0.0.33.dev1090 才能正常运行Qwen3-VL，现在需要确定xformers新版本是否解决了问题
  
 python use_existing_torch.py 
 pip install -r requirements/build.txt
 MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
+
+rm -rf ~/.cache/vllm
 ```
 
 ### 配置说明

@@ -111,7 +111,7 @@ import ctypes
 import numpy as np
 
 import vllm
-from vllm.envs import is_lk_moe_numa_enabled
+from vllm.envs import is_lk_moe_numa_enabled, is_lk_moe_use_weight_keep
 if is_lk_moe_numa_enabled():
     import  lk_moe
     GGML_TYPE_TO_TORCH_DTYPE = {
@@ -136,7 +136,8 @@ if is_lk_moe_numa_enabled():
             return True 
         if ggml_type in SUPPORTED_GGML_QUANT_TYPES:
             return True
-        return False
+        return False  
+    
 else:
     logger.error("Failed to import lk_moe module or LVLLM_MOE_NUMA_ENABLED is not set to 1, lk::MOE implementation will not be available")
 
@@ -2621,32 +2622,41 @@ class FusedMoE(CustomOp):
             return
         try:  
             find_weight = False 
+            from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsWNA16MarlinMoEMethod
+            from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsWNA16MoEMethod 
+            from vllm.model_executor.layers.quantization.awq_marlin import AWQMoEMethod
             from compressed_tensors.quantization import QuantizationStrategy
             if hasattr(self, 'quant_method') and hasattr(self.quant_method, 'block_quant') :
                 block_quant = self.quant_method.block_quant
             else:
                 block_quant = False 
-            from vllm.model_executor.layers.quantization.awq_marlin import AWQMoEMethod
-            if isinstance(self.quant_method, AWQMoEMethod) and self.quant_config.weight_bits == 4:
+            
+            if (isinstance(self.quant_method, CompressedTensorsWNA16MarlinMoEMethod) or isinstance(self.quant_method, CompressedTensorsWNA16MoEMethod)) \
+                and hasattr(self.quant_method, 'strategy'):
+                self._process_compressed_tensors_weights(self.quant_method.strategy)
+                find_weight = True 
+            if isinstance(self.quant_method, AWQMoEMethod):
                 self._process_awq_weights()
                 find_weight = True 
             from vllm.model_executor.layers.quantization.gguf import GGUFMoEMethod
             if isinstance(self.quant_method, GGUFMoEMethod): 
                 self._process_gguf_weights()
                 find_weight = True
-            elif hasattr(self, 'w13_weight_scale_inv') and block_quant:
-                # self._process_block_weights()
-                self._process_fp8_weights()
+            elif hasattr(self, 'w13_weight_scale_inv') or hasattr(self, 'w13_weight_scale'):
+                if is_lk_moe_use_weight_keep():
+                    self._process_fp8_weights(block_quant)
+                else:
+                    if block_quant: 
+                        self._process_block_weights()
+                    else: 
+                        self._process_channel_weights() 
                 find_weight = True
-            elif hasattr(self, 'w13_weight_scale'):
-                self._process_channel_weights()
-                find_weight = True 
             elif hasattr(self, 'w13_weight'): 
                 self._process_regular_weights()
                 find_weight = True
              
             if not find_weight: 
-                logger.error("weight not found in layer")
+                logger.error("weight not found in layer, quant_method: %s", self.quant_method)
                 return
             
             self._initialize_cuda_graph_buffers()
@@ -2679,64 +2689,50 @@ class FusedMoE(CustomOp):
         gate_ggml_type = self._get_ggml_type_from_quant_config(self.quant_config, layer_idx, 'gate')
         up_ggml_type = self._get_ggml_type_from_quant_config(self.quant_config, layer_idx, 'up')
         down_ggml_type = self._get_ggml_type_from_quant_config(self.quant_config, layer_idx, 'down')
+        
+        assert gate_ggml_type == up_ggml_type, f"Gate and Up weights must have the same GGML type, got {gate_ggml_type} and {up_ggml_type}"
   
-        if not is_ggml_type_supported(gate_ggml_type) or not is_ggml_type_supported(up_ggml_type) or not is_ggml_type_supported(down_ggml_type):  
+        if not is_ggml_type_supported(gate_ggml_type) or not is_ggml_type_supported(up_ggml_type) or not is_ggml_type_supported(down_ggml_type) \
+            or gate_ggml_type != up_ggml_type:  
             raise ValueError(f"GGML type {gate_ggml_type} or {up_ggml_type} or {down_ggml_type} is not supported for layer {layer_idx}")
              
         hidden_ggml_type = self.get_ggml_type_from_dtype(self.moe_config.in_dtype)
-          
+        w13_ggml_type = gate_ggml_type
+        w2_ggml_type = down_ggml_type
         
         num_experts, total_intermediate_size, hidden_size = self.w13_qweight.shape
         intermediate_size = total_intermediate_size // 2
-          
-        gate_proj_view = self.w13_qweight.narrow(1, 0, intermediate_size).contiguous()
-        up_proj_view = self.w13_qweight.narrow(1, intermediate_size, intermediate_size).contiguous()
+        assert intermediate_size == self.intermediate_size_per_partition, f"Intermediate size {intermediate_size} must be equal to intermediate_size_per_partition {self.intermediate_size_per_partition}"
+        assert self.w2_qweight.shape == (num_experts, self.hidden_size, self.w2_qweight.shape[2]), f"Down weight shape {self.w2_qweight.shape} must be (num_experts, hidden_size, w2_qweight.shape[2])"
         
-        up_numpy = up_proj_view.numpy()
-        gate_numpy = gate_proj_view.numpy()
-        down_numpy = self.w2_qweight.contiguous().numpy()
-         
-    
-            
-        gate_ptr = ctypes.addressof(
-            ctypes.cast(gate_numpy.ctypes.data, ctypes.POINTER(ctypes.c_uint8)).contents
-        )
         
-        up_ptr = ctypes.addressof(
-            ctypes.cast(up_numpy.ctypes.data, ctypes.POINTER(ctypes.c_uint8)).contents
-        )
+        w13_ptr = self.w13_qweight.contiguous().data_ptr()
         
-    
-        down_ptr = ctypes.addressof(
-            ctypes.cast(down_numpy.ctypes.data, ctypes.POINTER(ctypes.c_uint8)).contents
-        ) 
-            
+        w2_ptr = self.w2_qweight.contiguous().data_ptr()
+        
         moe_config = lk_moe.MOEConfig(
-            self.local_num_experts,        # expert_num
+            num_experts,        # expert_num
             self.top_k,                    # routed_expert_num
             self.hidden_size,              # hidden_size
             self.intermediate_size_per_partition,             # intermediate_size
             32,                            # stride
             10,                            # group_min_len
             1024,                          # group_max_len
-            gate_ptr,                 # gate_ptr
-            up_ptr,                   # up_ptr
-            down_ptr,                 # down_ptr
-            gate_ggml_type,                # gate_type 
-            up_ggml_type,                  # up_type  
-            down_ggml_type,                # down_type  
-            hidden_ggml_type,              # hidden_type
+            hidden_ggml_type,           
+            w13_ptr,                 # w13_ptr 
+            w2_ptr,                 # w2_ptr
+            w13_ggml_type,                # gate_type  
+            w2_ggml_type,                # down_type   
         )
          
         self.lk_moe_config = moe_config 
-        self.lk_moe = lk_moe.MOE(moe_config)
-        
-        del gate_numpy, up_numpy, down_numpy
-        del gate_proj_view, up_proj_view 
+        self.lk_moe = lk_moe.MOE(moe_config) 
+          
         del self.w13_qweight, self.w2_qweight
-        
+ 
         import gc
-        gc.collect()
+        gc.collect() 
+        
     
     def _block_scale_broadcast_fixed(self, scale, target_shape, group_shape): 
         if torch.is_tensor(group_shape): 
@@ -2757,460 +2753,395 @@ class FusedMoE(CustomOp):
         
         return scale_expanded
     
-    def _process_awq_weights(self): 
+    def _process_compressed_tensors_weights(self, strategy: str): 
+        
+        from compressed_tensors.quantization import QuantizationStrategy
+        w13_weight = self.w13_weight_packed
+        w13_scale = self.w13_weight_scale
+        w2_weight = self.w2_weight_packed
+        w2_scale = self.w2_weight_scale 
+        if strategy == QuantizationStrategy.GROUP:
+           pass
+            
+        elif strategy == QuantizationStrategy.BLOCK:
+            pass
+        else:
+            raise ValueError("compressed Weights are not supported for lk moe ...")
+        
+        if not w13_weight.device.type == 'cpu' or not w2_weight.device.type == 'cpu':
+            logger.error("Weights are still on GPU, can't use lk moe ...")
+            return 
+        
+        hidden_ggml_type = self.get_ggml_type_from_dtype(self.moe_config.in_dtype)
+        scale_ggml_type = self.get_ggml_type_from_dtype(w13_scale.dtype)
+        
+        group_size = self.quant_method.group_size        # 32
+        num_bits = self.quant_method.num_bits            # 4
+        packed_factor = self.quant_method.packed_factor  # 8 （bit)
+        weight_type = 100 # WEIGHT_TYPE_INT4
+ 
+        weights_per_container = packed_factor // num_bits  # 2
+ 
+        num_experts, total_intermediate_size, compressed_hidden_dim = w13_weight.shape
+ 
+        intermediate_size = total_intermediate_size // 2
+        hidden_size = compressed_hidden_dim * weights_per_container 
+ 
+        expected_w2_shape = (
+            num_experts,
+            hidden_size,
+            intermediate_size // weights_per_container
+        )
+
+        assert w2_weight.shape == expected_w2_shape, \
+            f"w2_weight {w2_weight.shape} != {expected_w2_shape}"
+ 
+        expected_w13_scale_shape = (
+            num_experts,
+            total_intermediate_size,
+            hidden_size // group_size
+        )
+
+        expected_w2_scale_shape = (
+            num_experts,
+            hidden_size,
+            intermediate_size // group_size
+        )
+
+        assert w13_scale.shape == expected_w13_scale_shape, \
+            f"w13_scale {w13_scale.shape} != {expected_w13_scale_shape}"
+        assert w2_scale.shape == expected_w2_scale_shape, \
+            f"w2_scale {w2_scale.shape} != {expected_w2_scale_shape}"
+        
+        w13_weight_ptr = w13_weight.contiguous().data_ptr()
+        w2_weight_ptr = w2_weight.contiguous().data_ptr()
+        w13_weight_scale_ptr = w13_scale.contiguous().data_ptr()
+        w2_weight_scale_ptr = w2_scale.contiguous().data_ptr()
+        
+        moe_config = lk_moe.MOE_WNA16Config(
+            self.local_num_experts,        # expert_num
+            self.top_k,                    # routed_expert_num
+            hidden_size,                   # hidden_size
+            intermediate_size,             # intermediate_size
+            32,                            # stride
+            10,                            # group_min_len
+            1024,                          # group_max_len
+            hidden_ggml_type,              # hidden_type 
+            w13_weight_ptr,                     # w13_weight_ptr 
+            w2_weight_ptr,                       # w2_weight_ptr  
+            weight_type,
+            w13_weight_scale_ptr,               # w13_weight_scale_ptr
+            w2_weight_scale_ptr,                 # w2_weight_scale_ptr
+            scale_ggml_type,
+            1,
+            group_size, 
+            packed_factor,                        # packed_factor
+            num_bits,                        # num_bits
+            group_size,                        # group_size
+        )
+         
+        self.lk_moe_config = moe_config 
+        self.lk_moe = lk_moe.MOE_WNA16(moe_config) 
+          
+        del w13_weight, w2_weight, w13_scale, w2_scale
+        del self.w13_weight_packed, self.w2_weight_packed , self.w13_weight_scale, self.w2_weight_scale
+ 
+        import gc
+        gc.collect()  
+        
+    
+    
+    def _process_awq_weights(self, strategy: str): 
+        
         w13_qweight = self.w13_qweight
         w2_qweight = self.w2_qweight
         w13_scales = self.w13_scales
         w2_scales = self.w2_scales
         w13_qzeros = self.w13_qzeros
         w2_qzeros = self.w2_qzeros
+        ValueError("AWQ Weights are not supported for lk moe ...") 
          
-        if not w13_qweight.device.type == 'cpu' or not w2_qweight.device.type == 'cpu':
-            logger.error("AWQ Weights are still on GPU, can't use lk moe ...")
-            return
-               
-        gate_ggml_type = 1
-        up_ggml_type = 1
-        down_ggml_type = 1
-        hidden_ggml_type = self.get_ggml_type_from_dtype(self.moe_config.in_dtype)
-        
-        num_experts = self.local_num_experts
-        hidden_size = self.hidden_size
-        intermediate_size = self.intermediate_size_per_partition 
-        
-        from vllm import _custom_ops as ops
-        w13_dequant = ops.awq_dequantize(w13_qweight.cuda(), w13_scales.cuda(), w13_qzeros.cuda(), 0, 0, 0)
-        del w13_qweight, w13_scales, w13_qzeros 
-        del self.w13_qweight, self.w13_scales, self.w13_qzeros
-        
-        w2_dequant = ops.awq_dequantize(w2_qweight.cuda(), w2_scales.cuda(), w2_qzeros.cuda(), 0, 0, 0)
-        del w2_qweight, w2_scales, w2_qzeros
-        del self.w2_qweight, self.w2_scales, self.w2_qzeros
-    
-        
-          
-        gate_proj_view = w13_dequant.narrow(1, 0, intermediate_size).contiguous()
-        up_proj_view = w2_dequant.narrow(1, intermediate_size, intermediate_size).contiguous()
-        
-        up_numpy = up_proj_view.numpy()
-        gate_numpy = gate_proj_view.numpy()
-        down_numpy = w2_dequant.numpy() 
-            
-        gate_ptr = ctypes.addressof(
-            ctypes.cast(gate_numpy.ctypes.data, ctypes.POINTER(ctypes.c_uint8)).contents
-        )
-        
-        up_ptr = ctypes.addressof(
-            ctypes.cast(up_numpy.ctypes.data, ctypes.POINTER(ctypes.c_uint8)).contents
-        )
-        
-    
-        down_ptr = ctypes.addressof(
-            ctypes.cast(down_numpy.ctypes.data, ctypes.POINTER(ctypes.c_uint8)).contents
-        ) 
-        
-        moe_config = lk_moe.MOEConfig(
-            self.local_num_experts,        # expert_num
-            self.top_k,                    # routed_expert_num
-            self.hidden_size,              # hidden_size
-            intermediate_size,             # intermediate_size
-            32,                            # stride
-            10,                            # group_min_len
-            1024,                          # group_max_len
-            gate_ptr,                 # gate_proj
-            up_ptr,                   # up_proj
-            down_ptr,                 # down_proj
-            gate_ggml_type,                # gate_type 
-            up_ggml_type,                  # up_type  
-            down_ggml_type,                # down_type  
-            hidden_ggml_type,              # hidden_type 
-        )
-         
-        self.lk_moe_config = moe_config 
-        self.lk_moe = lk_moe.MOE(moe_config)
-           
-        del gate_numpy, up_numpy, down_numpy
-        del gate_proj_view, up_proj_view 
-        del w13_dequant, w2_dequant
-        import gc
-        gc.collect()
  
-    def _process_fp8_weights(self): 
-        w13_weight = self.w13_weight
-        w2_weight = self.w2_weight
-        w13_weight_scale_inv = self.w13_weight_scale_inv
-        w2_weight_scale_inv = self.w2_weight_scale_inv
-         
-        if not w13_weight.device.type == 'cpu' or not w2_weight.device.type == 'cpu' or not w13_weight_scale_inv.device.type == 'cpu' or not w2_weight_scale_inv.device.type == 'cpu':
+    def _process_fp8_weights(self, block_quant: bool):   
+        if not self.w13_weight.device.type == 'cpu' or not self.w2_weight.device.type == 'cpu':
             logger.error("Weights are still on GPU, can't use lk moe ...")
             return
-               
+        if not self.w13_weight.dtype == torch.float8_e4m3fn or not self.w2_weight.dtype == torch.float8_e4m3fn:
+            raise ValueError("FP8 Weights are not supported for lk moe ...")
+
         hidden_ggml_type = self.get_ggml_type_from_dtype(self.moe_config.in_dtype)
-        group_shape = self.quant_method.weight_block_size
-        groupN, groupK = group_shape
-          
+        num_experts, total_intermediate_size, hidden_size = self.w13_weight.shape
+        intermediate_size = total_intermediate_size // 2 
+        assert self.w2_weight.shape == (num_experts, hidden_size, intermediate_size), f"Down weight shape {self.w2_weight.shape} must be (num_experts, hidden_size, intermediate_size)"
         
-        intermediate_size = w13_weight.shape[1] // 2
-          
-        gate_proj_view = w13_weight.narrow(1, 0, intermediate_size).contiguous()
-        up_proj_view = w13_weight.narrow(1, intermediate_size, intermediate_size).contiguous()
-        down_proj_view = w2_weight.contiguous()
+        if block_quant:
+            if not self.w13_weight_scale_inv.dtype == torch.float32 or not self.w2_weight_scale_inv.dtype == torch.float32:
+                raise ValueError("scale type are not supported for lk moe ...")
+            group_shape = self.quant_method.weight_block_size
+            groupN, groupK = group_shape
+            w13_weight_scale = self.w13_weight_scale_inv
+            w2_weight_scale = self.w2_weight_scale_inv
+            scale_num_experts, scale_total_N, scale_K = self.w13_weight_scale_inv.shape
+            scale_N = scale_total_N // 2
+            assert w2_weight_scale.shape == (scale_num_experts, scale_K, scale_N), f"Down weight scale shape {w2_weight_scale.shape} must be (scale_num_experts, scale_K, scale_N)"
+        else:
+            groupN, groupK = 1, -1
+            w13_weight_scale = self.w13_weight_scale
+            w2_weight_scale = self.w2_weight_scale
+            scale_num_experts, scale_total_N, scale_K = self.w13_weight_scale.shape 
+            assert w13_weight_scale.shape == (scale_num_experts, intermediate_size * 2 , 1), f"Up weight scale shape {w13_weight_scale.shape} must be (scale_num_experts, intermediate_size * 2 , 1)"
+            assert w2_weight_scale.shape == (scale_num_experts, hidden_size , 1), f"Down weight scale shape {w2_weight_scale.shape} must be (scale_num_experts, hidden_size , 1)"
+         
         
-        gate_ptr = gate_proj_view.data_ptr()
-        up_ptr = up_proj_view.data_ptr()
-        down_ptr = down_proj_view.data_ptr()
+        scale_ggml_type = self.get_ggml_type_from_dtype(w13_weight_scale.dtype)
         
-        scale_intermediate_size = w13_weight_scale_inv.shape[1] // 2
-        gate_scale_view = w13_weight_scale_inv.narrow(1, 0, scale_intermediate_size).contiguous()
-        up_scale_view = w13_weight_scale_inv.narrow(1, scale_intermediate_size, scale_intermediate_size).contiguous()
-        down_scale_view = w2_weight_scale_inv.contiguous()
+        weight_type = 102 # WEIGHT_TYPE_FP8_E4M3
         
-        gate_scale_ptr = gate_scale_view.data_ptr()
-        up_scale_ptr = up_scale_view.data_ptr()
-        down_scale_ptr = down_scale_view.data_ptr()
+        w13_weight_ptr = self.w13_weight.contiguous().data_ptr()
+        w2_weight_ptr = self.w2_weight.contiguous().data_ptr()
+        w13_weight_scale_ptr = w13_weight_scale.contiguous().data_ptr()
+        w2_weight_scale_ptr = w2_weight_scale.contiguous().data_ptr()
         
-        moe_config = lk_moe.MOEFP8Config(
+        moe_config = lk_moe.MOE_FP8Config(
             self.local_num_experts,        # expert_num
             self.top_k,                    # routed_expert_num
-            self.hidden_size,              # hidden_size
+            hidden_size,                   # hidden_size
             intermediate_size,             # intermediate_size
             32,                            # stride
             10,                            # group_min_len
             1024,                          # group_max_len
-            gate_ptr,                     # gate_proj
-            up_ptr,                       # up_proj
-            down_ptr,                     # down_proj
             hidden_ggml_type,              # hidden_type 
-            gate_scale_ptr,               # gate_scale
-            up_scale_ptr,                 # up_scale
-            down_scale_ptr,               # down_scale
+            w13_weight_ptr,                     # w13_weight_ptr 
+            w2_weight_ptr,                       # w2_weight_ptr  
+            weight_type,
+            w13_weight_scale_ptr,               # w13_weight_scale_ptr
+            w2_weight_scale_ptr,                 # w2_weight_scale_ptr 
+            scale_ggml_type,
             groupN,                        # groupN
             groupK,                        # groupK
         )
          
         self.lk_moe_config = moe_config 
-        self.lk_moe = lk_moe.MOEFP8(moe_config) 
-        
-        
-        
-        del gate_scale_view, up_scale_view, down_scale_view
-        del gate_proj_view, up_proj_view, down_proj_view
-        del w13_weight, w2_weight
-        del w13_weight_scale_inv, w2_weight_scale_inv
-        del self.w13_weight_scale_inv, self.w2_weight_scale_inv
+        self.lk_moe = lk_moe.MOE_FP8(moe_config) 
+         
+        del w13_weight_scale, w2_weight_scale
+        if block_quant:
+            del self.w13_weight_scale_inv, self.w2_weight_scale_inv
+        else:
+            del self.w13_weight_scale, self.w2_weight_scale
         del self.w13_weight, self.w2_weight
  
         import gc
         gc.collect()  
    
-    def _process_block_weights(self): 
-        w13_weight = self.w13_weight
-        w2_weight = self.w2_weight
-        w13_weight_scale_inv = self.w13_weight_scale_inv
-        w2_weight_scale_inv = self.w2_weight_scale_inv
+    def _process_block_weights(self):  
          
-        if not w13_weight.device.type == 'cpu' or not w2_weight.device.type == 'cpu':
+        if not self.w13_weight.device.type == 'cpu' or not self.w2_weight.device.type == 'cpu':
             logger.error("Weights are still on GPU, can't use lk moe ...")
-            return
-               
-        gate_ggml_type = 1
-        up_ggml_type = 1
-        down_ggml_type = 1
+            return 
+        
         hidden_ggml_type = self.get_ggml_type_from_dtype(self.moe_config.in_dtype)
-          
+        w13_ggml_type = hidden_ggml_type
+        w2_ggml_type = hidden_ggml_type 
             
-        gate_projs = []
-        up_projs = []
-        down_projs = []
+        w13_projs = []
+        w2_projs = [] 
         
         group_shape = self.quant_method.weight_block_size
 
              
-        num_experts = w13_weight.shape[0]  
-        intermediate_size = w13_weight.shape[1] // 2 # torch.Size([512, 1024, 2048])
-        hidden_size = w13_weight.shape[2]
+        num_experts, total_intermediate_size, hidden_size = self.w13_weight.shape
+        intermediate_size = total_intermediate_size // 2 
+        assert self.w2_weight.shape == (num_experts, hidden_size, intermediate_size), f"Down weight shape {self.w2_weight.shape} must be (num_experts, hidden_size, intermediate_size)"
+        
+        scale_num_experts, scale_total_intermediate_size, scale_hidden_size = self.w13_weight_scale_inv.shape
+        scale_intermediate_size = scale_total_intermediate_size // 2
+        
+        assert self.w2_weight_scale_inv.shape == (scale_num_experts, scale_hidden_size, scale_intermediate_size), f"Down weight scale shape {self.w2_weight_scale_inv.shape} must be (scale_num_experts, scale_hidden_size, scale_intermediate_size)"
+        
         dequant_device = 'cpu'
-        gate_buf = torch.empty(intermediate_size, hidden_size, dtype=torch.float32, device=dequant_device)
-        up_buf = torch.empty(intermediate_size, hidden_size, dtype=torch.float32, device=dequant_device)
-        down_buf = torch.empty(hidden_size, intermediate_size, dtype=torch.float32, device=dequant_device)
+        w13_buf = torch.zeros(intermediate_size, hidden_size, dtype=torch.float32, device=dequant_device, requires_grad=False) 
+        w2_buf = torch.zeros(hidden_size, intermediate_size, dtype=torch.float32, device=dequant_device, requires_grad=False)
         
         for expert_idx in range(num_experts): 
-            expert_w13_weight = w13_weight[expert_idx].to(dequant_device)  # torch.Size([1024, 2048])
-            expert_w13_scale_inv = w13_weight_scale_inv[expert_idx].to(dequant_device)  # torch.Size([8, 16]) 
-            expert_w2_weight = w2_weight[expert_idx].to(dequant_device)   # torch.Size([2048, 512])
-            expert_w2_scale_inv = w2_weight_scale_inv[expert_idx].to(dequant_device) #  torch.Size([16, 4]) 
-            
-            gate_size = expert_w13_weight.shape[0] // 2 
-            expert_gate_weight = expert_w13_weight[:gate_size, :]   
-            expert_up_weight = expert_w13_weight[gate_size:, :]   
-            
-            gate_scale_inv_size = expert_w13_scale_inv.shape[0] // 2     
-            expert_gate_scale_inv = expert_w13_scale_inv[:gate_scale_inv_size, :]  # torch.Size([4, 16])
-            expert_up_scale_inv = expert_w13_scale_inv[gate_scale_inv_size:, :]    # torch.Size([4, 16])
-                
-            expert_down_weight = expert_w2_weight  
-            expert_down_scale_inv = expert_w2_scale_inv   
+            expert_w13_weight = self.w13_weight[expert_idx].to(dequant_device)  # torch.Size([1024, 2048])
+            expert_w13_scale_inv = self.w13_weight_scale_inv[expert_idx].to(dequant_device)  # torch.Size([8, 16]) 
+            expert_w2_weight = self.w2_weight[expert_idx].to(dequant_device)   # torch.Size([2048, 512])
+            expert_w2_scale_inv = self.w2_weight_scale_inv[expert_idx].to(dequant_device) #  torch.Size([16, 4])  
                 
                 
-            gate_float = expert_gate_weight.to(dtype=torch.float32)
-            up_float = expert_up_weight.to(dtype=torch.float32)
-            down_float = expert_down_weight.to(dtype=torch.float32)
-                 
+            w13_float = expert_w13_weight.to(dtype=torch.float32)
+            w2_float = expert_w2_weight.to(dtype=torch.float32) 
              
-            gate_scale_inv_expanded = self._block_scale_broadcast_fixed(
-                expert_gate_scale_inv, gate_float.shape, group_shape)
-            gate_buf = gate_float * gate_scale_inv_expanded
+            w13_scale_inv_expanded = self._block_scale_broadcast_fixed(
+                expert_w13_scale_inv, w13_float.shape, group_shape)
+            w13_buf = w13_float * w13_scale_inv_expanded
+              
              
-            up_scale_inv_expanded = self._block_scale_broadcast_fixed(
-                expert_up_scale_inv, up_float.shape, group_shape)
-            up_buf = up_float * up_scale_inv_expanded
-             
-            down_scale_inv_expanded = self._block_scale_broadcast_fixed(
-                expert_down_scale_inv, down_float.shape, group_shape)
-            down_buf = down_float * down_scale_inv_expanded
+            w2_scale_inv_expanded = self._block_scale_broadcast_fixed(
+                expert_w2_scale_inv, w2_float.shape, group_shape)
+            w2_buf = w2_float * w2_scale_inv_expanded
             
-            gate_projs.append(gate_buf)
-            up_projs.append(up_buf)
-            down_projs.append(down_buf)
+            w13_projs.append(w13_buf.to(dtype=self.moe_config.in_dtype)) 
+            w2_projs.append(w2_buf.to(dtype=self.moe_config.in_dtype))
             
             del expert_w13_weight, expert_w13_scale_inv, expert_w2_weight, expert_w2_scale_inv
-            del expert_gate_weight, expert_up_weight, expert_down_weight
-            del expert_gate_scale_inv, expert_up_scale_inv, expert_down_scale_inv
-            del gate_scale_inv_expanded, up_scale_inv_expanded, down_scale_inv_expanded
-            del gate_float, up_float, down_float 
-           
-        del gate_buf, up_buf, down_buf     
+            del w13_float, w2_float, w13_scale_inv_expanded, w2_scale_inv_expanded
+            del w13_buf, w2_buf  
+                 
+        w13_tensor = torch.stack(w13_projs, dim=0).to('cpu')
+        w2_tensor = torch.stack(w2_projs, dim=0).to('cpu') 
+        del w13_projs, w2_projs  
         
-        gate_ggml_type = 1
-        up_ggml_type = 1
-        down_ggml_type = 1  
-        
-        up_tensor = torch.stack(up_projs, dim=0).to('cpu')
-        gate_tensor = torch.stack(gate_projs, dim=0).to('cpu')
-        down_tensor = torch.stack(down_projs, dim=0).to('cpu') 
-        del gate_projs, up_projs, down_projs 
-            
-        up_numpy = up_tensor.half().view(torch.uint16).numpy()
-        gate_numpy = gate_tensor.half().view(torch.uint16).numpy()
-        down_numpy = down_tensor.half().view(torch.uint16).numpy()
-        
-        del up_tensor, gate_tensor, down_tensor
-    
-            
-        gate_ptr = ctypes.addressof(
-            ctypes.cast(gate_numpy.ctypes.data, ctypes.POINTER(ctypes.c_uint8)).contents
-        )
-        
-        up_ptr = ctypes.addressof(
-            ctypes.cast(up_numpy.ctypes.data, ctypes.POINTER(ctypes.c_uint8)).contents
-        )
-        
-    
-        down_ptr = ctypes.addressof(
-            ctypes.cast(down_numpy.ctypes.data, ctypes.POINTER(ctypes.c_uint8)).contents
-        ) 
-        
+        w13_ptr = w13_tensor.contiguous().data_ptr()
+        w2_ptr = w2_tensor.contiguous().data_ptr()
+     
         moe_config = lk_moe.MOEConfig(
             self.local_num_experts,        # expert_num
             self.top_k,                    # routed_expert_num
             self.hidden_size,              # hidden_size
-            intermediate_size,             # intermediate_size
+            self.intermediate_size_per_partition,             # intermediate_size
             32,                            # stride
             10,                            # group_min_len
-            1024,                          # group_max_len
-            gate_ptr,                 # gate_proj
-            up_ptr,                   # up_proj
-            down_ptr,                 # down_proj
-            gate_ggml_type,                # gate_type 
-            up_ggml_type,                  # up_type  
-            down_ggml_type,                # down_type  
-            hidden_ggml_type,              # hidden_type 
+            1024,                          # group_max_len 
+            hidden_ggml_type,                # hidden_type 
+            w13_ptr,                 # w13_proj
+            w2_ptr,                   # w2_proj 
+            w13_ggml_type,                  # w13_type  
+            w2_ggml_type,                # w2_type   
         )
          
         self.lk_moe_config = moe_config 
         self.lk_moe = lk_moe.MOE(moe_config)
-        
-        del w13_weight, w2_weight
-        del w13_weight_scale_inv, w2_weight_scale_inv
+         
+        del w13_ptr, w2_ptr 
         del self.w13_weight, self.w2_weight
         del self.w13_weight_scale_inv, self.w2_weight_scale_inv
         
         import gc
         gc.collect()
          
-    def _process_channel_weights(self): 
-        w13_weight = self.w13_weight
-        w2_weight = self.w2_weight
-        w13_weight_scale = self.w13_weight_scale
-        w2_weight_scale = self.w2_weight_scale
+    def _process_channel_weights(self):  
          
-        if not w13_weight.device.type == 'cpu' or not w2_weight.device.type == 'cpu':
+        if not self.w13_weight.device.type == 'cpu' or not self.w2_weight.device.type == 'cpu':
             logger.error("Weights are still on GPU, can't use lk moe ...")
             return
                
-        gate_ggml_type = 1
-        up_ggml_type = 1
-        down_ggml_type = 1
+        
         hidden_ggml_type = self.get_ggml_type_from_dtype(self.moe_config.in_dtype)
-          
-        gate_projs = []
-        up_projs = []
-        down_projs = []
+        w13_ggml_type = hidden_ggml_type
+        w2_ggml_type = hidden_ggml_type
+            
+        w13_projs = []
+        w2_projs = [] 
              
-        num_experts = w13_weight.shape[0]  
-        intermediate_size = w13_weight.shape[1] // 2
-        hidden_size = w13_weight.shape[2]
+        num_experts, total_intermediate_size, hidden_size = self.w13_weight.shape
+        intermediate_size = total_intermediate_size // 2 
+        assert self.w2_weight.shape == (num_experts, hidden_size, intermediate_size), f"Down weight shape {self.w2_weight.shape} must be (num_experts, hidden_size, intermediate_size)"
+        
+        scale_num_experts, scale_total_intermediate_size, scale_hidden_size = self.w13_weight_scale.shape
+        scale_intermediate_size = scale_total_intermediate_size // 2
+        
+        assert self.w2_weight_scale.shape == (scale_num_experts, scale_hidden_size, scale_intermediate_size), f"Down weight scale shape {self.w2_weight_scale.shape} must be (scale_num_experts, scale_hidden_size, scale_intermediate_size)"
+        
+        
         dequant_device = 'cpu'
-        gate_buf = torch.empty(intermediate_size, hidden_size, dtype=torch.float32, device=dequant_device)
-        up_buf = torch.empty(intermediate_size, hidden_size, dtype=torch.float32, device=dequant_device)
-        down_buf = torch.empty(hidden_size, intermediate_size, dtype=torch.float32, device=dequant_device)
+        
+        w13_buf = torch.zeros(intermediate_size, hidden_size, dtype=torch.float32, device=dequant_device, requires_grad=False) 
+        w2_buf = torch.zeros(hidden_size, intermediate_size, dtype=torch.float32, device=dequant_device, requires_grad=False)
         
         for expert_idx in range(num_experts): 
-            expert_w13_weight = w13_weight[expert_idx].to(dequant_device)  # shape: [1408, 4096]
-            expert_w13_scale = w13_weight_scale[expert_idx].to(dequant_device)    # shape: [1408, 1]
-            expert_w2_weight = w2_weight[expert_idx].to(dequant_device)    # shape: [4096, 1408]
-            expert_w2_scale = w2_weight_scale[expert_idx].to(dequant_device)  # shape: [4096, 1]
+            expert_w13_weight = self.w13_weight[expert_idx].to(dequant_device)  # shape: [1408, 4096]
+            expert_w13_scale = self.w13_weight_scale[expert_idx].to(dequant_device)    # shape: [1408, 1]
+            expert_w2_weight = self.w2_weight[expert_idx].to(dequant_device)    # shape: [4096, 1408]
+            expert_w2_scale = self.w2_weight_scale[expert_idx].to(dequant_device)  # shape: [4096, 1]
             
-            gate_size = expert_w13_weight.shape[0] // 2 
-            expert_gate_weight = expert_w13_weight[:gate_size, :]  # [704, 4096]
-            expert_up_weight = expert_w13_weight[gate_size:, :]    # [704, 4096]
-            
-            gate_scale_size = expert_w13_scale.shape[0] // 2    
-            expert_gate_scale = expert_w13_scale[:gate_scale_size, :]  # [704, 1]
-            expert_up_scale = expert_w13_scale[gate_scale_size:, :]    # [704, 1]
-                
-            expert_down_weight = expert_w2_weight  # [4096, 1408]
-            expert_down_scale = expert_w2_scale  # [4096, 1]
+            w13_float = expert_w13_weight.to(dtype=torch.float32)
+            w2_float = expert_w2_weight.to(dtype=torch.float32) 
              
                 
-            gate_float = expert_gate_weight.to(dtype=torch.float32)
-            up_float = expert_up_weight.to(dtype=torch.float32)
-            down_float = expert_down_weight.to(dtype=torch.float32)
+            w13_scale_expanded = self.w13_weight_scale.expand_as(w13_float)
+            w2_scale_expanded = self.w2_weight_scale.expand_as(w2_float)
                 
-            gate_scale_expanded = expert_gate_scale.expand_as(gate_float)
-            up_scale_expanded = expert_up_scale.expand_as(up_float)
-            down_scale_expanded = expert_down_scale.expand_as(down_float)
-                
-            gate_buf = gate_float * gate_scale_expanded
-            up_buf = up_float * up_scale_expanded
-            down_buf = down_float * down_scale_expanded 
+            w13_buf = w13_float * w13_scale_expanded 
+            w2_buf = w2_float * w2_scale_expanded 
             
-            gate_projs.append(gate_buf)
-            up_projs.append(up_buf)
-            down_projs.append(down_buf)
+            w13_projs.append(w13_buf.to(dtype=self.moe_config.in_dtype)) 
+            w2_projs.append(w2_buf.to(dtype=self.moe_config.in_dtype))
             
-            del expert_w13_weight, expert_w13_scale, expert_w2_weight, expert_w2_scale
-            del expert_gate_weight, expert_up_weight, expert_down_weight
-            del expert_gate_scale, expert_up_scale, expert_down_scale
-            del gate_float, up_float, down_float
-            del gate_scale_expanded, up_scale_expanded, down_scale_expanded
+            del expert_w13_weight, expert_w13_scale, expert_w2_weight, expert_w2_scale 
+            del w13_float, w2_float, w13_scale_expanded, w2_scale_expanded
+            del w13_buf, w2_buf  
             
-        del gate_buf, up_buf, down_buf    
+        w13_tensor = torch.stack(w13_projs, dim=0).to('cpu')
+        w2_tensor = torch.stack(w2_projs, dim=0).to('cpu') 
+        del w13_projs, w2_projs  
         
-        gate_ggml_type = 1
-        up_ggml_type = 1
-        down_ggml_type = 1  
-        
-        up_tensor = torch.stack(up_projs, dim=0).to('cpu')
-        gate_tensor = torch.stack(gate_projs, dim=0).to('cpu')
-        down_tensor = torch.stack(down_projs, dim=0).to('cpu') 
-        del gate_projs, up_projs, down_projs 
-            
-        up_numpy = up_tensor.half().view(torch.uint16).numpy()
-        gate_numpy = gate_tensor.half().view(torch.uint16).numpy()
-        down_numpy = down_tensor.half().view(torch.uint16).numpy()
-        
-        del up_tensor, gate_tensor, down_tensor
-    
-            
-        gate_ptr = ctypes.addressof(
-            ctypes.cast(gate_numpy.ctypes.data, ctypes.POINTER(ctypes.c_uint8)).contents
-        )
-        
-        up_ptr = ctypes.addressof(
-            ctypes.cast(up_numpy.ctypes.data, ctypes.POINTER(ctypes.c_uint8)).contents
-        )
-        
-    
-        down_ptr = ctypes.addressof(
-            ctypes.cast(down_numpy.ctypes.data, ctypes.POINTER(ctypes.c_uint8)).contents
-        ) 
+        w13_ptr = w13_tensor.contiguous().data_ptr()
+        w2_ptr = w2_tensor.contiguous().data_ptr()       
+          
         
         moe_config = lk_moe.MOEConfig(
             self.local_num_experts,        # expert_num
             self.top_k,                    # routed_expert_num
             self.hidden_size,              # hidden_size
-            intermediate_size,             # intermediate_size
+            self.intermediate_size_per_partition,             # intermediate_size
             32,                            # stride
             10,                            # group_min_len
-            1024,                          # group_max_len
-            gate_ptr,                 # gate_proj
-            up_ptr,                   # up_proj
-            down_ptr,                 # down_proj
-            gate_ggml_type,                # gate_type 
-            up_ggml_type,                  # up_type  
-            down_ggml_type,                # down_type  
-            hidden_ggml_type,              # hidden_type 
+            1024,                          # group_max_len 
+            hidden_ggml_type,                # hidden_type 
+            w13_ptr,                 # w13_proj
+            w2_ptr,                   # w2_proj 
+            w13_ggml_type,                  # w13_type  
+            w2_ggml_type,                # w2_type   
         )
          
         self.lk_moe_config = moe_config 
         self.lk_moe = lk_moe.MOE(moe_config)
-          
-        del w13_weight, w2_weight
-        del w13_weight_scale, w2_weight_scale
+        
+        del w13_tensor, w2_tensor
+        del w13_ptr, w2_ptr 
         del self.w13_weight, self.w2_weight
         del self.w13_weight_scale, self.w2_weight_scale
         
         import gc
         gc.collect()
             
-    def _process_regular_weights(self): 
-        w13_weight = self.w13_weight
-        w2_weight = self.w2_weight
-         
-        if not w13_weight.device.type == 'cpu' or not w2_weight.device.type == 'cpu':
+    def _process_regular_weights(self):  
+        if not self.w13_weight.device.type == 'cpu' or not self.w2_weight.device.type == 'cpu':
             logger.error("Weights are still on GPU, can't use lk moe ...")
             return
-              
-        gate_up_dtype = w13_weight.dtype
-        down_dtype = w2_weight.dtype 
-        gate_ggml_type = self.get_ggml_type_from_dtype(gate_up_dtype)
-        up_ggml_type = self.get_ggml_type_from_dtype(gate_up_dtype)
-        down_ggml_type = self.get_ggml_type_from_dtype(down_dtype)
+               
+        w13_ggml_type = self.get_ggml_type_from_dtype(self.w13_weight.dtype)
+        w2_ggml_type = self.get_ggml_type_from_dtype(self.w2_weight.dtype ) 
         hidden_ggml_type = self.get_ggml_type_from_dtype(self.moe_config.in_dtype)
-          
-        
+     
         num_experts, total_intermediate_size, hidden_size = self.w13_weight.shape
         intermediate_size = total_intermediate_size // 2
-          
-        gate_proj_view = self.w13_weight.narrow(1, 0, intermediate_size).contiguous()
-        up_proj_view = self.w13_weight.narrow(1, intermediate_size, intermediate_size).contiguous()
         
-        gate_ptr = gate_proj_view.data_ptr()
-        up_ptr = up_proj_view.data_ptr()
-        down_ptr = self.w2_weight.contiguous().data_ptr()  
+        assert self.w2_weight.shape == (num_experts, hidden_size, intermediate_size), f"Down weight shape {self.w2_weight.shape} must be (num_experts, hidden_size, intermediate_size)"
+        
+        w13_ptr = self.w13_weight.contiguous().data_ptr()
+        w2_ptr = self.w2_weight.contiguous().data_ptr()
         
         moe_config = lk_moe.MOEConfig(
-            self.local_num_experts,        # expert_num
+            num_experts,        # expert_num
             self.top_k,                    # routed_expert_num
-            self.hidden_size,              # hidden_size
+            hidden_size,              # hidden_size
             intermediate_size,             # intermediate_size
             32,                            # stride
             10,                            # group_min_len
             1024,                          # group_max_len
-            gate_ptr,                 # gate_proj
-            up_ptr,                   # up_proj
-            down_ptr,                 # down_proj
-            gate_ggml_type,                # gate_type 
-            up_ggml_type,                  # up_type  
-            down_ggml_type,                # down_type  
-            hidden_ggml_type,              # hidden_type 
+            hidden_ggml_type,           
+            w13_ptr,                 # w13_ptr 
+            w2_ptr,                 # w2_ptr
+            w13_ggml_type,                # gate_type  
+            w2_ggml_type,                # down_type   
         )
          
         self.lk_moe_config = moe_config 
         self.lk_moe = lk_moe.MOE(moe_config) 
-        
-        del gate_proj_view, up_proj_view,  
+         
         del self.w13_weight, self.w2_weight
  
         import gc
@@ -3239,28 +3170,28 @@ class FusedMoE(CustomOp):
             buff_dtype = self.moe_config.in_dtype
              
             FusedMoE.output_gpu[current_device] = [
-                torch.zeros((batch_size, hidden_size), device=current_device, dtype=buff_dtype)
+                torch.zeros((batch_size, hidden_size), device="cuda:" + str(current_device), dtype=buff_dtype)
                 for batch_size in FusedMoE.cuda_graphs
             ]
             
             FusedMoE.input_tensor_cpu[current_device] = [
-                torch.zeros((batch_size, self.hidden_size), device="cpu", dtype=buff_dtype, pin_memory=True)
+                torch.zeros((batch_size, self.hidden_size), device="cpu", dtype=buff_dtype, pin_memory=True, requires_grad=False)
                 for batch_size in FusedMoE.cuda_graphs
             ]
             FusedMoE.expert_ids_cpu[current_device] = [
-                torch.zeros((batch_size, num_experts_per_tok), device="cpu", dtype=torch.long, pin_memory=True)
+                torch.zeros((batch_size, num_experts_per_tok), device="cpu", dtype=torch.long, pin_memory=True, requires_grad=False)
                 for batch_size in FusedMoE.cuda_graphs
             ]
             FusedMoE.weights_cpu[current_device] = [
-                torch.zeros((batch_size, num_experts_per_tok), device="cpu", dtype=torch.float32, pin_memory=True)
+                torch.zeros((batch_size, num_experts_per_tok), device="cpu", dtype=torch.float32, pin_memory=True, requires_grad=False)
                 for batch_size in FusedMoE.cuda_graphs
             ]
             FusedMoE.output_cpu[current_device] = [
-                torch.zeros((batch_size, hidden_size), device="cpu", pin_memory=True, dtype=buff_dtype)
+                torch.zeros((batch_size, hidden_size), device="cpu", pin_memory=True, dtype=buff_dtype, requires_grad=False)
                 for batch_size in FusedMoE.cuda_graphs
             ]
             FusedMoE.bsz_tensor_cpu[current_device] = [
-                torch.zeros((1), device="cpu", dtype=torch.int32, pin_memory=True)
+                torch.zeros((1), device="cpu", dtype=torch.int32, pin_memory=True, requires_grad=False)
                 for _ in range(len(FusedMoE.cuda_graphs))
             ]
          
@@ -3335,10 +3266,10 @@ class FusedMoE(CustomOp):
          
         is_decode_mode = getattr(batch_descriptor, 'uniform_decode', False) 
         
-        if(hasattr(batch_descriptor, 'num_tokens')):
-            batch_size = batch_descriptor.num_tokens
-        else:
-            batch_size = hidden_states.size(0)
+        # if(hasattr(batch_descriptor, 'num_tokens')):
+        #     batch_size = batch_descriptor.num_tokens
+        # else:
+        batch_size = hidden_states.size(0)
         
         stream = current_stream()
         stream_ptr = get_cuda_stream_ptr(stream) 
