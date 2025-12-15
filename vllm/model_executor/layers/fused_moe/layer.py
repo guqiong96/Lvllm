@@ -1860,6 +1860,7 @@ class FusedMoE(CustomOp):
                 except Exception as e:
                     logger.error(f"Error in lk::MOE forward with chunk size {chunk_size}: {e}") 
                     self.use_lk_moe = False
+            else:
                 # Matrix multiply.
                 final_hidden_states = self.quant_method.apply(
                     layer=self,
@@ -2008,6 +2009,7 @@ class FusedMoE(CustomOp):
                 except Exception as e:
                     logger.error(f"Error in lk::MOE forward: {e}") 
                     self.use_lk_moe = False
+            else:
                 # Matrix multiply.
                 final_hidden_states = self.quant_method.apply(
                     layer=self,
@@ -2085,7 +2087,11 @@ class FusedMoE(CustomOp):
                 }
                 return quant_name_to_type.get(weight_name, None)
             
-        raise ValueError(f"Weight type {layer_idx}.{weight_type} not found in quant_config")
+        raise ValueError(f"Weight type {layer_idx}.{weight_type} not found in quant_config") 
+    
+    def _zero_tensor(self, tensor: torch.Tensor):
+        if tensor is not None:
+            tensor.data = torch.empty(0, dtype=tensor.dtype, device=tensor.device)
             
     def process_weights_after_loading(self):
         if not self.use_lk_moe:
@@ -2094,39 +2100,85 @@ class FusedMoE(CustomOp):
             find_weight = False 
             from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsWNA16MarlinMoEMethod
             from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsWNA16MoEMethod 
-            from vllm.model_executor.layers.quantization.awq_marlin import AWQMoEMethod
-            from compressed_tensors.quantization import QuantizationStrategy
-            if hasattr(self, 'quant_method') and hasattr(self.quant_method, 'block_quant') :
-                block_quant = self.quant_method.block_quant
-            else:
-                block_quant = False 
+            from vllm.model_executor.layers.quantization.awq_marlin import AWQMarlinMoEMethod
+            from vllm.model_executor.layers.quantization.fp8 import Fp8MoEMethod
+            from vllm.model_executor.layers.quantization.gguf import GGUFMoEMethod
+            from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsW8A8Fp8MoEMethod
+            from vllm.model_executor.layers.fused_moe.config import fp8_w8a8_moe_quant_config
+
+
             
             if (isinstance(self.quant_method, CompressedTensorsWNA16MarlinMoEMethod) or isinstance(self.quant_method, CompressedTensorsWNA16MoEMethod)) \
                 and hasattr(self.quant_method, 'strategy'):
+                
+                if self.quant_method.moe_quant_config is None:
+                    from vllm.model_executor.layers.fused_moe.config import int4_w4a16_moe_quant_config
+                    self.quant_method.moe_quant_config =  int4_w4a16_moe_quant_config(
+                        w1_scale=self.w13_weight_scale,
+                        w2_scale=self.w2_weight_scale,
+                        w1_zp=None,
+                        w2_zp=None,
+                        block_shape=[0, self.quant_method.group_size]
+                    )
                 self._process_compressed_tensors_weights(self.quant_method.strategy)
                 find_weight = True 
-            if isinstance(self.quant_method, AWQMoEMethod):
+                
+            if isinstance(self.quant_method, AWQMarlinMoEMethod):
                 self._process_awq_weights()
                 find_weight = True 
-            from vllm.model_executor.layers.quantization.gguf import GGUFMoEMethod
+            
             if isinstance(self.quant_method, GGUFMoEMethod): 
                 self._process_gguf_weights()
                 find_weight = True
-            elif hasattr(self, 'w13_weight_scale_inv') or hasattr(self, 'w13_weight_scale'):
+                
+            if isinstance(self.quant_method, Fp8MoEMethod):
+                if self.quant_method.moe_quant_config is None:
+                    self.quant_method.moe_quant_config =  fp8_w8a8_moe_quant_config(
+                        w1_scale=(
+                            self.w13_weight_scale_inv
+                            if self.quant_method.block_quant
+                            else self.w13_weight_scale
+                        ),
+                        w2_scale=(
+                            self.w2_weight_scale_inv if self.quant_method.block_quant else self.w2_weight_scale
+                        ),
+                        a1_scale=self.w13_input_scale,
+                        a2_scale=self.w2_input_scale,
+                        block_shape=self.quant_method.weight_block_size,
+                    )
                 if is_lk_moe_use_weight_keep():
-                    self._process_fp8_weights(block_quant)
-                else:
-                    if block_quant: 
-                        self._process_block_weights()
-                    else: 
-                        self._process_channel_weights() 
+                    self._process_fp8_weights(self.quant_method.block_quant)
+                else: 
+                    self._process_block_weights()
                 find_weight = True
-            elif hasattr(self, 'w13_weight'): 
+                
+            if isinstance(self.quant_method, CompressedTensorsW8A8Fp8MoEMethod):
+                if self.quant_method.moe_quant_config is None:
+                    self.quant_method.moe_quant_config =  fp8_w8a8_moe_quant_config(
+                        w1_scale=(
+                            self.w13_weight_scale_inv
+                            if self.quant_method.block_quant
+                            else self.w13_weight_scale
+                        ),
+                        w2_scale=(
+                            self.w2_weight_scale_inv if self.quant_method.block_quant else self.w2_weight_scale
+                        ),
+                        a1_scale=self.w13_input_scale,
+                        a2_scale=self.w2_input_scale,
+                        block_shape=self.quant_method.weight_block_size,
+                    )
+                if is_lk_moe_use_weight_keep():
+                    self._process_fp8_weights(False)
+                else:
+                    self._process_channel_weights() 
+                find_weight = True
+            if isinstance(self.quant_method, UnquantizedFusedMoEMethod): 
                 self._process_regular_weights()
                 find_weight = True
              
             if not find_weight: 
                 logger.error("weight not found in layer, quant_method: %s", self.quant_method)
+                self.use_lk_moe = False
                 return
             
             self._initialize_cuda_graph_buffers()
@@ -2198,6 +2250,8 @@ class FusedMoE(CustomOp):
         self.lk_moe_config = moe_config 
         self.lk_moe = lk_moe.MOE(moe_config) 
           
+        self._zero_tensor(self.w13_qweight)
+        self._zero_tensor(self.w2_qweight)
         del self.w13_qweight, self.w2_qweight
  
         import gc
@@ -2312,7 +2366,12 @@ class FusedMoE(CustomOp):
          
         self.lk_moe_config = moe_config 
         self.lk_moe = lk_moe.MOE_WNA16(moe_config) 
-          
+           
+        self._zero_tensor(self.w13_weight_packed)
+        self._zero_tensor(self.w2_weight_packed)
+        self._zero_tensor(self.w13_weight_scale)
+        self._zero_tensor(self.w2_weight_scale)
+        
         del w13_weight, w2_weight, w13_scale, w2_scale
         del self.w13_weight_packed, self.w2_weight_packed , self.w13_weight_scale, self.w2_weight_scale
  
@@ -2393,12 +2452,18 @@ class FusedMoE(CustomOp):
          
         self.lk_moe_config = moe_config 
         self.lk_moe = lk_moe.MOE_FP8(moe_config) 
-         
+          
         del w13_weight_scale, w2_weight_scale
         if block_quant:
+            self._zero_tensor(self.w13_weight_scale_inv)
+            self._zero_tensor(self.w2_weight_scale_inv)
             del self.w13_weight_scale_inv, self.w2_weight_scale_inv
         else:
+            self._zero_tensor(self.w13_weight_scale)
+            self._zero_tensor(self.w2_weight_scale)
             del self.w13_weight_scale, self.w2_weight_scale
+        self._zero_tensor(self.w13_weight)
+        self._zero_tensor(self.w2_weight)
         del self.w13_weight, self.w2_weight
  
         import gc
@@ -2484,7 +2549,10 @@ class FusedMoE(CustomOp):
         self.lk_moe_config = moe_config 
         self.lk_moe = lk_moe.MOE(moe_config)
          
-        del w13_ptr, w2_ptr 
+        self._zero_tensor(self.w13_weight) 
+        self._zero_tensor(self.w2_weight) 
+        self._zero_tensor(self.w13_weight_scale_inv)
+        self._zero_tensor(self.w2_weight_scale_inv)
         del self.w13_weight, self.w2_weight
         del self.w13_weight_scale_inv, self.w2_weight_scale_inv
         
@@ -2693,23 +2761,9 @@ class FusedMoE(CustomOp):
 
     def _process_valid_inputs(self, hidden_states: torch.Tensor, router_logits: torch.Tensor) -> torch.Tensor:
         """Process inputs that are guaranteed to be valid (non-NaN)"""
-        topk_weights, topk_ids, _ = self.select_experts(
+        topk_weights, topk_ids, zero_expert_result = self.select_experts(
             hidden_states=hidden_states,
             router_logits=router_logits,
-            top_k=self.top_k,
-            use_grouped_topk=self.use_grouped_topk,
-            renormalize=self.renormalize,
-            topk_group=self.topk_group,
-            num_expert_group=self.num_expert_group,
-            custom_routing_function=self.custom_routing_function,
-            scoring_func=self.scoring_func,
-            routed_scaling_factor=self.routed_scaling_factor,
-            e_score_correction_bias=self.e_score_correction_bias,
-            enable_eplb=self.enable_eplb,
-            expert_map=self.expert_map,
-            expert_load_view=self.expert_load_view,
-            logical_to_physical_map=self.logical_to_physical_map,
-            logical_replica_count=self.logical_replica_count,
         )
          
         from vllm.forward_context import get_forward_context

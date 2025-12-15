@@ -731,8 +731,9 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
 
     def create_weights(self, layer: torch.nn.Module, num_experts: int,
                        hidden_size: int, intermediate_size_per_partition: int,
-                       params_dtype: torch.dtype, **extra_weight_attrs):
-
+                       params_dtype: torch.dtype,
+        **extra_weight_attrs,
+    ):
         from vllm.envs import is_lk_moe_numa_enabled
         device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
         if isinstance(layer, FusedMoE) and is_lk_moe_numa_enabled():

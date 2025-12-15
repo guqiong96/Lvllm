@@ -560,6 +560,7 @@ class AWQMarlinMoEMethod(FusedMoEMethodBase):
         layer.register_parameter("w2_qzeros", w2_qzeros)
         set_weight_attrs(w2_qzeros, extra_weight_attrs)
 
+        device = layer.w13_qweight.device
         if isinstance(layer, FusedMoE) and is_lk_moe_numa_enabled():
             device = origin_device
         layer.workspace = marlin_make_workspace_new(device, 4)

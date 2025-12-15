@@ -2,14 +2,17 @@
 # LvLLM GPU and NUMA Dual Parallelism
 
 LvLLM is a special extension of vllm that makes full use of CPU and memory resources, reduces GPU memory requirements, and features an efficient GPU parallel and NUMA parallel architecture, supporting hybrid inference for MOE large models.
+
+## 2025-12-16: v1.2.0 ynchronized the upstream vllm code to the latest version, optimized lk_moe to reduce memory usage
+
+Known issue: Qwen3-Next-80B-A3B-Instruct-FP8 requires using the dtype: "bfloat16" to work properly
  
-## 2025-12-14: Added inference support for the AWQ-4bit quantized model (symmetric quantization - avx2 version), cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit and cpatonn/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit has passed verification
+## 2025-12-14: v1.1.2 Added inference support for the AWQ-4bit quantized model (symmetric quantization - avx2 version), cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit and cpatonn/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit has passed verification
 
 torch version updated to 2.9.1(do not use torch 2.9.0)
 
-Qwen3-Next-80B-A3B-Instruct-AWQ-4bit currently only works properly with tensor-parallel-size: 2
+Known issue: Qwen3-Next-80B-A3B-Instruct-AWQ-4bit currently only works properly with tensor-parallel-size: 2
 
-pip Using a mirror repository with pip requires waiting for synchronization lk_moe==1.1.2 ERROR: Could not find a version that satisfies the requirement lk_moe==1.1.2 (from versions: 1.1.0, 1.1.1)  Or manually install: pip install lk-moe==1.1.2 --index-url https://pypi.org/simple
 
 ## 2025-12-9: Added the LVLLM_MOE_USE_WEIGHT environment variable to support MOE modules using two modes to infer fp8 models
 
@@ -103,7 +106,10 @@ conda create -n Lvllm python==3.12.11
 conda activate Lvllm
 
 # Upgrade libstdcxx-ng (to avoid glibcxx_3.4.32 not found error, which prevents loading lk_moe module and causes memory overflow)
+# triton compile version `GLIBCXX_3.4.30' not found  
 conda install -c conda-forge libstdcxx-ng
+export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
+
 # install libnuma-dev on ubuntu
 sudo apt-get install libnuma-dev
 # install numactl-devel on rocky linux
@@ -220,13 +226,15 @@ You can modify the parameters in the configuration file or adjust the environmen
 
 ​LvLLM是vllm的特别扩展，充分利用cpu和内存资源，降低显卡显存要求，高效的GPU并行+NUMA并行架构，支持混合推理MOE大模型 
 
-## 2025-12-14 增加AWQ-4bit量化模型（对称量化 avx2版本）推理支持 -，验证通过 cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit and cpatonn/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit
+## 2025-12-16 v1.2.0 同步上游vllm代码至最新，lk_moe优化降低内存占用
+
+已知问题：Qwen3-Next-80B-A3B-Instruct-FP8需要使用dtype: "bfloat16" 才能正常工作
+
+## 2025-12-14 v1.1.2 增加AWQ-4bit量化模型（对称量化 avx2版本）推理支持 -，验证通过 cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit and cpatonn/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit
 
 torch 版本升级至 2.9.1(不要使用torch 2.9.0)
 
-Qwen3-Next-80B-A3B-Instruct-AWQ-4bit 目前仅在 tensor-parallel-size 为 2 时才能正常工作
-
-pip使用镜像仓库需要等待同步 lk_moe==1.1.2  ERROR: Could not find a version that satisfies the requirement lk_moe==1.1.2 (from versions: 1.1.0, 1.1.1) 或者手动安装：pip install lk-moe==1.1.2 --index-url https://pypi.org/simple
+已知问题：Qwen3-Next-80B-A3B-Instruct-AWQ-4bit 目前仅在 tensor-parallel-size 为 2 时才能正常工作
 
 ## 2025-12-9: 增加LVLLM_MOE_USE_WEIGHT环境变量，支持MOE模块使用两种模式推理fp8模型：
 
@@ -316,7 +324,9 @@ conda create -n Lvllm python==3.12.11
 conda activate Lvllm
 
 # 升级libstdcxx-ng  （避免glibcxx_3.4.32 not found， 新增的lk_moe模块无法加载退回到原始vllm模式，最后显存溢出）
+# triton编译时 version `GLIBCXX_3.4.30' not found 
 conda install -c conda-forge libstdcxx-ng
+export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
 
 # 安装NUMA库 ubuntu
 sudo apt-get install libnuma-dev

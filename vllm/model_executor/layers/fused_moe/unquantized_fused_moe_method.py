@@ -145,6 +145,12 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         params_dtype: torch.dtype,
         **extra_weight_attrs,
     ):
+        from vllm.envs import is_lk_moe_numa_enabled
+        from vllm.model_executor.layers.fused_moe.layer import FusedMoE
+        device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
+        if isinstance(layer, FusedMoE) and is_lk_moe_numa_enabled():
+            device = "cpu"  
+            
         if self.moe.is_act_and_mul:
             w13_up_dim = 2 * intermediate_size_per_partition
         else:
@@ -156,6 +162,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
                 w13_up_dim,
                 hidden_size,
                 dtype=params_dtype,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -163,7 +170,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         set_weight_attrs(w13_weight, extra_weight_attrs)
         if self.moe.has_bias:
             w13_bias = torch.nn.Parameter(
-                torch.zeros(num_experts, w13_up_dim, dtype=params_dtype),
+                torch.zeros(num_experts, w13_up_dim, dtype=params_dtype, device=device),
                 requires_grad=False,
             )
             layer.register_parameter("w13_bias", w13_bias)
@@ -175,6 +182,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
                 hidden_size,
                 intermediate_size_per_partition,
                 dtype=params_dtype,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -182,7 +190,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         set_weight_attrs(w2_weight, extra_weight_attrs)
         if self.moe.has_bias:
             w2_bias = torch.nn.Parameter(
-                torch.zeros(num_experts, hidden_size, dtype=params_dtype),
+                torch.zeros(num_experts, hidden_size, dtype=params_dtype, device=device),
                 requires_grad=False,
             )
             layer.register_parameter("w2_bias", w2_bias)
