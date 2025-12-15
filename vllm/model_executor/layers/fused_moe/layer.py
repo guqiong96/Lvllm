@@ -2639,6 +2639,10 @@ class FusedMoE(CustomOp):
         
         del w13_tensor, w2_tensor
         del w13_ptr, w2_ptr 
+        self._zero_tensor(self.w13_weight)
+        self._zero_tensor(self.w2_weight)
+        self._zero_tensor(self.w13_weight_scale)
+        self._zero_tensor(self.w2_weight_scale)
         del self.w13_weight, self.w2_weight
         del self.w13_weight_scale, self.w2_weight_scale
         
@@ -2680,6 +2684,8 @@ class FusedMoE(CustomOp):
         self.lk_moe_config = moe_config 
         self.lk_moe = lk_moe.MOE(moe_config) 
          
+        self._zero_tensor(self.w13_weight)
+        self._zero_tensor(self.w2_weight)
         del self.w13_weight, self.w2_weight
  
         import gc
