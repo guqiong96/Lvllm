@@ -9,10 +9,8 @@ mkdocs-git-revision-date-localized-plugin
 mkdocs-minify-plugin
 regex
 ruff
-
-# Required for argparse hook only
-cachetools
-cloudpickle
-py-cpuinfo
-msgspec
 pydantic
+
+# For generating argparse docs.
+# Adding requirements here should only be used as a last resort.
+msgspec  # Need for multiple inheritance involving msgspec.Struct
