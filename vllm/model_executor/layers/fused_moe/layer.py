@@ -2198,7 +2198,9 @@ class FusedMoE(CustomOp):
                 return 30  # GGML_TYPE_BF16
             else:
                 raise ValueError(f"Unsupported dtype {dtype}")
-            
+    
+    def _get_processes_info(self) -> tuple[int, int]:   
+        return self.tp_size, self.tp_rank    
                    
     def _process_gguf_weights(self):  
          
@@ -2232,7 +2234,11 @@ class FusedMoE(CustomOp):
         
         w2_ptr = self.w2_qweight.contiguous().data_ptr()
         
+        num_processes, process_id = self._get_processes_info()
+        
         moe_config = lk_moe.MOEConfig(
+            num_processes,                # num_processes
+            process_id,                   # process_id
             num_experts,        # expert_num
             self.top_k,                    # routed_expert_num
             self.hidden_size,              # hidden_size
@@ -2342,7 +2348,11 @@ class FusedMoE(CustomOp):
         w13_weight_scale_ptr = w13_scale.contiguous().data_ptr()
         w2_weight_scale_ptr = w2_scale.contiguous().data_ptr()
         
+        num_processes, process_id = self._get_processes_info()
+        
         moe_config = lk_moe.MOE_WNA16Config(
+            num_processes,                # num_processes
+            process_id,                   # process_id
             self.local_num_experts,        # expert_num
             self.top_k,                    # routed_expert_num
             hidden_size,                   # hidden_size
@@ -2431,7 +2441,11 @@ class FusedMoE(CustomOp):
         w13_weight_scale_ptr = w13_weight_scale.contiguous().data_ptr()
         w2_weight_scale_ptr = w2_weight_scale.contiguous().data_ptr()
         
+        num_processes, process_id = self._get_processes_info()
+        
         moe_config = lk_moe.MOE_FP8Config(
+            num_processes,                # num_processes
+            process_id,                   # process_id
             self.local_num_experts,        # expert_num
             self.top_k,                    # routed_expert_num
             hidden_size,                   # hidden_size
@@ -2531,7 +2545,11 @@ class FusedMoE(CustomOp):
         w13_ptr = w13_tensor.contiguous().data_ptr()
         w2_ptr = w2_tensor.contiguous().data_ptr()
      
+        num_processes, process_id = self._get_processes_info()
+        
         moe_config = lk_moe.MOEConfig(
+            num_processes,                # num_processes
+            process_id,                   # process_id
             self.local_num_experts,        # expert_num
             self.top_k,                    # routed_expert_num
             self.hidden_size,              # hidden_size
@@ -2618,8 +2636,11 @@ class FusedMoE(CustomOp):
         w13_ptr = w13_tensor.contiguous().data_ptr()
         w2_ptr = w2_tensor.contiguous().data_ptr()       
           
+        num_processes, process_id = self._get_processes_info()
         
         moe_config = lk_moe.MOEConfig(
+            num_processes,                # num_processes
+            process_id,                   # process_id
             self.local_num_experts,        # expert_num
             self.top_k,                    # routed_expert_num
             self.hidden_size,              # hidden_size
@@ -2661,16 +2682,22 @@ class FusedMoE(CustomOp):
         num_experts, total_intermediate_size, hidden_size = self.w13_weight.shape
         intermediate_size = total_intermediate_size // 2
         
-        assert self.w2_weight.shape == (num_experts, hidden_size, intermediate_size), f"Down weight shape {self.w2_weight.shape} must be (num_experts, hidden_size, intermediate_size)"
+        assert self.w13_weight.shape == (num_experts, self.intermediate_size_per_partition * 2, self.hidden_size), f"Up weight shape {self.w13_weight.shape} must be (num_experts, total_intermediate_size, hidden_size)"
+        
+        assert self.w2_weight.shape == (num_experts, self.hidden_size, self.intermediate_size_per_partition), f"Down weight shape {self.w2_weight.shape} must be (num_experts, hidden_size, intermediate_size)"
         
         w13_ptr = self.w13_weight.contiguous().data_ptr()
         w2_ptr = self.w2_weight.contiguous().data_ptr()
         
+        num_processes, process_id = self._get_processes_info()
+        
         moe_config = lk_moe.MOEConfig(
+            num_processes,                # num_processes
+            process_id,                   # process_id
             num_experts,        # expert_num
             self.top_k,                    # routed_expert_num
-            hidden_size,              # hidden_size
-            intermediate_size,             # intermediate_size
+            self.hidden_size,              # hidden_size
+            self.intermediate_size_per_partition,             # intermediate_size
             32,                            # stride
             10,                            # group_min_len
             1024,                          # group_max_len
@@ -2714,28 +2741,28 @@ class FusedMoE(CustomOp):
             buff_dtype = self.moe_config.in_dtype
              
             FusedMoE.output_gpu[current_device] = [
-                torch.zeros((batch_size, hidden_size), device="cuda:" + str(current_device), dtype=buff_dtype)
+                torch.zeros((batch_size, hidden_size), device=current_device, dtype=buff_dtype, requires_grad=False).contiguous()
                 for batch_size in FusedMoE.cuda_graphs
             ]
             
             FusedMoE.input_tensor_cpu[current_device] = [
-                torch.zeros((batch_size, self.hidden_size), device="cpu", dtype=buff_dtype, pin_memory=True, requires_grad=False)
+                torch.zeros((batch_size, self.hidden_size), device="cpu", dtype=buff_dtype, pin_memory=True, requires_grad=False).contiguous()
                 for batch_size in FusedMoE.cuda_graphs
             ]
             FusedMoE.expert_ids_cpu[current_device] = [
-                torch.zeros((batch_size, num_experts_per_tok), device="cpu", dtype=torch.long, pin_memory=True, requires_grad=False)
+                torch.zeros((batch_size, num_experts_per_tok), device="cpu", dtype=torch.long, pin_memory=True, requires_grad=False).contiguous()
                 for batch_size in FusedMoE.cuda_graphs
             ]
             FusedMoE.weights_cpu[current_device] = [
-                torch.zeros((batch_size, num_experts_per_tok), device="cpu", dtype=torch.float32, pin_memory=True, requires_grad=False)
+                torch.zeros((batch_size, num_experts_per_tok), device="cpu", dtype=torch.float32, pin_memory=True, requires_grad=False).contiguous()
                 for batch_size in FusedMoE.cuda_graphs
             ]
             FusedMoE.output_cpu[current_device] = [
-                torch.zeros((batch_size, hidden_size), device="cpu", pin_memory=True, dtype=buff_dtype, requires_grad=False)
+                torch.zeros((batch_size, hidden_size), device="cpu", pin_memory=True, dtype=buff_dtype, requires_grad=False).contiguous()
                 for batch_size in FusedMoE.cuda_graphs
             ]
             FusedMoE.bsz_tensor_cpu[current_device] = [
-                torch.zeros((1), device="cpu", dtype=torch.int32, pin_memory=True, requires_grad=False)
+                torch.zeros((1), device="cpu", dtype=torch.int32, pin_memory=True, requires_grad=False).contiguous()
                 for _ in range(len(FusedMoE.cuda_graphs))
             ]
          
@@ -2796,10 +2823,10 @@ class FusedMoE(CustomOp):
          
         is_decode_mode = getattr(batch_descriptor, 'uniform_decode', False) 
         
-        # if(hasattr(batch_descriptor, 'num_tokens')):
-        #     batch_size = batch_descriptor.num_tokens
-        # else:
-        batch_size = hidden_states.size(0)
+        if(hasattr(batch_descriptor, 'num_tokens')):
+            batch_size = batch_descriptor.num_tokens
+        else:
+            batch_size = hidden_states.size(0)
         
         stream = current_stream()
         stream_ptr = get_cuda_stream_ptr(stream) 
