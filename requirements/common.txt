@@ -52,4 +52,4 @@ openai-harmony >= 0.0.3  # Required for gpt-oss
 anthropic == 0.71.0
 model-hosting-container-standards >= 0.1.9, < 1.0.0
 mcp
-lk_moe == 1.2.1
+lk_moe == 1.2.2
