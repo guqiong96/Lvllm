@@ -5,11 +5,11 @@ LvLLM is a special extension of vllm that makes full use of CPU and memory resou
 
 ## 2025-12-16: v1.2.0 ynchronized the upstream vllm code to the latest version, optimized lk_moe to reduce memory usage
 
-Known issue: Qwen3-Next-80B-A3B-Instruct-FP8 requires using the dtype: "bfloat16" to work properly
+Known issue: Qwen3-Next-80B-A3B-Instruct all version requires using the dtype: "bfloat16" to work properly
  
 ## 2025-12-14: v1.1.2 Added inference support for the AWQ-4bit quantized model (symmetric quantization - avx2 version), cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit and cpatonn/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit has passed verification
 
-torch version updated to 2.9.1(do not use torch 2.9.0)
+torch version updated to 2.9.1
 
 Known issue: Qwen3-Next-80B-A3B-Instruct-AWQ-4bit currently only works properly with tensor-parallel-size: 2
 
@@ -20,7 +20,7 @@ LVLLM_MOE_USE_WEIGHT="KEEP": lk_moe inference uses the original weight format fp
 
 LVLLM_MOE_USE_WEIGHT="TO_DTYPE": lk_moe inference uses the configured parameter dtype: float16 or bfloat16, which increases fp8 model inference speed, but will increase memory usage and loading time. TO_DTYPE is the default value.
 
-torch version updated to 2.9.1(do not use torch 2.9.0)
+torch version updated to 2.9.1
 
 ## 2025-11-1: Support tensor parallelism and pipeline for multi-card inference   https://b23.tv/xzHieMs
 ```bash
@@ -75,9 +75,7 @@ Setting dtype: "float16" in config.yaml provides a 1.5x prefill speed increase c
 
 5. Only supports single-card inference (support for multi-GPU tensor parallelism (TP) and pipeline parallelism (PP) inference will be available from 2025-11-1)
 
-6. **Known Issue**: Using torch2.9.0 will result in garbled output, which is a compatibility issue between torch2.9.0 and vllm
-
-7. **Known Issue**: There seems to be a slight interference with output quality when multiple requests are made concurrently, which currently appears to be unrelated to LK MOE.
+6. **Known Issue**: There seems to be a slight interference with output quality when multiple requests are made concurrently, which currently appears to be unrelated to LK MOE.
 
 ## Installation Steps
 
@@ -149,7 +147,7 @@ MAX_JOBS=32 NVCC_THREADS=1 reduces memory usage during compilation to avoid free
 ### 5. Run Lvllm
 Use the following command to start the Lvllm service:
 ```bash 
-LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS="88" OMP_NUM_THREADS="88" vllm serve --config ~/Downloads/Lvllm/config.yaml
+LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS="88" OMP_NUM_THREADS="88" LVLLM_MOE_USE_WEIGHT="KEEP" VLLM_ATTENTION_BACKEND="FLASHINFER" vllm serve --config ~/Downloads/Lvllm/config.yaml
 ```
 
 Modify the configuration parameters in config.yaml 
@@ -228,11 +226,11 @@ You can modify the parameters in the configuration file or adjust the environmen
 
 ## 2025-12-16 v1.2.0 同步上游vllm代码至最新，lk_moe优化降低内存占用
 
-已知问题：Qwen3-Next-80B-A3B-Instruct-FP8需要使用dtype: "bfloat16" 才能正常工作
+已知问题：Qwen3-Next-80B-A3B-Instruct 系列模型需要使用dtype: "bfloat16" 才能正常工作
 
 ## 2025-12-14 v1.1.2 增加AWQ-4bit量化模型（对称量化 avx2版本）推理支持 -，验证通过 cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit and cpatonn/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit
 
-torch 版本升级至 2.9.1(不要使用torch 2.9.0)
+torch 版本升级至 2.9.1
 
 已知问题：Qwen3-Next-80B-A3B-Instruct-AWQ-4bit 目前仅在 tensor-parallel-size 为 2 时才能正常工作
 
@@ -242,7 +240,6 @@ LVLLM_MOE_USE_WEIGHT="KEEP": lk_moe推理使用权重原始格式fp8_e4m3, 降�
 
 LVLLM_MOE_USE_WEIGHT="TO_DTYPE": lk_moe推理使用配置参数dtype：float16或bfloat16, 提高fp8模型推理速度， 但会增加内存占用延长加载时间，TO_DTYPE为默认值
 
-torch 版本升级至 2.9.1(不要使用torch 2.9.0)
 
 ## 2025-11-1： 支持张量并行、流水线多卡推理 https://b23.tv/xzHieMs
 ```bash
@@ -293,9 +290,7 @@ config.yaml里面设置dtype: "float16"相比不设置或设置为dtype: "bfloat
 
 5、仅支持单卡推理(2025-11-1支持多GPU张量并行(TP)、流水线并行(PP)推理)
 
-6. **已知问题**：使用torch2.9.0会导致输出乱码，这是torch2.9.0和vllm的兼容性问题
-
-7. **已知问题**：多个请求并发时似乎会轻微干扰输出质量，目前看与LK MOE无关
+6. **已知问题**：多个请求并发时似乎会轻微干扰输出质量，目前看与LK MOE无关
 
 ## 安装步骤
 
@@ -370,9 +365,8 @@ CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" 性能选项
 
 使用以下命令启动Lvllm服务: 
 ```bash 
-LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS="88" OMP_NUM_THREADS="88" LVLLM_MOE_USE_WEIGHT="TO_DTYPE" vllm serve --config ~/Downloads/Lvllm/config.yaml
-```
-VLLM_ATTENTION_BACKEND="FLASHINFER": 这个环境变量已不是最优选项[2025-10-21]
+LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS="88" OMP_NUM_THREADS="88" LVLLM_MOE_USE_WEIGHT="KEEP" VLLM_ATTENTION_BACKEND="FLASHINFER" vllm serve --config ~/Downloads/Lvllm/config.yaml
+``` 
 1、单GPU推理(N)：LK_THREADS、OMP_NUM_THREADS 设置为总的核心数量-4 , 开启超线程则设置为总的线程数量-8
 2、多GPU推理(N/GPU数量)：每个GPU的LK_THREADS、OMP_NUM_THREADS 设置为N/(GPU数量)
 
