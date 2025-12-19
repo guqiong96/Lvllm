@@ -92,7 +92,7 @@ import ctypes
 import numpy as np
 
 import vllm
-from vllm.envs import is_lk_moe_numa_enabled, is_lk_moe_use_weight_keep
+from vllm.envs import is_lk_moe_numa_enabled, is_lk_moe_use_weight_keep, is_disabled_lk_moe_layer
 if is_lk_moe_numa_enabled():
     import  lk_moe
     GGML_TYPE_TO_TORCH_DTYPE = {
@@ -471,6 +471,9 @@ class FusedMoE(CustomOp):
             raise ValueError("Duplicate layer name: {}".format(prefix))
         compilation_config.static_forward_context[prefix] = self
         self.layer_name = prefix
+        
+        if is_disabled_lk_moe_layer(self.layer_name):
+            self.use_lk_moe = False
 
         self.enable_eplb = enable_eplb
         self.expert_load_view: torch.Tensor | None = None
@@ -2095,6 +2098,8 @@ class FusedMoE(CustomOp):
             
     def process_weights_after_loading(self):
         if not self.use_lk_moe:
+            logger.info(f"Initialized lk_moe with {self.local_num_experts} experts for layer {self.layer_name} [" + 
+            ("Enabled" if self.use_lk_moe else "Disabled") + "]")
             return
         try:  
             find_weight = False 
@@ -2182,7 +2187,8 @@ class FusedMoE(CustomOp):
                 return
             
             self._initialize_cuda_graph_buffers()
-            logger.info(f"Initialized lk_moe with {self.local_num_experts} experts for layer {self.layer_name}")
+            logger.info(f"Initialized lk_moe with {self.local_num_experts} experts for layer {self.layer_name} [" + 
+            ("Enabled" if self.use_lk_moe else "Disabled") + "]")
         except Exception as e:
             logger.error(f"Failed to initialize lk_moe: {e}")
             self.use_lk_moe = False
@@ -2595,10 +2601,10 @@ class FusedMoE(CustomOp):
         intermediate_size = total_intermediate_size // 2 
         assert self.w2_weight.shape == (num_experts, hidden_size, intermediate_size), f"Down weight shape {self.w2_weight.shape} must be (num_experts, hidden_size, intermediate_size)"
         
-        scale_num_experts, scale_total_intermediate_size, scale_hidden_size = self.w13_weight_scale.shape
+        scale_num_experts, scale_total_intermediate_size, _ = self.w13_weight_scale.shape
         scale_intermediate_size = scale_total_intermediate_size // 2
         
-        assert self.w2_weight_scale.shape == (scale_num_experts, scale_hidden_size, scale_intermediate_size), f"Down weight scale shape {self.w2_weight_scale.shape} must be (scale_num_experts, scale_hidden_size, scale_intermediate_size)"
+        assert self.w2_weight_scale.shape == (scale_num_experts, hidden_size, 1), f"Down weight scale shape {self.w2_weight_scale.shape} must be (scale_num_experts, scale_hidden_size, 1)"
         
         
         dequant_device = 'cpu'
@@ -2616,8 +2622,8 @@ class FusedMoE(CustomOp):
             w2_float = expert_w2_weight.to(dtype=torch.float32) 
              
                 
-            w13_scale_expanded = self.w13_weight_scale.expand_as(w13_float)
-            w2_scale_expanded = self.w2_weight_scale.expand_as(w2_float)
+            w13_scale_expanded = expert_w13_scale.expand_as(w13_float)
+            w2_scale_expanded = expert_w2_scale.expand_as(w2_float)
                 
             w13_buf = w13_float * w13_scale_expanded 
             w2_buf = w2_float * w2_scale_expanded 
