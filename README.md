@@ -5,7 +5,7 @@ LvLLM is a special extension of vllm that makes full use of CPU and memory resou
 
 ## 2025-12-16: v1.2.0 ynchronized the upstream vllm code to the latest version, optimized lk_moe to reduce memory usage
 
-Known issue: Qwen3-Next-80B-A3B-Instruct-FP8 requires using the dtype: "bfloat16" to work properly
+Known issue: Qwen3-Next-80B-A3B-Instruct requires using the dtype: "bfloat16" to work properly
  
 ## 2025-12-14: v1.1.2 Added inference support for the AWQ-4bit quantized model (symmetric quantization - avx2 version), cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit and cpatonn/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit has passed verification
 

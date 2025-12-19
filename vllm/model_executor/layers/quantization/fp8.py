@@ -734,9 +734,9 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                        intermediate_size_per_partition: int,
                        params_dtype: torch.dtype, **extra_weight_attrs,
     ):
-        from vllm.envs import is_lk_moe_numa_enabled
+        from vllm.envs import is_lk_moe_numa_enabled, is_disabled_lk_moe_layer
         device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
-        if isinstance(layer, FusedMoE) and is_lk_moe_numa_enabled():
+        if isinstance(layer, FusedMoE) and is_lk_moe_numa_enabled() and not is_disabled_lk_moe_layer(layer.layer_name):
             device = "cpu"  
         layer.intermediate_size_per_partition = intermediate_size_per_partition
         layer.hidden_size = hidden_size
@@ -1096,8 +1096,8 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                     rotate_flashinfer_fp8_moe_weights(w13_weight, w2_weight)
                 layer.w13_weight.data = w13_weight.data
 
-        from vllm.envs import is_lk_moe_numa_enabled  
-        if self.use_marlin and not is_lk_moe_numa_enabled():
+        from vllm.envs import is_lk_moe_numa_enabled, is_disabled_lk_moe_layer  
+        if self.use_marlin and not is_lk_moe_numa_enabled() and not is_disabled_lk_moe_layer(layer.layer_name):
             prepare_moe_fp8_layer_for_marlin(
                 layer, False, input_dtype=self.marlin_input_dtype
             )

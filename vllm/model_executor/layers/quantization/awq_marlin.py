@@ -462,10 +462,10 @@ class AWQMarlinMoEMethod(FusedMoEMethodBase):
         params_dtype: torch.dtype,
         **extra_weight_attrs,
     ):
-        from vllm.envs import is_lk_moe_numa_enabled
+        from vllm.envs import is_lk_moe_numa_enabled, is_disabled_lk_moe_layer
         device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
         origin_device = device
-        if isinstance(layer, FusedMoE) and is_lk_moe_numa_enabled():
+        if isinstance(layer, FusedMoE) and is_lk_moe_numa_enabled() and not is_disabled_lk_moe_layer(layer.layer_name):
             device = "cpu" 
         extra_weight_attrs.update(
             {
@@ -561,7 +561,7 @@ class AWQMarlinMoEMethod(FusedMoEMethodBase):
         set_weight_attrs(w2_qzeros, extra_weight_attrs)
 
         device = layer.w13_qweight.device
-        if isinstance(layer, FusedMoE) and is_lk_moe_numa_enabled():
+        if isinstance(layer, FusedMoE) and is_lk_moe_numa_enabled() and not is_disabled_lk_moe_layer(layer.layer_name):
             device = origin_device
         layer.workspace = marlin_make_workspace_new(device, 4)
 

@@ -229,6 +229,7 @@ if TYPE_CHECKING:
     VLLM_OBJECT_STORAGE_SHM_BUFFER_NAME: str = "VLLM_OBJECT_STORAGE_SHM_BUFFER"
     LVLLM_MOE_NUMA_ENABLED: bool = False
     LVLLM_MOE_USE_WEIGHT: Literal["KEEP", "TO_DTYPE"] = "TO_DTYPE"
+    LVLLM_DISABLE_LK_MOE_LAYERS: str | None = None
     VLLM_DEEPEP_BUFFER_SIZE_MB: int = 1024
     VLLM_DEEPEP_HIGH_THROUGHPUT_FORCE_INTRA_NODE: bool = False
     VLLM_DEEPEP_LOW_LATENCY_USE_MNNVL: bool = False
@@ -1547,6 +1548,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # Whether to enable NUMA for MOE.
     "LVLLM_MOE_NUMA_ENABLED":
     lambda: bool(int(os.getenv("LVLLM_MOE_NUMA_ENABLED", "0"))),
+    "LVLLM_DISABLE_LK_MOE_LAYERS": lambda: os.environ.get("LVLLM_DISABLE_LK_MOE_LAYERS", None),
     # Disables parallel execution of shared_experts via separate cuda stream
     "VLLM_DISABLE_SHARED_EXPERTS_STREAM": lambda: bool(
         int(os.getenv("VLLM_DISABLE_SHARED_EXPERTS_STREAM", "0"))
@@ -1704,6 +1706,7 @@ def compile_factors() -> dict[str, object]:
         "CUDA_VISIBLE_DEVICES",
         "NO_COLOR",
         "LVLLM_MOE_NUMA_ENABLED",
+        "LVLLM_DISABLE_LK_MOE_LAYERS",
         "LVLLM_MOE_USE_WEIGHT",
     }
 
@@ -1763,3 +1766,67 @@ def is_lk_moe_numa_enabled() -> bool:
         return False
 def is_lk_moe_use_weight_keep() -> bool:
     return environment_variables["LVLLM_MOE_USE_WEIGHT"]() == "KEEP"
+
+
+def extract_layer_index(layer_name: str, num_attn_module: int = 1) -> int:
+    """
+    Extract the layer index from the module name.
+    Examples:
+    - "encoder.layers.0" -> 0
+    - "encoder.layers.1.self_attn" -> 1
+    - "2.self_attn" -> 2
+    - "model.encoder.layers.0.sub.1" -> ValueError if num_attn_module == 1
+    """
+    subnames = layer_name.split(".")
+    int_vals: list[int] = []
+    for subname in subnames:
+        try:
+            int_vals.append(int(subname))
+        except ValueError:
+            continue
+    if num_attn_module == 1 or "attn" not in layer_name:
+        assert len(int_vals) == 1, (
+            f"layer name {layer_name} should only contain one integer"
+        )
+
+        return int_vals[0]
+    else:
+        assert len(int_vals) <= 2, (
+            f"layer name {layer_name} should contain most two integers"
+        )
+        layer_index = (
+            int_vals[0] * num_attn_module + int_vals[1]
+            if len(int_vals) == 2
+            else int_vals[0]
+        )
+        return layer_index
+    
+def is_disabled_lk_moe_layer(layer_name: str)-> bool:
+    layer_id = extract_layer_index(layer_name)
+    
+    disabled_layers_env = environment_variables.get("LVLLM_DISABLE_LK_MOE_LAYERS", "")()
+    if not disabled_layers_env:
+        return False
+    
+    disabled_layers_env = disabled_layers_env.strip()
+ 
+    disabled_layers = set()
+    for part in disabled_layers_env.split(','):
+        part = part.strip()
+        if not part:
+            continue
+        
+        if '-' in part:
+            try:
+                start, end = map(int, part.split('-')) 
+                if start <= end:
+                    disabled_layers.update(range(start, end + 1))
+            except ValueError: 
+                continue
+        else:
+            try:
+                disabled_layers.add(int(part))
+            except ValueError: 
+                continue
+            
+    return layer_id in disabled_layers

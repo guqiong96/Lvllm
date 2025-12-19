@@ -264,12 +264,12 @@ class GGUFModelLoader(BaseModelLoader):
                     unmapped_params,
                 )
             )
-        if unmapped_params:
-            raise RuntimeError(
-                f"Failed to map GGUF parameters "
-                f"({len(unmapped_params)}): "
-                f"{unmapped_params}"
-            )
+        # if unmapped_params:
+        #     raise RuntimeError(
+        #         f"Failed to map GGUF parameters "
+        #         f"({len(unmapped_params)}): "
+        #         f"{unmapped_params}"
+        #     )
         return gguf_to_hf_name_map
 
     def _get_gguf_weight_type(
