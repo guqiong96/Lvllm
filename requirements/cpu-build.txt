@@ -1,7 +1,7 @@
 cmake>=3.26.1
 ninja
 packaging>=24.2
-setuptools>=77.0.3,<81.0.0
+setuptools==77.0.3 # this version can reuse CMake build dir
 setuptools-scm>=8
 scons; platform_machine == "aarch64"    # needed to build Arm Compute Library (ACL)
 wheel

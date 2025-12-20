@@ -1097,7 +1097,7 @@ transformers==4.57.3
     #   transformers-stream-generator
 transformers-stream-generator==0.0.5
     # via -r requirements/test.in
-triton==3.5.0
+triton==3.5.1
 tritonclient==2.51.0
     # via
     #   -r requirements/test.in

@@ -1,19 +1,20 @@
-model: "/home/guqiong/Models/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit"
+model: "/home/guqiong/Models/Kimi-K2-Thinking"
 host: "0.0.0.0"
 port: 8070
 tensor-parallel-size: 2
 #pipeline-parallel-size: 2
-max-model-len: 22000 
-gpu-memory-utilization: 0.80
+max-model-len: 20000 
+gpu-memory-utilization: 0.95
 trust-remote-code: true
 tokenizer-mode: "auto"
 swap-space: 0
-served-model-name: "Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit" 
+served-model-name: "Kimi-K2-Thinking" 
 compilation_config.cudagraph_mode: "FULL_DECODE_ONLY"
 enable_prefix_caching: true
 enable-chunked-prefill: true
 max_num_batched_tokens: 1024
-dtype: "bfloat16" 
+dtype: "float16"
+max_num_seqs: 4
 # hf-config-path: "/home/guqiong/Downloads/Qwen3-Coder-30B-A3B-Instruct"
 # tokenizer: "/home/guqiong/Downloads/Qwen3-Coder-30B-A3B-Instruct"
 # speculative-config: '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
