@@ -383,6 +383,12 @@ class RMSNormGated(CustomOp):
             - norm_before_gate=True: out = norm(x) * silu(z)
             - norm_before_gate=False: out = norm(x * silu(z))
         """
+        original_dtype = x.dtype
+        if original_dtype in (torch.float16, torch.bfloat16):
+            x = x.float()
+            if z is not None:
+                z = z.float()
+                
         # Apply gating before normalization if needed
         if z is not None and not self.norm_before_gate:
             x = x * F.silu(z)
@@ -405,6 +411,9 @@ class RMSNormGated(CustomOp):
         # Apply gating after normalization if needed
         if z is not None and self.norm_before_gate:
             out = out * F.silu(z)
+        
+        if original_dtype in (torch.float16, torch.bfloat16):
+            out = out.to(original_dtype)
 
         return out
 
