@@ -6,6 +6,8 @@ LvLLM is a special extension of vllm that makes full use of CPU and memory resou
 
 ## 2025-12-28: Optimize inference speed: bfloat16, float16, awq4bit; optimize NUMA data access for multiple GPUs; enable NUMA nodes for multiple GPUs to achieve the best performance
 
+Known issues with this version: GGUF model are not supported, FP8 model LVLLM_MOE_USE_WEIGHT=KEEP are not supported, FP8 models are not supported on GPUs that support E4M3FNUZ
+
 
 ## 2025-12-16: v1.2.0 ynchronized the upstream vllm code to the latest version, optimized lk_moe to reduce memory usage
  
@@ -228,7 +230,10 @@ You can modify the parameters in the configuration file or adjust the environmen
 ​LvLLM是vllm的特别扩展，充分利用cpu和内存资源，降低显卡显存要求，高效的GPU并行+NUMA并行架构，支持混合推理MOE大模型 
 
 
-## 2025-12-16 优化推理速度：bfloat16、float16、awq4bit，优化多GPU的numa数据访问，多GPU开启NUMA节点获取最佳性能
+## 2025-12-28：优化推理速度：bfloat16、awq4bit；优化多GPU的NUMA数据访问；为多GPU启用NUMA节点以实现最佳性能
+
+
+版本已知问题：GGUF模型不支持，FP8模型LVLLM_MOE_USE_WEIGHT=KEEP不支持，FP8模型在E4M3FNUZ的GPU上不支持
 
 
 ## 2025-12-16 v1.2.0 同步上游vllm代码至最新，lk_moe优化降低内存占用

@@ -2513,8 +2513,8 @@ class FusedMoE(CustomOp):
             process_id,                   # process_id
             self.local_num_experts,        # expert_num
             self.top_k,                    # routed_expert_num
-            hidden_size,                   # hidden_size
-            intermediate_size,             # intermediate_size
+            self.hidden_size,                   # hidden_size
+            self.intermediate_size_per_partition,             # intermediate_size
             32,                            # stride
             10,                            # group_min_len
             1024,                          # group_max_len
