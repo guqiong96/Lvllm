@@ -4,7 +4,7 @@
 LvLLM is a special extension of vllm that makes full use of CPU and memory resources, reduces GPU memory requirements, and features an efficient GPU parallel and NUMA parallel architecture, supporting hybrid inference for MOE large models.
 
 
-## 2025-12-28: Optimize inference speed: bfloat16, float16, awq4bit; optimize NUMA data access for multiple GPUs; enable NUMA nodes for multiple GPUs to achieve the best performance
+## 2025-12-28: Optimize inference speed: bfloat16, awq4bit; optimize NUMA data access for multiple GPUs; enable NUMA nodes for multiple GPUs to achieve the best performance
 
 Known issues with this version: GGUF model are not supported, FP8 model LVLLM_MOE_USE_WEIGHT=KEEP are not supported, FP8 models are not supported on GPUs that support E4M3FNUZ
 
