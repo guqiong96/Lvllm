@@ -970,7 +970,7 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
             layer.w13_weight = torch.nn.Parameter(shuffled_w13, requires_grad=False)
             layer.w2_weight = torch.nn.Parameter(shuffled_w2, requires_grad=False)
 
-        elif self.use_marlin and not is_lk_moe_numa_enabled()  and not is_disabled_lk_moe_layer(layer.layer_name):
+        elif self.use_marlin and not is_lk_moe_numa_enabled():
             prepare_moe_fp8_layer_for_marlin(
                 layer, False, input_dtype=self.marlin_input_dtype
             )

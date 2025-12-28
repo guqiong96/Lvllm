@@ -1033,7 +1033,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                 layer.w13_weight.data = w13_weight.data
 
         from vllm.envs import is_lk_moe_numa_enabled, is_disabled_lk_moe_layer  
-        if self.use_marlin and not is_lk_moe_numa_enabled() and not is_disabled_lk_moe_layer(layer.layer_name):
+        if self.use_marlin and not is_lk_moe_numa_enabled():
             prepare_moe_fp8_layer_for_marlin(
                 layer, False, input_dtype=self.marlin_input_dtype
             )

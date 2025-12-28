@@ -3,17 +3,18 @@
 
 LvLLM is a special extension of vllm that makes full use of CPU and memory resources, reduces GPU memory requirements, and features an efficient GPU parallel and NUMA parallel architecture, supporting hybrid inference for MOE large models.
 
-## 2025-12-16: v1.2.0 ynchronized the upstream vllm code to the latest version, optimized lk_moe to reduce memory usage
 
-Known issue: Qwen3-Next-80B-A3B-Instruct requires using the dtype: "bfloat16" to work properly
+## 2025-12-28: Optimize inference speed: bfloat16, float16, awq4bit; optimize NUMA data access for multiple GPUs; enable NUMA nodes for multiple GPUs to achieve the best performance
+
+
+## 2025-12-16: v1.2.0 ynchronized the upstream vllm code to the latest version, optimized lk_moe to reduce memory usage
+ 
  
 ## 2025-12-14: v1.1.2 Added inference support for the AWQ-4bit quantized model (symmetric quantization - avx2 version), cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit and cpatonn/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit has passed verification
 
 torch version updated to 2.9.1(do not use torch 2.9.0)
 
-Known issue: Qwen3-Next-80B-A3B-Instruct-AWQ-4bit currently only works properly with tensor-parallel-size: 2
-
-
+ 
 ## 2025-12-9: Added the LVLLM_MOE_USE_WEIGHT environment variable to support MOE modules using two modes to infer fp8 models
 
 LVLLM_MOE_USE_WEIGHT="KEEP": lk_moe inference uses the original weight format fp8_e4m3, reducing memory usage during inference.
@@ -226,15 +227,17 @@ You can modify the parameters in the configuration file or adjust the environmen
 
 ​LvLLM是vllm的特别扩展，充分利用cpu和内存资源，降低显卡显存要求，高效的GPU并行+NUMA并行架构，支持混合推理MOE大模型 
 
+
+## 2025-12-16 优化推理速度：bfloat16、float16、awq4bit，优化多GPU的numa数据访问，多GPU开启NUMA节点获取最佳性能
+
+
 ## 2025-12-16 v1.2.0 同步上游vllm代码至最新，lk_moe优化降低内存占用
 
-已知问题：Qwen3-Next-80B-A3B-Instruct-FP8需要使用dtype: "bfloat16" 才能正常工作
 
 ## 2025-12-14 v1.1.2 增加AWQ-4bit量化模型（对称量化 avx2版本）推理支持 -，验证通过 cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit and cpatonn/Qwen3-Next-80B-A3B-Instruct-AWQ-4bit
 
-torch 版本升级至 2.9.1(不要使用torch 2.9.0)
-
-已知问题：Qwen3-Next-80B-A3B-Instruct-AWQ-4bit 目前仅在 tensor-parallel-size 为 2 时才能正常工作
+torch 版本升级至 2.9.1 
+ 
 
 ## 2025-12-9: 增加LVLLM_MOE_USE_WEIGHT环境变量，支持MOE模块使用两种模式推理fp8模型：
 
@@ -242,7 +245,7 @@ LVLLM_MOE_USE_WEIGHT="KEEP": lk_moe推理使用权重原始格式fp8_e4m3, 降�
 
 LVLLM_MOE_USE_WEIGHT="TO_DTYPE": lk_moe推理使用配置参数dtype：float16或bfloat16, 提高fp8模型推理速度， 但会增加内存占用延长加载时间，TO_DTYPE为默认值
 
-torch 版本升级至 2.9.1(不要使用torch 2.9.0)
+torch 版本升级至 2.9.1 
 
 ## 2025-11-1： 支持张量并行、流水线多卡推理 https://b23.tv/xzHieMs
 ```bash

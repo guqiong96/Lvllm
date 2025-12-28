@@ -2299,10 +2299,10 @@ class FusedMoE(CustomOp):
             10,                            # group_min_len
             1024,                          # group_max_len
             hidden_ggml_type,           
-            w13_ptr,                 # w13_ptr 
-            w2_ptr,                 # w2_ptr
             w13_ggml_type,                # gate_type  
             w2_ggml_type,                # down_type   
+            w13_ptr,                 # w13_ptr 
+            w2_ptr,                 # w2_ptr
         )
          
         self.lk_moe_config = moe_config 
@@ -2335,6 +2335,7 @@ class FusedMoE(CustomOp):
         
         return scale_expanded
     
+    @torch.compiler.disable
     def _process_compressed_tensors_weights(self, strategy: str): 
         
         from compressed_tensors.quantization import QuantizationStrategy
@@ -2360,7 +2361,7 @@ class FusedMoE(CustomOp):
         group_size = self.quant_method.group_size        # 32
         num_bits = self.quant_method.num_bits            # 4
         packed_factor = self.quant_method.packed_factor  # 8 （bit)
-        weight_type = 100 # WEIGHT_TYPE_INT4
+         
  
         weights_per_container = packed_factor // num_bits  # 2
  
@@ -2397,25 +2398,34 @@ class FusedMoE(CustomOp):
         
         w13_weight_ptr = w13_weight.contiguous().data_ptr()
         w2_weight_ptr = w2_weight.contiguous().data_ptr()
-        w13_weight_scale_ptr = w13_scale.contiguous().data_ptr()
-        w2_weight_scale_ptr = w2_scale.contiguous().data_ptr()
+        if w13_scale.dtype == torch.bfloat16:
+            w13_scale = w13_scale.to(torch.float16, copy=True).contiguous()
+            w2_scale = w2_scale.to(torch.float16, copy=True).contiguous()
+            
+            w13_weight_scale_ptr = w13_scale.contiguous().data_ptr()
+            w2_weight_scale_ptr = w2_scale.contiguous().data_ptr()
+            scale_ggml_type = 1
+        else:
+            w13_weight_scale_ptr = w13_scale.contiguous().data_ptr()
+            w2_weight_scale_ptr = w2_scale.contiguous().data_ptr()
         
         num_processes, process_id = self._get_processes_info()
         
-        moe_config = lk_moe.MOE_WNA16Config(
+        moe_config = lk_moe.MOE_WNA16RepackConfig(
             num_processes,                # num_processes
             process_id,                   # process_id
             self.local_num_experts,        # expert_num
             self.top_k,                    # routed_expert_num
-            hidden_size,                   # hidden_size
-            intermediate_size,             # intermediate_size
+            self.hidden_size,                   # hidden_size
+            self.intermediate_size_per_partition,             # intermediate_size
             32,                            # stride
             10,                            # group_min_len
             1024,                          # group_max_len
             hidden_ggml_type,              # hidden_type 
+            2,
+            2,
             w13_weight_ptr,                     # w13_weight_ptr 
-            w2_weight_ptr,                       # w2_weight_ptr  
-            weight_type,
+            w2_weight_ptr,                       # w2_weight_ptr   
             w13_weight_scale_ptr,               # w13_weight_scale_ptr
             w2_weight_scale_ptr,                 # w2_weight_scale_ptr
             scale_ggml_type,
@@ -2427,15 +2437,20 @@ class FusedMoE(CustomOp):
         )
          
         self.lk_moe_config = moe_config 
-        self.lk_moe = lk_moe.MOE_WNA16(moe_config) 
+        self.lk_moe = lk_moe.MOE_WNA16Repack(moe_config) 
+        
+        self._zero_tensor(w13_scale)
+        self._zero_tensor(w2_scale)
            
         self._zero_tensor(self.w13_weight_packed)
         self._zero_tensor(self.w2_weight_packed)
         self._zero_tensor(self.w13_weight_scale)
         self._zero_tensor(self.w2_weight_scale)
-        
+         
         del w13_weight, w2_weight, w13_scale, w2_scale
         del self.w13_weight_packed, self.w2_weight_packed , self.w13_weight_scale, self.w2_weight_scale
+        
+       
  
         import gc
         gc.collect()  
@@ -2485,9 +2500,7 @@ class FusedMoE(CustomOp):
          
         
         scale_ggml_type = self.get_ggml_type_from_dtype(w13_weight_scale.dtype)
-        
-        weight_type = 102 # WEIGHT_TYPE_FP8_E4M3
-        
+         
         w13_weight_ptr = self.w13_weight.contiguous().data_ptr()
         w2_weight_ptr = self.w2_weight.contiguous().data_ptr()
         w13_weight_scale_ptr = w13_weight_scale.contiguous().data_ptr()
@@ -2506,9 +2519,10 @@ class FusedMoE(CustomOp):
             10,                            # group_min_len
             1024,                          # group_max_len
             hidden_ggml_type,              # hidden_type 
+            8,
+            8,
             w13_weight_ptr,                     # w13_weight_ptr 
-            w2_weight_ptr,                       # w2_weight_ptr  
-            weight_type,
+            w2_weight_ptr,                       # w2_weight_ptr   
             w13_weight_scale_ptr,               # w13_weight_scale_ptr
             w2_weight_scale_ptr,                 # w2_weight_scale_ptr 
             scale_ggml_type,
@@ -2608,12 +2622,12 @@ class FusedMoE(CustomOp):
             self.intermediate_size_per_partition,             # intermediate_size
             32,                            # stride
             10,                            # group_min_len
-            1024,                          # group_max_len 
+            8192,                          # group_max_len 
             hidden_ggml_type,                # hidden_type 
-            w13_ptr,                 # w13_proj
-            w2_ptr,                   # w2_proj 
             w13_ggml_type,                  # w13_type  
             w2_ggml_type,                # w2_type   
+            w13_ptr,                 # w13_proj
+            w2_ptr,                   # w2_proj 
         )
          
         self.lk_moe_config = moe_config 
@@ -2700,11 +2714,11 @@ class FusedMoE(CustomOp):
             32,                            # stride
             10,                            # group_min_len
             1024,                          # group_max_len 
-            hidden_ggml_type,                # hidden_type 
-            w13_ptr,                 # w13_proj
-            w2_ptr,                   # w2_proj 
+            hidden_ggml_type,                # hidden_type  
             w13_ggml_type,                  # w13_type  
             w2_ggml_type,                # w2_type   
+            w13_ptr,                 # w13_proj
+            w2_ptr,                   # w2_proj 
         )
          
         self.lk_moe_config = moe_config 
@@ -2753,11 +2767,11 @@ class FusedMoE(CustomOp):
             32,                            # stride
             10,                            # group_min_len
             1024,                          # group_max_len
-            hidden_ggml_type,           
-            w13_ptr,                 # w13_ptr 
-            w2_ptr,                 # w2_ptr
+            hidden_ggml_type,            
             w13_ggml_type,                # gate_type  
-            w2_ggml_type,                # down_type   
+            w2_ggml_type,                # down_type  
+            w13_ptr,                 # w13_ptr 
+            w2_ptr,                 # w2_ptr 
         )
          
         self.lk_moe_config = moe_config 
@@ -2777,7 +2791,7 @@ class FusedMoE(CustomOp):
     def _initialize_cuda_graph_buffers(self): 
         if not hasattr(FusedMoE, 'cuda_graphs'): 
             max_num_batched_tokens = 2048 
-            FusedMoE.cuda_graphs = [1, 2, 4] + list(range(8, max_num_batched_tokens+1, 8))
+            FusedMoE.cuda_graphs = [1, 2, 4] + list(range(8, max_num_batched_tokens+1, 8)) 
              
             FusedMoE.input_tensor_cpu = {}  # device_id -> buffers
             FusedMoE.expert_ids_cpu = {}    # device_id -> buffers
@@ -2843,7 +2857,7 @@ class FusedMoE(CustomOp):
                             f"Maximum available buffer size: {cuda_graphs[-1]}")
         
         return best_index
-
+    
     def _process_valid_inputs(self, hidden_states: torch.Tensor, router_logits: torch.Tensor) -> torch.Tensor:
         """Process inputs that are guaranteed to be valid (non-NaN)"""
         topk_weights, topk_ids, zero_expert_result = self.select_experts(
