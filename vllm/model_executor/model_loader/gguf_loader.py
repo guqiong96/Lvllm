@@ -361,8 +361,8 @@ class GGUFModelLoader(BaseModelLoader):
         )
         vllm_config.quant_config.unquantized_modules.extend(unquant_names)
         
-        from vllm.envs import is_lk_moe_numa_enabled
-        if is_lk_moe_numa_enabled():
+        from vllm.envs import is_lk_moe_feature_enabled
+        if is_lk_moe_feature_enabled():
             import re
             layer_groups = {}
             for name, weight_type in weight_type_map.items():

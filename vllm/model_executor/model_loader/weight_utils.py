@@ -945,8 +945,8 @@ def gguf_quant_weights_iterator(
             if weight_type.name not in ("F32", "BF16", "F16"):
                 name = name.replace("weight", "qweight")
             device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
-            from vllm.envs import is_lk_moe_numa_enabled
-            if is_lk_moe_numa_enabled() and (".gate_proj." in name or ".up_proj." in name or ".down_proj." in name):
+            from vllm.envs import is_lk_moe_feature_enabled
+            if is_lk_moe_feature_enabled() and (".gate_proj." in name or ".up_proj." in name or ".down_proj." in name):
                 device = "cpu"
                 
             if weight_type.name == "BF16" and tensor.data.dtype == np.uint8:

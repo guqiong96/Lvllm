@@ -93,8 +93,8 @@ import ctypes
 import numpy as np
 
 import vllm
-from vllm.envs import is_lk_moe_numa_enabled, is_lk_moe_use_weight_keep, is_disabled_lk_moe_layer
-if is_lk_moe_numa_enabled():
+from vllm.envs import is_lk_moe_feature_enabled, is_lk_moe_use_weight_keep, should_use_lk_moe_for_layer
+if is_lk_moe_feature_enabled():
     import  lk_moe
     GGML_TYPE_TO_TORCH_DTYPE = {
         0: torch.float32,    # GGML_TYPE_F32
@@ -385,7 +385,6 @@ class FusedMoE(CustomOp):
         num_redundant_experts: int = 0,
         has_bias: bool = False,
         is_sequence_parallel=False,
-        use_lk_moe: bool = True,
         zero_expert_num: int | None = 0,
         zero_expert_type: str | None = None,
         expert_mapping: list[tuple[str, str, int, str]] | None = None,
@@ -394,10 +393,11 @@ class FusedMoE(CustomOp):
     ):
         super().__init__()
         
-        self.use_lk_moe = use_lk_moe and is_lk_moe_numa_enabled()
+        
+        self._lk_moe_init_lock = threading.Lock() 
+        self.use_lk_moe = is_lk_moe_feature_enabled()
         self.lk_moe = None
         self.lk_moe_config = None
-        self._lk_moe_init_lock = threading.Lock() 
         
 
         # Allow disabling of the separate shared experts stream for
@@ -473,7 +473,7 @@ class FusedMoE(CustomOp):
         compilation_config.static_forward_context[prefix] = self
         self.layer_name = prefix
         
-        if is_disabled_lk_moe_layer(self.layer_name):
+        if not should_use_lk_moe_for_layer(self.layer_name):
             self.use_lk_moe = False
 
         self.enable_eplb = enable_eplb

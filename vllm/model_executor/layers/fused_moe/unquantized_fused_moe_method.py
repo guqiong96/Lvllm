@@ -145,10 +145,10 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         params_dtype: torch.dtype,
         **extra_weight_attrs,
     ):
-        from vllm.envs import is_lk_moe_numa_enabled, is_disabled_lk_moe_layer
+        from vllm.envs import should_use_lk_moe_for_layer
         from vllm.model_executor.layers.fused_moe.layer import FusedMoE
         device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
-        if isinstance(layer, FusedMoE) and is_lk_moe_numa_enabled() and not is_disabled_lk_moe_layer(layer.layer_name):
+        if isinstance(layer, FusedMoE) and should_use_lk_moe_for_layer(layer.layer_name):
             device = "cpu"  
             
         if self.moe.is_act_and_mul:

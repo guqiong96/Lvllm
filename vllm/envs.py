@@ -1770,7 +1770,7 @@ def compile_factors() -> dict[str, object]:
     return factors
 
 
-def is_lk_moe_numa_enabled() -> bool:
+def is_lk_moe_feature_enabled() -> bool:
     try:
         import  lk_moe  
         return environment_variables["LVLLM_MOE_NUMA_ENABLED"]()
@@ -1814,15 +1814,20 @@ def extract_layer_index(layer_name: str, num_attn_module: int = 1) -> int:
         )
         return layer_index
     
-def is_disabled_lk_moe_layer(layer_name: str)-> bool:
+def should_use_lk_moe_for_layer(layer_name: str)-> bool:
+
+    if not is_lk_moe_feature_enabled():
+        return False   
+    
     layer_id = extract_layer_index(layer_name)
     
+  
     disabled_layers_env = environment_variables.get("LVLLM_DISABLE_LK_MOE_LAYERS", "")()
     if not disabled_layers_env:
-        return False
+        return True   
     
     disabled_layers_env = disabled_layers_env.strip()
- 
+    
     disabled_layers = set()
     for part in disabled_layers_env.split(','):
         part = part.strip()
@@ -1841,5 +1846,6 @@ def is_disabled_lk_moe_layer(layer_name: str)-> bool:
                 disabled_layers.add(int(part))
             except ValueError: 
                 continue
-            
-    return layer_id in disabled_layers
+     
+    return layer_id not in disabled_layers
+ 

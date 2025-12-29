@@ -733,9 +733,9 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
         params_dtype: torch.dtype,
         **extra_weight_attrs,
     ):
-        from vllm.envs import is_lk_moe_numa_enabled, is_disabled_lk_moe_layer
+        from vllm.envs import should_use_lk_moe_for_layer
         device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
-        if isinstance(layer, FusedMoE) and is_lk_moe_numa_enabled() and not is_disabled_lk_moe_layer(layer.layer_name):
+        if isinstance(layer, FusedMoE) and should_use_lk_moe_for_layer(layer.layer_name):
             device = "cpu"
         layer.intermediate_size_per_partition = intermediate_size_per_partition
         layer.hidden_size = hidden_size
@@ -959,7 +959,7 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
             layer.w13_weight_scale = torch.nn.Parameter(
                 max_w13_scales, requires_grad=False
             )
-        from vllm.envs import is_lk_moe_numa_enabled, is_disabled_lk_moe_layer
+        from vllm.envs import should_use_lk_moe_for_layer
         # Property to determine if AITER is used
         if self.rocm_aiter_moe_enabled:
             # reshaping weights is required for aiter moe kernel.
@@ -970,7 +970,7 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
             layer.w13_weight = torch.nn.Parameter(shuffled_w13, requires_grad=False)
             layer.w2_weight = torch.nn.Parameter(shuffled_w2, requires_grad=False)
 
-        elif self.use_marlin and not is_lk_moe_numa_enabled():
+        elif self.use_marlin and not should_use_lk_moe_for_layer(layer.layer_name):
             prepare_moe_fp8_layer_for_marlin(
                 layer, False, input_dtype=self.marlin_input_dtype
             )
@@ -1464,9 +1464,9 @@ class CompressedTensorsWNA16MarlinMoEMethod(CompressedTensorsMoEMethod):
         params_dtype: torch.dtype,
         **extra_weight_attrs,
     ):
-        from vllm.envs import is_lk_moe_numa_enabled, is_disabled_lk_moe_layer
+        from vllm.envs import should_use_lk_moe_for_layer
         device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
-        if isinstance(layer, FusedMoE) and is_lk_moe_numa_enabled() and not is_disabled_lk_moe_layer(layer.layer_name):
+        if isinstance(layer, FusedMoE) and should_use_lk_moe_for_layer(layer.layer_name):
             device = "cpu"
         intermediate_size_full = extra_weight_attrs.pop("intermediate_size_full")
 
@@ -1609,8 +1609,8 @@ class CompressedTensorsWNA16MarlinMoEMethod(CompressedTensorsMoEMethod):
         layer.marlin_state = GPTQMarlinState.REPACK
 
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
-        from vllm.envs import is_lk_moe_numa_enabled, is_disabled_lk_moe_layer 
-        if isinstance(layer, FusedMoE) and is_lk_moe_numa_enabled() and not is_disabled_lk_moe_layer(layer.layer_name):
+        from vllm.envs import should_use_lk_moe_for_layer 
+        if isinstance(layer, FusedMoE) and should_use_lk_moe_for_layer(layer.layer_name):
             layer.w13_weight_packed = torch.nn.Parameter(
             layer.w13_weight_packed.cpu().transpose(1, 2).contiguous().view(torch.uint8),
                 requires_grad=False,
@@ -1866,9 +1866,9 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
         params_dtype: torch.dtype,
         **extra_weight_attrs,
     ):
-        from vllm.envs import is_lk_moe_numa_enabled, is_disabled_lk_moe_layer
+        from vllm.envs import should_use_lk_moe_for_layer
         device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
-        if isinstance(layer, FusedMoE) and is_lk_moe_numa_enabled() and not is_disabled_lk_moe_layer(layer.layer_name):
+        if isinstance(layer, FusedMoE) and should_use_lk_moe_for_layer(layer.layer_name):
             device = "cpu"
         # Will transpose the loaded weight along the
         # intermediate and hidden dim sizes. Will
