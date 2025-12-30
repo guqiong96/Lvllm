@@ -2887,49 +2887,64 @@ class FusedMoE(CustomOp):
          
         is_decode_mode = getattr(batch_descriptor, 'uniform_decode', False) 
         
-        if(hasattr(batch_descriptor, 'num_tokens')):
-            batch_size = batch_descriptor.num_tokens
-        else:
-            batch_size = hidden_states.size(0)
+        
+        batch_size = hidden_states.size(0)
         
         stream = current_stream()
         stream_ptr = get_cuda_stream_ptr(stream) 
         non_blocking = True
-        
-        try:      
-            graph_index = self._find_best_graph_index(batch_size)
-            
-            current_device = torch.cuda.current_device()  
-            
-            input_tensor_cpu = FusedMoE.input_tensor_cpu[current_device]
-            expert_ids_cpu = FusedMoE.expert_ids_cpu[current_device]
-            weights_cpu = FusedMoE.weights_cpu[current_device]
-            output_cpu = FusedMoE.output_cpu[current_device]
-            bsz_tensor_cpu = FusedMoE.bsz_tensor_cpu[current_device]
-            output_gpu = FusedMoE.output_gpu[current_device]
-                 
-            bsz_tensor_cpu[graph_index][0] = batch_size 
+       
+        try:   
+            if torch.cuda.is_current_stream_capturing():  
+                graph_index = self._find_best_graph_index(batch_size)
+                
+                current_device = torch.cuda.current_device()  
+                
+                input_tensor_cpu = FusedMoE.input_tensor_cpu[current_device]
+                expert_ids_cpu = FusedMoE.expert_ids_cpu[current_device]
+                weights_cpu = FusedMoE.weights_cpu[current_device]
+                output_cpu = FusedMoE.output_cpu[current_device]
+                bsz_tensor_cpu = FusedMoE.bsz_tensor_cpu[current_device]
+                output_gpu = FusedMoE.output_gpu[current_device]
+                    
+                bsz_tensor_cpu[graph_index][0] = batch_size 
 
-            input_tensor_cpu[graph_index][:batch_size].copy_(hidden_states, non_blocking=non_blocking)
-            expert_ids_cpu[graph_index][:batch_size].copy_(topk_ids, non_blocking=non_blocking)
-            weights_cpu[graph_index][:batch_size].copy_(topk_weights, non_blocking=non_blocking) 
-            input_ptr = input_tensor_cpu[graph_index].data_ptr()
-            expert_ids_ptr = expert_ids_cpu[graph_index].data_ptr()
-            weights_ptr = weights_cpu[graph_index].data_ptr()
-            output_ptr = output_cpu[graph_index].data_ptr()   
-            self.lk_moe.submit_with_cuda_stream(
-                stream_ptr, 
-                hidden_states.size(0),                                   # qlen
-                expert_ids_cpu[graph_index].size(1),                     # k
-                expert_ids_ptr,                  # expert_ids
-                weights_ptr,                     # weights
-                input_ptr,                       # input
-                output_ptr,                      # output 
-                bsz_tensor_cpu[graph_index].data_ptr()                   # bsz_tensor
-            )  
-            self.lk_moe.sync_with_cuda_stream(stream_ptr) 
-            output_gpu[graph_index][:batch_size].copy_(output_cpu[graph_index][:batch_size], non_blocking=non_blocking) 
-            return weak_ref_tensors(output_gpu[graph_index][:batch_size])  
+                input_tensor_cpu[graph_index][:batch_size].copy_(hidden_states, non_blocking=non_blocking)
+                expert_ids_cpu[graph_index][:batch_size].copy_(topk_ids, non_blocking=non_blocking)
+                weights_cpu[graph_index][:batch_size].copy_(topk_weights, non_blocking=non_blocking) 
+                input_ptr = input_tensor_cpu[graph_index].data_ptr()
+                expert_ids_ptr = expert_ids_cpu[graph_index].data_ptr()
+                weights_ptr = weights_cpu[graph_index].data_ptr()
+                output_ptr = output_cpu[graph_index].data_ptr()   
+                self.lk_moe.submit_with_cuda_stream(
+                    stream_ptr, 
+                    batch_size,                                   # qlen
+                    expert_ids_cpu[graph_index].size(1),                     # k
+                    expert_ids_ptr,                  # expert_ids
+                    weights_ptr,                     # weights
+                    input_ptr,                       # input
+                    output_ptr,                      # output 
+                    bsz_tensor_cpu[graph_index].data_ptr()                   # bsz_tensor
+                )  
+                self.lk_moe.sync_with_cuda_stream(stream_ptr) 
+                output_gpu[graph_index][:batch_size].copy_(output_cpu[graph_index][:batch_size], non_blocking=non_blocking)  
+                return weak_ref_tensors(output_gpu[graph_index][:batch_size])  
+            else: 
+                expert_ids_cpu = topk_ids.clone().to(dtype=torch.int64, device='cpu', memory_format=torch.contiguous_format)
+                weights_cpu = topk_weights.clone().to(dtype=torch.float32, device='cpu', memory_format=torch.contiguous_format)
+                hidden_states_cpu = hidden_states.clone().to(device='cpu', memory_format=torch.contiguous_format)
+                output_cpu = torch.empty_like(hidden_states, device='cpu').contiguous()
+                bsz_tensor = torch.tensor([hidden_states.size(0)], device='cpu', dtype=torch.int32)
+                self.lk_moe.forward(
+                    hidden_states.size(0),                         # qlen
+                    expert_ids_cpu.size(1),                    # k
+                    expert_ids_cpu.data_ptr(),                 # expert_ids
+                    weights_cpu.data_ptr(),                    # weights
+                    hidden_states_cpu.data_ptr(),              # input
+                    output_cpu.data_ptr(),                     # output 
+                    bsz_tensor.data_ptr()                      # bsz_tensor
+                )      
+                return output_cpu.to(hidden_states.device) 
        
         except Exception as e:
             logger.error(f"lk_moe forward failed with error: {e}, falling back to default path")
