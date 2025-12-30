@@ -231,6 +231,8 @@ if TYPE_CHECKING:
     LVLLM_MOE_NUMA_ENABLED: bool = False
     LVLLM_MOE_USE_WEIGHT: Literal["KEEP", "TO_DTYPE"] = "TO_DTYPE"
     LVLLM_DISABLE_LK_MOE_LAYERS: str | None = None
+    LVLLM_GPU_EXPERT_COMPUTATION: bool = False
+    LVLLM_GPU_PREFETCH_WINDOW: int = 3
     VLLM_DEEPEP_BUFFER_SIZE_MB: int = 1024
     VLLM_DEEPEP_HIGH_THROUGHPUT_FORCE_INTRA_NODE: bool = False
     VLLM_DEEPEP_LOW_LATENCY_USE_MNNVL: bool = False
@@ -1559,6 +1561,14 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # Weight format for MOE.
     "LVLLM_MOE_USE_WEIGHT": lambda: os.getenv("LVLLM_MOE_USE_WEIGHT", "TO_DTYPE"),
     "LVLLM_DISABLE_LK_MOE_LAYERS": lambda: os.environ.get("LVLLM_DISABLE_LK_MOE_LAYERS", None),
+    # Whether to enable GPU expert computation.
+    "LVLLM_GPU_EXPERT_COMPUTATION": lambda: bool(
+        int(os.getenv("LVLLM_GPU_EXPERT_COMPUTATION", "0"))
+    ),
+    # Prefetch window size for GPU expert computation.
+    "LVLLM_GPU_PREFETCH_WINDOW": lambda: int(
+        os.getenv("LVLLM_GPU_PREFETCH_WINDOW", "3")
+    ),
     # Disables parallel execution of shared_experts via separate cuda stream
     "VLLM_DISABLE_SHARED_EXPERTS_STREAM": lambda: bool(
         int(os.getenv("VLLM_DISABLE_SHARED_EXPERTS_STREAM", "0"))
@@ -1721,6 +1731,8 @@ def compile_factors() -> dict[str, object]:
         "LVLLM_MOE_NUMA_ENABLED",
         "LVLLM_DISABLE_LK_MOE_LAYERS",
         "LVLLM_MOE_USE_WEIGHT",
+        "LVLLM_GPU_EXPERT_COMPUTATION",
+        "LVLLM_GPU_PREFETCH_WINDOW",
     }
 
     from vllm.config.utils import normalize_value
@@ -1777,9 +1789,15 @@ def is_lk_moe_feature_enabled() -> bool:
     except Exception as e:
         print(f"Error: lk_moe is not available falling back to default behavior." , e)
         return False
+
+def is_gpu_expert_computation_enabled() -> bool:
+    return environment_variables["LVLLM_GPU_EXPERT_COMPUTATION"]()
+
 def is_lk_moe_use_weight_keep() -> bool:
     return environment_variables["LVLLM_MOE_USE_WEIGHT"]() == "KEEP"
 
+def get_gpu_prefetch_window() -> int:
+    return environment_variables["LVLLM_GPU_PREFETCH_WINDOW"]()
 
 def extract_layer_index(layer_name: str, num_attn_module: int = 1) -> int:
     """
