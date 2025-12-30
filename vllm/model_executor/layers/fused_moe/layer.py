@@ -93,7 +93,7 @@ import ctypes
 import numpy as np
 
 import vllm
-from vllm.envs import is_lk_moe_feature_enabled, is_lk_moe_use_weight_keep, should_use_lk_moe_for_layer
+from vllm.envs import is_lk_moe_feature_enabled, is_lk_moe_use_weight_keep, should_use_lk_moe_for_layer, is_gpu_expert_computation_enabled, get_gpu_prefetch_window
 if is_lk_moe_feature_enabled():
     import  lk_moe
     GGML_TYPE_TO_TORCH_DTYPE = {
@@ -396,6 +396,8 @@ class FusedMoE(CustomOp):
         
         self._lk_moe_init_lock = threading.Lock() 
         self.use_lk_moe = is_lk_moe_feature_enabled()
+        self.use_gpu_expert_computation = is_gpu_expert_computation_enabled()
+        self.gpu_prefetch_window = get_gpu_prefetch_window()
         self.lk_moe = None
         self.lk_moe_config = None
         
@@ -1867,12 +1869,8 @@ class FusedMoE(CustomOp):
             staged_router_logits = batched_router_logits[:chunk_size, :]  # type: ignore
             staged_hidden_states.copy_(hidden_states, non_blocking=True)
             staged_router_logits.copy_(router_logits, non_blocking=True)
-            if self.use_lk_moe and self.lk_moe is not None:
-                try:  
-                    final_hidden_states = self.forward_lk(staged_hidden_states, staged_router_logits)
-                except Exception as e:
-                    logger.error(f"Error in lk::MOE forward with chunk size {chunk_size}: {e}") 
-                    self.use_lk_moe = False
+            if self.use_lk_moe and self.lk_moe is not None and not self.use_gpu_expert_computation: 
+                final_hidden_states = self.forward_lk(staged_hidden_states, staged_router_logits)
             else:
                 # Matrix multiply.
                 final_hidden_states = self.quant_method.apply(
@@ -1952,6 +1950,8 @@ class FusedMoE(CustomOp):
         hidden_states: torch.Tensor,
         router_logits: torch.Tensor,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        # if self.use_lk_moe and self.lk_moe is not None and self.use_gpu_expert_computation:
+        #     self.prefetch_next_layers_async(self, current_layer_idx, moe_layers)
         assert self.quant_method is not None
 
         self.ensure_moe_quant_config_init()
@@ -2052,12 +2052,8 @@ class FusedMoE(CustomOp):
                     router_logits,
                     dim=0,
                 )
-            if self.use_lk_moe and self.lk_moe is not None:
-                try:  
-                    final_hidden_states = self.forward_lk(hidden_states, router_logits)
-                except Exception as e:
-                    logger.error(f"Error in lk::MOE forward: {e}") 
-                    self.use_lk_moe = False
+            if self.use_lk_moe and self.lk_moe is not None and not self.use_gpu_expert_computation:
+                final_hidden_states = self.forward_lk(hidden_states, router_logits)
             else:
                 # Matrix multiply.
                 final_hidden_states = self.quant_method.apply(
@@ -2114,7 +2110,8 @@ class FusedMoE(CustomOp):
             else:
                 return combine_output(final_hidden_states)
     
-            
+    def prefetch_next_layers_async(self, current_layer_idx, moe_layers):
+        pass        
             
     def _get_ggml_type_from_quant_config(self,  quant_config, layer_idx, weight_type):  
         if layer_idx < len(quant_config.moe_weight_type_map):
@@ -2807,30 +2804,31 @@ class FusedMoE(CustomOp):
             buff_dtype = self.moe_config.in_dtype
              
             FusedMoE.output_gpu[current_device] = [
-                torch.zeros((batch_size, hidden_size), device=current_device, dtype=buff_dtype, requires_grad=False).contiguous()
+                torch.zeros((batch_size, hidden_size), device=current_device, dtype=buff_dtype)
                 for batch_size in FusedMoE.cuda_graphs
             ]
             
             FusedMoE.input_tensor_cpu[current_device] = [
-                torch.zeros((batch_size, self.hidden_size), device="cpu", dtype=buff_dtype, pin_memory=True, requires_grad=False).contiguous()
+                torch.zeros((batch_size, self.hidden_size), device="cpu", dtype=buff_dtype, pin_memory=True)
                 for batch_size in FusedMoE.cuda_graphs
             ]
             FusedMoE.expert_ids_cpu[current_device] = [
-                torch.zeros((batch_size, num_experts_per_tok), device="cpu", dtype=torch.long, pin_memory=True, requires_grad=False).contiguous()
+                torch.zeros((batch_size, num_experts_per_tok), device="cpu", dtype=torch.long, pin_memory=True)
                 for batch_size in FusedMoE.cuda_graphs
             ]
             FusedMoE.weights_cpu[current_device] = [
-                torch.zeros((batch_size, num_experts_per_tok), device="cpu", dtype=torch.float32, pin_memory=True, requires_grad=False).contiguous()
+                torch.zeros((batch_size, num_experts_per_tok), device="cpu", dtype=torch.float32, pin_memory=True)
                 for batch_size in FusedMoE.cuda_graphs
             ]
             FusedMoE.output_cpu[current_device] = [
-                torch.zeros((batch_size, hidden_size), device="cpu", pin_memory=True, dtype=buff_dtype, requires_grad=False).contiguous()
+                torch.zeros((batch_size, hidden_size), device="cpu", pin_memory=True, dtype=buff_dtype)
                 for batch_size in FusedMoE.cuda_graphs
             ]
             FusedMoE.bsz_tensor_cpu[current_device] = [
-                torch.zeros((1), device="cpu", dtype=torch.int32, pin_memory=True, requires_grad=False).contiguous()
+                torch.zeros((1), device="cpu", dtype=torch.int32, pin_memory=True)
                 for _ in range(len(FusedMoE.cuda_graphs))
             ]
+
          
     def _find_best_graph_index(self, total_tokens: int) -> int:
         if not hasattr(FusedMoE, 'cuda_graphs') or not FusedMoE.cuda_graphs:
