@@ -52,7 +52,6 @@ llama-gguf-split --merge ~/Models/XXXXX-00001-of-00005.gguf ~/Models/XXXX-merged
 ```
 ## October 14, 2025: CUDA Graph Enabled, Decoding Speed Doubled!!! Output Quality Improved!!!
 
-Setting dtype: "float16" in config.yaml provides a 1.5x prefill speed increase compared to not setting it or setting it to dtype: "bfloat16". Xeon processors with AMX may not be affected.
 
 <img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/b9760c71-d07b-423a-9e8d-f70c3a007a1b" />
 
@@ -279,7 +278,7 @@ llama-gguf-split --merge ~/Models/XXXXX-00001-of-00005.gguf ~/Models/XXXX-merged
 
 ## 2025-10-14: 开启cuda graph , decode 速度翻倍！！ 输出质量提高！！
 
-config.yaml里面设置dtype: "float16"相比不设置或设置为dtype: "bfloat16" 有1.5倍prefill速度提升，带amx的至强可能不受影响
+
 
 <img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/b9760c71-d07b-423a-9e8d-f70c3a007a1b" />
 

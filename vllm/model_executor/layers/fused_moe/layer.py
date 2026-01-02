@@ -2180,20 +2180,6 @@ class FusedMoE(CustomOp):
                 find_weight = True
                 
             if isinstance(self.quant_method, Fp8MoEMethod):
-                if self.quant_method.moe_quant_config is None:
-                    self.quant_method.moe_quant_config =  fp8_w8a8_moe_quant_config(
-                        w1_scale=(
-                            self.w13_weight_scale_inv
-                            if self.quant_method.block_quant
-                            else self.w13_weight_scale
-                        ),
-                        w2_scale=(
-                            self.w2_weight_scale_inv if self.quant_method.block_quant else self.w2_weight_scale
-                        ),
-                        a1_scale=self.w13_input_scale,
-                        a2_scale=self.w2_input_scale,
-                        block_shape=self.quant_method.weight_block_size,
-                    )
                 if is_lk_moe_use_weight_keep():
                     self._process_fp8_weights(self.quant_method.block_quant)
                 else: 
@@ -2201,20 +2187,6 @@ class FusedMoE(CustomOp):
                 find_weight = True
                 
             if isinstance(self.quant_method, CompressedTensorsW8A8Fp8MoEMethod):
-                if self.quant_method.moe_quant_config is None:
-                    self.quant_method.moe_quant_config =  fp8_w8a8_moe_quant_config(
-                        w1_scale=(
-                            self.w13_weight_scale_inv
-                            if self.quant_method.block_quant
-                            else self.w13_weight_scale
-                        ),
-                        w2_scale=(
-                            self.w2_weight_scale_inv if self.quant_method.block_quant else self.w2_weight_scale
-                        ),
-                        a1_scale=self.w13_input_scale,
-                        a2_scale=self.w2_input_scale,
-                        block_shape=self.quant_method.weight_block_size,
-                    )
                 if is_lk_moe_use_weight_keep():
                     self._process_fp8_weights(False)
                 else:
@@ -2285,7 +2257,7 @@ class FusedMoE(CustomOp):
         
         num_processes, process_id = self._get_processes_info()
         
-        moe_config = lk_moe.MOEConfig(
+        self.lk_moe_config = lk_moe.MOEConfig(
             num_processes,                # num_processes
             process_id,                   # process_id
             num_experts,        # expert_num
@@ -2301,9 +2273,7 @@ class FusedMoE(CustomOp):
             w13_ptr,                 # w13_ptr 
             w2_ptr,                 # w2_ptr
         )
-         
-        self.lk_moe_config = moe_config 
-        self.lk_moe = lk_moe.MOE(moe_config) 
+        self.lk_moe = lk_moe.MOE(self.lk_moe_config) 
           
         self._zero_tensor(self.w13_qweight)
         self._zero_tensor(self.w2_qweight)
@@ -2408,7 +2378,7 @@ class FusedMoE(CustomOp):
         
         num_processes, process_id = self._get_processes_info()
         
-        moe_config = lk_moe.MOE_WNA16RepackConfig(
+        self.lk_moe_config = lk_moe.MOE_WNA16RepackConfig(
             num_processes,                # num_processes
             process_id,                   # process_id
             self.local_num_experts,        # expert_num
@@ -2417,7 +2387,7 @@ class FusedMoE(CustomOp):
             self.intermediate_size_per_partition,             # intermediate_size
             32,                            # stride
             10,                            # group_min_len
-            1024,                          # group_max_len
+            1024,                         # group_max_len
             hidden_ggml_type,              # hidden_type 
             2,
             2,
@@ -2431,10 +2401,8 @@ class FusedMoE(CustomOp):
             packed_factor,                        # packed_factor
             num_bits,                        # num_bits
             group_size,                        # group_size
-        )
-         
-        self.lk_moe_config = moe_config 
-        self.lk_moe = lk_moe.MOE_WNA16Repack(moe_config) 
+        ) 
+        self.lk_moe = lk_moe.MOE_WNA16Repack(self.lk_moe_config) 
         
         self._zero_tensor(w13_scale)
         self._zero_tensor(w2_scale)
@@ -2505,7 +2473,7 @@ class FusedMoE(CustomOp):
         
         num_processes, process_id = self._get_processes_info()
         
-        moe_config = lk_moe.MOE_FP8Config(
+        self.lk_moe_config = lk_moe.MOE_FP8Config(
             num_processes,                # num_processes
             process_id,                   # process_id
             self.local_num_experts,        # expert_num
@@ -2526,9 +2494,7 @@ class FusedMoE(CustomOp):
             groupN,                        # groupN
             groupK,                        # groupK
         )
-         
-        self.lk_moe_config = moe_config 
-        self.lk_moe = lk_moe.MOE_FP8(moe_config) 
+        self.lk_moe = lk_moe.MOE_FP8(self.lk_moe_config) 
           
         del w13_weight_scale, w2_weight_scale
         if block_quant:
@@ -2553,8 +2519,8 @@ class FusedMoE(CustomOp):
             return 
         
         hidden_ggml_type = self.get_ggml_type_from_dtype(self.moe_config.in_dtype)
-        w13_ggml_type = hidden_ggml_type
-        w2_ggml_type = hidden_ggml_type 
+        w13_ggml_type = 1
+        w2_ggml_type = 1
             
         w13_projs = []
         w2_projs = [] 
@@ -2610,7 +2576,7 @@ class FusedMoE(CustomOp):
      
         num_processes, process_id = self._get_processes_info()
         
-        moe_config = lk_moe.MOEConfig(
+        self.lk_moe_config = lk_moe.MOEConfig(
             num_processes,                # num_processes
             process_id,                   # process_id
             self.local_num_experts,        # expert_num
@@ -2619,16 +2585,14 @@ class FusedMoE(CustomOp):
             self.intermediate_size_per_partition,             # intermediate_size
             32,                            # stride
             10,                            # group_min_len
-            8192,                          # group_max_len 
+            1024,                          # group_max_len 
             hidden_ggml_type,                # hidden_type 
             w13_ggml_type,                  # w13_type  
             w2_ggml_type,                # w2_type   
             w13_ptr,                 # w13_proj
             w2_ptr,                   # w2_proj 
         )
-         
-        self.lk_moe_config = moe_config 
-        self.lk_moe = lk_moe.MOE(moe_config)
+        self.lk_moe = lk_moe.MOE(self.lk_moe_config)
          
         self._zero_tensor(self.w13_weight) 
         self._zero_tensor(self.w2_weight) 
@@ -2701,7 +2665,7 @@ class FusedMoE(CustomOp):
           
         num_processes, process_id = self._get_processes_info()
         
-        moe_config = lk_moe.MOEConfig(
+        self.lk_moe_config = lk_moe.MOEConfig(
             num_processes,                # num_processes
             process_id,                   # process_id
             self.local_num_experts,        # expert_num
@@ -2716,10 +2680,8 @@ class FusedMoE(CustomOp):
             w2_ggml_type,                # w2_type   
             w13_ptr,                 # w13_proj
             w2_ptr,                   # w2_proj 
-        )
-         
-        self.lk_moe_config = moe_config 
-        self.lk_moe = lk_moe.MOE(moe_config)
+        ) 
+        self.lk_moe = lk_moe.MOE(self.lk_moe_config)
         
         del w13_tensor, w2_tensor
         del w13_ptr, w2_ptr 
@@ -2754,7 +2716,7 @@ class FusedMoE(CustomOp):
         
         num_processes, process_id = self._get_processes_info()
         
-        moe_config = lk_moe.MOEConfig(
+        self.lk_moe_config = lk_moe.MOEConfig(
             num_processes,                # num_processes
             process_id,                   # process_id
             num_experts,        # expert_num
@@ -2769,10 +2731,8 @@ class FusedMoE(CustomOp):
             w2_ggml_type,                # down_type  
             w13_ptr,                 # w13_ptr 
             w2_ptr,                 # w2_ptr 
-        )
-         
-        self.lk_moe_config = moe_config 
-        self.lk_moe = lk_moe.MOE(moe_config) 
+        ) 
+        self.lk_moe = lk_moe.MOE(self.lk_moe_config) 
          
         self._zero_tensor(self.w13_weight)
         self._zero_tensor(self.w2_weight)
@@ -2787,8 +2747,8 @@ class FusedMoE(CustomOp):
     
     def _initialize_cuda_graph_buffers(self): 
         if not hasattr(FusedMoE, 'cuda_graphs'): 
-            max_num_batched_tokens = 2048 
-            FusedMoE.cuda_graphs = [1, 2, 4] + list(range(8, max_num_batched_tokens+1, 8)) 
+            max_num_seqs = self.vllm_config.scheduler_config.max_num_seqs
+            FusedMoE.cuda_graphs = [1, 2, 4] + list(range(8, max_num_seqs+1, 8)) 
              
             FusedMoE.input_tensor_cpu = {}  # device_id -> buffers
             FusedMoE.expert_ids_cpu = {}    # device_id -> buffers
@@ -2804,28 +2764,28 @@ class FusedMoE(CustomOp):
             buff_dtype = self.moe_config.in_dtype
              
             FusedMoE.output_gpu[current_device] = [
-                torch.zeros((batch_size, hidden_size), device=current_device, dtype=buff_dtype)
+                torch.zeros((batch_size, hidden_size), device=current_device, dtype=buff_dtype, requires_grad=False).contiguous()
                 for batch_size in FusedMoE.cuda_graphs
             ]
             
             FusedMoE.input_tensor_cpu[current_device] = [
-                torch.zeros((batch_size, self.hidden_size), device="cpu", dtype=buff_dtype, pin_memory=True)
+                torch.zeros((batch_size, self.hidden_size), device="cpu", dtype=buff_dtype, pin_memory=True, requires_grad=False).contiguous()
                 for batch_size in FusedMoE.cuda_graphs
             ]
             FusedMoE.expert_ids_cpu[current_device] = [
-                torch.zeros((batch_size, num_experts_per_tok), device="cpu", dtype=torch.long, pin_memory=True)
+                torch.zeros((batch_size, num_experts_per_tok), device="cpu", dtype=torch.int64, pin_memory=True, requires_grad=False).contiguous()
                 for batch_size in FusedMoE.cuda_graphs
             ]
             FusedMoE.weights_cpu[current_device] = [
-                torch.zeros((batch_size, num_experts_per_tok), device="cpu", dtype=torch.float32, pin_memory=True)
+                torch.zeros((batch_size, num_experts_per_tok), device="cpu", dtype=torch.float32, pin_memory=True, requires_grad=False).contiguous()
                 for batch_size in FusedMoE.cuda_graphs
             ]
             FusedMoE.output_cpu[current_device] = [
-                torch.zeros((batch_size, hidden_size), device="cpu", pin_memory=True, dtype=buff_dtype)
+                torch.zeros((batch_size, hidden_size), device="cpu", pin_memory=True, dtype=buff_dtype, requires_grad=False).contiguous()
                 for batch_size in FusedMoE.cuda_graphs
             ]
             FusedMoE.bsz_tensor_cpu[current_device] = [
-                torch.zeros((1), device="cpu", dtype=torch.int32, pin_memory=True)
+                torch.zeros((1), device="cpu", dtype=torch.int32, pin_memory=True, requires_grad=False).contiguous()
                 for _ in range(len(FusedMoE.cuda_graphs))
             ]
 
@@ -2934,7 +2894,7 @@ class FusedMoE(CustomOp):
                 weights_cpu = topk_weights.clone().to(dtype=torch.float32, device='cpu', memory_format=torch.contiguous_format)
                 hidden_states_cpu = hidden_states.clone().to(device='cpu', memory_format=torch.contiguous_format)
                 output_cpu = torch.empty_like(hidden_states, device='cpu').contiguous()
-                bsz_tensor = torch.tensor([hidden_states.size(0)], device='cpu', dtype=torch.int32)
+                bsz_tensor = torch.tensor([hidden_states.size(0)], device='cpu', dtype=torch.int32).contiguous()
                 self.lk_moe.forward(
                     hidden_states.size(0),                         # qlen
                     expert_ids_cpu.size(1),                    # k
@@ -2944,7 +2904,7 @@ class FusedMoE(CustomOp):
                     output_cpu.data_ptr(),                     # output 
                     bsz_tensor.data_ptr()                      # bsz_tensor
                 )      
-                return output_cpu.to(hidden_states.device) 
+                return output_cpu.to(hidden_states.device, non_blocking=non_blocking)  
        
         except Exception as e:
             logger.error(f"lk_moe forward failed with error: {e}, falling back to default path")
