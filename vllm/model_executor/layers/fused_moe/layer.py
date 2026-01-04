@@ -1826,7 +1826,7 @@ class FusedMoE(CustomOp):
             staged_router_logits = batched_router_logits[:chunk_size, :]  # type: ignore
             staged_hidden_states.copy_(hidden_states, non_blocking=True)
             staged_router_logits.copy_(router_logits, non_blocking=True)
-            if self.use_lk_moe and self.lk_moe is not None and not self.use_gpu_expert_computation: 
+            if self.use_lk_moe and self.lk_moe is not None: 
                 final_hidden_states = self.forward_lk(staged_hidden_states, staged_router_logits)
             else:
                 # Matrix multiply.
@@ -2002,7 +2002,7 @@ class FusedMoE(CustomOp):
                     router_logits,
                     dim=0,
                 )
-            if self.use_lk_moe and self.lk_moe is not None and not self.use_gpu_expert_computation:
+            if self.use_lk_moe and self.lk_moe is not None:
                 final_hidden_states = self.forward_lk(
                     hidden_states=hidden_states_combined
                     if do_naive_dispatch_combine
