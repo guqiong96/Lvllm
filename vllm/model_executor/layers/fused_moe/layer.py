@@ -1626,19 +1626,18 @@ class FusedMoE(CustomOp):
         elif self.use_grouped_topk and valid_grouping():
             assert self.topk_group is not None
             assert self.num_expert_group is not None
-            grouped_topk_impl = GroupedTopk(
+            from vllm.model_executor.layers.fused_moe.fused_moe import grouped_topk
+ 
+
+            topk_weights, topk_ids = grouped_topk(
+                hidden_states=hidden_states,
+                gating_output=router_logits,
                 topk=self.top_k,
                 renormalize=self.renormalize,
                 num_expert_group=self.num_expert_group,
                 topk_group=self.topk_group,
                 scoring_func=self.scoring_func,
-                routed_scaling_factor=self.routed_scaling_factor,
-                num_fused_shared_experts=self.num_fused_shared_experts,
-            )
-
-            topk_weights, topk_ids = grouped_topk_impl(
-                hidden_states=hidden_states,
-                gating_output=router_logits,
+                routed_scaling_factor=self.routed_scaling_factor, 
                 e_score_correction_bias=self.e_score_correction_bias,
             )
         elif self.e_score_correction_bias is not None:
@@ -2694,8 +2693,11 @@ class FusedMoE(CustomOp):
     
     def _initialize_cuda_graph_buffers(self): 
         if not hasattr(FusedMoE, 'cuda_graphs'): 
-            max_num_seqs = self.vllm_config.scheduler_config.max_num_seqs
-            FusedMoE.cuda_graphs = [1, 2, 4] + list(range(8, max_num_seqs+1, 8)) 
+            
+            batch_size = self.vllm_config.scheduler_config.max_num_seqs
+            if not self.vllm_config.compilation_config.cudagraph_mode == "FULL_DECODE_ONLY":
+                batch_size = self.vllm_config.scheduler_config.max_num_batched_tokens
+            FusedMoE.cuda_graphs = [1, 2, 4] + list(range(8, batch_size+1, 8)) 
              
             FusedMoE.input_tensor_cpu = {}  # device_id -> buffers
             FusedMoE.expert_ids_cpu = {}    # device_id -> buffers
@@ -2720,7 +2722,7 @@ class FusedMoE(CustomOp):
                 for batch_size in FusedMoE.cuda_graphs
             ]
             FusedMoE.expert_ids_cpu[current_device] = [
-                torch.zeros((batch_size, num_experts_per_tok), device="cpu", dtype=torch.int64, pin_memory=True, requires_grad=False).contiguous()
+                torch.zeros((batch_size, num_experts_per_tok), device="cpu", dtype=torch.int32, pin_memory=True, requires_grad=False).contiguous()
                 for batch_size in FusedMoE.cuda_graphs
             ]
             FusedMoE.weights_cpu[current_device] = [
@@ -2837,7 +2839,7 @@ class FusedMoE(CustomOp):
                 output_gpu[graph_index][:batch_size].copy_(output_cpu[graph_index][:batch_size], non_blocking=non_blocking)  
                 return weak_ref_tensors(output_gpu[graph_index][:batch_size])  
             else: 
-                expert_ids_cpu = topk_ids.clone().to(dtype=torch.int64, device='cpu', memory_format=torch.contiguous_format)
+                expert_ids_cpu = topk_ids.clone().to(dtype=torch.int32, device='cpu', memory_format=torch.contiguous_format)
                 weights_cpu = topk_weights.clone().to(dtype=torch.float32, device='cpu', memory_format=torch.contiguous_format)
                 hidden_states_cpu = hidden_states.clone().to(device='cpu', memory_format=torch.contiguous_format)
                 output_cpu = torch.empty_like(hidden_states, device='cpu').contiguous()
