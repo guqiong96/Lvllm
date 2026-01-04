@@ -393,8 +393,9 @@ class FusedMoE(CustomOp):
         self.gpu_prefetch_window = get_gpu_prefetch_window()
         self.lk_moe = None
         self.lk_moe_config = None
-        
-
+        from vllm.utils.torch_utils import prefill_stream
+        self.prefill_stream = prefill_stream()
+         
         # Allow disabling of the separate shared experts stream for
         # debug purposes.
         # TODO: Remove this after more extensive testings with TP/DP
@@ -692,6 +693,16 @@ class FusedMoE(CustomOp):
         # Chunked all2all staging tensor
         self.batched_hidden_states: torch.Tensor | None = None
         self.batched_router_logits: torch.Tensor | None = None
+        
+        self.grouped_topk_impl = GroupedTopk(
+            topk=self.top_k,
+            renormalize=self.renormalize,
+            num_expert_group=self.num_expert_group,
+            topk_group=self.topk_group,
+            scoring_func=self.scoring_func,
+            routed_scaling_factor=self.routed_scaling_factor,
+            num_fused_shared_experts=self.num_fused_shared_experts,
+        )
 
     # Note: maybe_init_modular_kernel should only be called by
     # prepare_communication_buffer_for_model.
@@ -1626,18 +1637,10 @@ class FusedMoE(CustomOp):
         elif self.use_grouped_topk and valid_grouping():
             assert self.topk_group is not None
             assert self.num_expert_group is not None
-            from vllm.model_executor.layers.fused_moe.fused_moe import grouped_topk
- 
 
-            topk_weights, topk_ids = grouped_topk(
+            topk_weights, topk_ids = self.grouped_topk_impl(
                 hidden_states=hidden_states,
                 gating_output=router_logits,
-                topk=self.top_k,
-                renormalize=self.renormalize,
-                num_expert_group=self.num_expert_group,
-                topk_group=self.topk_group,
-                scoring_func=self.scoring_func,
-                routed_scaling_factor=self.routed_scaling_factor, 
                 e_score_correction_bias=self.e_score_correction_bias,
             )
         elif self.e_score_correction_bias is not None:
@@ -2737,8 +2740,29 @@ class FusedMoE(CustomOp):
                 torch.zeros((1), device="cpu", dtype=torch.int32, pin_memory=True, requires_grad=False).contiguous()
                 for _ in range(len(FusedMoE.cuda_graphs))
             ]
-
-         
+            
+            FusedMoE.prefill_input_tensor_cpu = {}  # device_id -> buffers
+            FusedMoE.prefill_expert_ids_cpu = {}    # device_id -> buffers
+            FusedMoE.prefill_weights_cpu = {}       # device_id -> buffers
+            FusedMoE.prefill_output_cpu = {}        # device_id -> buffers
+            FusedMoE.prefill_bsz_tensor_cpu = {}    # device_id -> buffers
+            FusedMoE.prefill_output_gpu = {}        # device_id -> buffers
+            
+            max_num_batched_tokens = self.vllm_config.scheduler_config.max_num_batched_tokens
+            
+            FusedMoE.prefill_output_gpu[current_device] = torch.zeros((max_num_batched_tokens, hidden_size), device=current_device, dtype=buff_dtype, requires_grad=False).contiguous()
+            
+            FusedMoE.prefill_input_tensor_cpu[current_device] = torch.zeros((max_num_batched_tokens, hidden_size), device="cpu", dtype=buff_dtype, pin_memory=True, requires_grad=False).contiguous()
+            
+            FusedMoE.prefill_expert_ids_cpu[current_device] = torch.zeros((max_num_batched_tokens, num_experts_per_tok), device="cpu", dtype=torch.int32, pin_memory=True, requires_grad=False).contiguous()
+                
+            FusedMoE.prefill_weights_cpu[current_device] = torch.zeros((max_num_batched_tokens, num_experts_per_tok), device="cpu", dtype=torch.float32, pin_memory=True, requires_grad=False).contiguous()
+            
+            FusedMoE.prefill_output_cpu[current_device] = torch.zeros((max_num_batched_tokens, hidden_size), device="cpu", pin_memory=True, dtype=buff_dtype, requires_grad=False).contiguous()
+             
+            FusedMoE.prefill_bsz_tensor_cpu[current_device] = torch.zeros((1), device="cpu", dtype=torch.int32, pin_memory=True, requires_grad=False).contiguous()
+            
+            
     def _find_best_graph_index(self, total_tokens: int) -> int:
         if not hasattr(FusedMoE, 'cuda_graphs') or not FusedMoE.cuda_graphs:
             raise ValueError("No CUDA graphs initialized.")
@@ -2771,6 +2795,7 @@ class FusedMoE(CustomOp):
             hidden_states=hidden_states,
             router_logits=router_logits,
         )
+        
          
         from vllm.forward_context import get_forward_context
         from vllm.config import CUDAGraphMode
@@ -2802,13 +2827,12 @@ class FusedMoE(CustomOp):
         stream = current_stream()
         stream_ptr = get_cuda_stream_ptr(stream) 
         non_blocking = True
+        current_device = torch.cuda.current_device()  
        
         try:   
             if torch.cuda.is_current_stream_capturing():  
                 graph_index = self._find_best_graph_index(batch_size)
-                
-                current_device = torch.cuda.current_device()  
-                
+                 
                 input_tensor_cpu = FusedMoE.input_tensor_cpu[current_device]
                 expert_ids_cpu = FusedMoE.expert_ids_cpu[current_device]
                 weights_cpu = FusedMoE.weights_cpu[current_device]
@@ -2839,21 +2863,61 @@ class FusedMoE(CustomOp):
                 output_gpu[graph_index][:batch_size].copy_(output_cpu[graph_index][:batch_size], non_blocking=non_blocking)  
                 return weak_ref_tensors(output_gpu[graph_index][:batch_size])  
             else: 
-                expert_ids_cpu = topk_ids.clone().to(dtype=torch.int32, device='cpu', memory_format=torch.contiguous_format)
-                weights_cpu = topk_weights.clone().to(dtype=torch.float32, device='cpu', memory_format=torch.contiguous_format)
-                hidden_states_cpu = hidden_states.clone().to(device='cpu', memory_format=torch.contiguous_format)
-                output_cpu = torch.empty_like(hidden_states, device='cpu').contiguous()
-                bsz_tensor = torch.tensor([hidden_states.size(0)], device='cpu', dtype=torch.int32).contiguous()
-                self.lk_moe.forward(
-                    hidden_states.size(0),                         # qlen
-                    expert_ids_cpu.size(1),                    # k
-                    expert_ids_cpu.data_ptr(),                 # expert_ids
-                    weights_cpu.data_ptr(),                    # weights
-                    hidden_states_cpu.data_ptr(),              # input
-                    output_cpu.data_ptr(),                     # output 
-                    bsz_tensor.data_ptr()                      # bsz_tensor
-                )      
-                return output_cpu.to(hidden_states.device, non_blocking=non_blocking)  
+                if not hasattr(self, 'prefill_stream') or self.prefill_stream is None:
+                    self.prefill_stream = torch.cuda.Stream()
+             
+                main_stream = current_stream()
+                 
+                main_done_event = torch.cuda.Event()
+                main_done_event.record(stream=main_stream)
+                 
+                with torch.cuda.stream(self.prefill_stream): 
+                    main_done_event.wait(stream=self.prefill_stream)
+                     
+                    input_tensor_cpu = FusedMoE.prefill_input_tensor_cpu[current_device]
+                    expert_ids_cpu = FusedMoE.prefill_expert_ids_cpu[current_device]
+                    weights_cpu = FusedMoE.prefill_weights_cpu[current_device]
+                    output_cpu = FusedMoE.prefill_output_cpu[current_device]
+                    bsz_tensor_cpu = FusedMoE.prefill_bsz_tensor_cpu[current_device]
+                    output_gpu = FusedMoE.prefill_output_gpu[current_device]
+                     
+                    bsz_tensor_cpu[0] = batch_size
+                    input_tensor_cpu[:batch_size].copy_(hidden_states, non_blocking=True)
+                    expert_ids_cpu[:batch_size].copy_(topk_ids, non_blocking=True)
+                    weights_cpu[:batch_size].copy_(topk_weights, non_blocking=True)
+                     
+                    copy_done_event = torch.cuda.Event()
+                    copy_done_event.record(stream=self.prefill_stream)
+                     
+                    stream_ptr = get_cuda_stream_ptr(self.prefill_stream) 
+                     
+                    self.lk_moe.submit_with_cuda_stream(
+                        stream_ptr,
+                        batch_size,
+                        topk_ids.size(1),
+                        expert_ids_cpu.data_ptr(),
+                        weights_cpu.data_ptr(),
+                        input_tensor_cpu.data_ptr(),
+                        output_cpu.data_ptr(),
+                        bsz_tensor_cpu.data_ptr()
+                    )
+                     
+                    compute_done_event = torch.cuda.Event()
+                    compute_done_event.record(stream=self.prefill_stream)
+                    compute_done_event.wait(stream=self.prefill_stream)
+                     
+                    output_gpu[:batch_size].copy_(
+                        output_cpu[:batch_size],
+                        non_blocking=True
+                    )
+                     
+                    prefill_done_event = torch.cuda.Event()
+                    prefill_done_event.record(stream=self.prefill_stream)
+                    self.prefill_stream.synchronize()
+                 
+                prefill_done_event.wait(stream=main_stream)
+                 
+                return weak_ref_tensors(output_gpu[:batch_size]) 
        
         except Exception as e:
             logger.error(f"lk_moe forward failed with error: {e}, falling back to default path")

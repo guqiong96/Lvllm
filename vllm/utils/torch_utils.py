@@ -510,6 +510,22 @@ def aux_stream() -> torch.cuda.Stream | None:
 
     return _aux_stream
 
+_prefill_stream: torch.cuda.Stream | None = None
+
+
+def prefill_stream() -> torch.cuda.Stream | None:
+    """
+    Ensures prefill_stream is initialized only once
+    """
+    global _prefill_stream
+
+    from vllm.platforms import current_platform
+
+    if _prefill_stream is None and current_platform.is_cuda_alike():
+        _prefill_stream = torch.cuda.Stream()
+
+    return _prefill_stream
+
 
 @lru_cache(maxsize=8)
 def _cuda_device_count_stateless(cuda_visible_devices: str | None = None) -> int:
