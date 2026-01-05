@@ -2739,29 +2739,7 @@ class FusedMoE(CustomOp):
                 torch.zeros((1), device="cpu", dtype=torch.int32, pin_memory=True, requires_grad=False).contiguous()
                 for _ in range(len(FusedMoE.cuda_graphs))
             ]
-            
-            FusedMoE.prefill_input_tensor_cpu = {}  # device_id -> buffers
-            FusedMoE.prefill_expert_ids_cpu = {}    # device_id -> buffers
-            FusedMoE.prefill_weights_cpu = {}       # device_id -> buffers
-            FusedMoE.prefill_output_cpu = {}        # device_id -> buffers
-            FusedMoE.prefill_bsz_tensor_cpu = {}    # device_id -> buffers
-            FusedMoE.prefill_output_gpu = {}        # device_id -> buffers
-            
-            max_num_batched_tokens = self.vllm_config.scheduler_config.max_num_batched_tokens
-            
-            FusedMoE.prefill_output_gpu[current_device] = torch.zeros((max_num_batched_tokens, hidden_size), device=current_device, dtype=buff_dtype, requires_grad=False).contiguous()
-            
-            FusedMoE.prefill_input_tensor_cpu[current_device] = torch.zeros((max_num_batched_tokens, hidden_size), device="cpu", dtype=buff_dtype, pin_memory=True, requires_grad=False).contiguous()
-            
-            FusedMoE.prefill_expert_ids_cpu[current_device] = torch.zeros((max_num_batched_tokens, num_experts_per_tok), device="cpu", dtype=torch.int32, pin_memory=True, requires_grad=False).contiguous()
-                
-            FusedMoE.prefill_weights_cpu[current_device] = torch.zeros((max_num_batched_tokens, num_experts_per_tok), device="cpu", dtype=torch.float32, pin_memory=True, requires_grad=False).contiguous()
-            
-            FusedMoE.prefill_output_cpu[current_device] = torch.zeros((max_num_batched_tokens, hidden_size), device="cpu", pin_memory=True, dtype=buff_dtype, requires_grad=False).contiguous()
-             
-            FusedMoE.prefill_bsz_tensor_cpu[current_device] = torch.zeros((1), device="cpu", dtype=torch.int32, pin_memory=True, requires_grad=False).contiguous()
-            
-            
+         
     def _find_best_graph_index(self, total_tokens: int) -> int:
         if not hasattr(FusedMoE, 'cuda_graphs') or not FusedMoE.cuda_graphs:
             raise ValueError("No CUDA graphs initialized.")
