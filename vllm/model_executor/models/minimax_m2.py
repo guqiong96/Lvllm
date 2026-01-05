@@ -485,8 +485,20 @@ class MiniMaxM2Model(nn.Module):
             loaded_params.add(name)
         return loaded_params
 
-
-class MiniMaxM2ForCausalLM(nn.Module, SupportsPP):
+from .interfaces import SupportsLoRA
+class MiniMaxM2ForCausalLM(nn.Module, SupportsLoRA,SupportsPP):
+    packed_modules_mapping  = {
+        "qkv_proj" : [
+            "q_proj",
+            "k_proj",
+            "v_proj",
+        ]
+    }
+    embedding_modules  = {
+        "embed_tokens" : "model.embed_tokens" ,
+        "lm_head" : "lm_head" ,
+    }
+    embedding_padding_modules  = [ "lm_head" ]
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
         config = vllm_config.model_config.hf_config
