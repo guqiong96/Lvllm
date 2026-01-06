@@ -100,9 +100,6 @@ class MiniMaxM2MoE(nn.Module):
             num_experts=config.num_local_experts,
             top_k=config.num_experts_per_tok,
             scoring_func=config.scoring_func,
-            use_grouped_topk=True,
-            num_expert_group=1,
-            topk_group=1,
             e_score_correction_bias=self.e_score_correction_bias,
             hidden_size=config.hidden_size,
             intermediate_size=config.intermediate_size,
@@ -234,6 +231,8 @@ class MiniMaxM2Attention(nn.Module):
     ) -> torch.Tensor:
         qkv, _ = self.qkv_proj(hidden_states)
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+        # q = self.q_norm(q)
+        # k = self.k_norm(k)
         q, k = MiniMaxText01RMSNormTP.forward_qk(
             self.q_norm, self.k_norm, q.contiguous(), k.contiguous()
         )
@@ -485,20 +484,8 @@ class MiniMaxM2Model(nn.Module):
             loaded_params.add(name)
         return loaded_params
 
-from .interfaces import SupportsLoRA
-class MiniMaxM2ForCausalLM(nn.Module, SupportsLoRA,SupportsPP):
-    packed_modules_mapping  = {
-        "qkv_proj" : [
-            "q_proj",
-            "k_proj",
-            "v_proj",
-        ]
-    }
-    embedding_modules  = {
-        "embed_tokens" : "model.embed_tokens" ,
-        "lm_head" : "lm_head" ,
-    }
-    embedding_padding_modules  = [ "lm_head" ]
+
+class MiniMaxM2ForCausalLM(nn.Module, SupportsPP):
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
         config = vllm_config.model_config.hf_config

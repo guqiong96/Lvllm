@@ -4,6 +4,7 @@
 from collections.abc import Callable, Iterable
 from contextlib import nullcontext
 from enum import Enum
+from functools import partial
 from typing import Literal, cast, get_args, overload
 
 import torch
@@ -66,6 +67,9 @@ else:
 
     eplb_map_to_physical_and_record = _eplb_map_to_physical_and_record
 from vllm.model_executor.layers.fused_moe.fused_moe import GroupedTopk
+from vllm.model_executor.layers.fused_moe.rocm_aiter_fused_moe import (  # noqa: E501
+    rocm_aiter_grouped_topk,
+)
 
 if current_platform.is_tpu():
     from .moe_pallas import fused_moe as fused_moe_pallas
@@ -576,9 +580,14 @@ class FusedMoE(CustomOp):
         self.apply_router_weight_on_input = apply_router_weight_on_input
         self.activation = activation
 
-        if self.scoring_func != "softmax" and not self.use_grouped_topk:
+        if (
+            not self.use_grouped_topk
+            and self.scoring_func != "softmax"
+            and self.scoring_func != "sigmoid"
+        ):
             raise ValueError(
-                "Only softmax scoring function is supported for non-grouped topk."
+                "Only softmax and sigmoid scoring function is supported for non-grouped"
+                "topk."
             )
 
         # ToDo: Better logic to determine the routing method type
@@ -693,15 +702,28 @@ class FusedMoE(CustomOp):
         self.batched_hidden_states: torch.Tensor | None = None
         self.batched_router_logits: torch.Tensor | None = None
         
-        self.grouped_topk_impl = GroupedTopk(
-            topk=self.top_k,
-            renormalize=self.renormalize,
-            num_expert_group=self.num_expert_group,
-            topk_group=self.topk_group,
-            scoring_func=self.scoring_func,
-            routed_scaling_factor=self.routed_scaling_factor,
-            num_fused_shared_experts=self.num_fused_shared_experts,
-        )
+        if rocm_aiter_ops.is_fused_moe_enabled():
+            if not rocm_aiter_ops.is_fusion_moe_shared_experts_enabled():
+                assert self.num_fused_shared_experts == 0
+            self.grouped_topk_impl = partial(
+                rocm_aiter_grouped_topk,
+                num_fused_shared_experts=self.num_fused_shared_experts,
+                topk=self.top_k,
+                renormalize=self.renormalize,
+                num_expert_group=self.num_expert_group,
+                topk_group=self.topk_group,
+                scoring_func=self.scoring_func,
+                routed_scaling_factor=self.routed_scaling_factor,
+            )
+        else:
+            self.grouped_topk_impl = GroupedTopk(
+                topk=self.top_k,
+                renormalize=self.renormalize,
+                num_expert_group=self.num_expert_group,
+                topk_group=self.topk_group,
+                scoring_func=self.scoring_func,
+                routed_scaling_factor=self.routed_scaling_factor,
+            )
 
     # Note: maybe_init_modular_kernel should only be called by
     # prepare_communication_buffer_for_model.
@@ -1637,6 +1659,7 @@ class FusedMoE(CustomOp):
             assert self.topk_group is not None
             assert self.num_expert_group is not None
 
+
             topk_weights, topk_ids = self.grouped_topk_impl(
                 hidden_states=hidden_states,
                 gating_output=router_logits,
@@ -1649,6 +1672,7 @@ class FusedMoE(CustomOp):
                 e_score_correction_bias=self.e_score_correction_bias.data,
                 topk=self.top_k,
                 renormalize=self.renormalize,
+                scoring_func=self.scoring_func,
             )
             if self.routed_scaling_factor != 1.0:
                 topk_weights *= self.routed_scaling_factor
