@@ -68,21 +68,7 @@ llama-gguf-split --merge ~/Models/XXXXX-00001-of-00005.gguf ~/Models/XXXX-merged
 ## September 30, 2025: Verified Models: Qwen3-Next-80B-A3B-Instruct, Qwen3-Coder-30B-A3B-Instruct
 <img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/c37da729-a692-4b20-b7f5-b7798acd22c4" />
 
-
-# Current Limitations:
-1. Only supports dtype: "bfloat16" and "float16" "fp8" [2025-12-14: Added inference support for the AWQ-4bit quantized model (symmetric quantization)，October 19, 2025: FP8 supports GPU NUMA hybrid inference MOE models, October 30, 2025: Only supports GGUF model hybrid inference for Qwen3 series (excluding Qwen3 Next) in single gguf file]
-
-2. Only supports compilation_config.cudagraph_mode: "NONE" [No limitation as of October 14, 2025]
-
-3. Only supports MOE models
-
-4. Only supports max_num_batched_tokens: 1024
-
-5. Only supports single-card inference (support for multi-GPU tensor parallelism (TP) and pipeline parallelism (PP) inference will be available from 2025-11-1)
-
-6. **Known Issue**: Using torch2.9.0 will result in garbled output, which is a compatibility issue between torch2.9.0 and vllm
-
-7. **Known Issue**: There seems to be a slight interference with output quality when multiple requests are made concurrently, which currently appears to be unrelated to LK MOE.
+ 
 
 ## Installation Steps
 
@@ -294,21 +280,7 @@ llama-gguf-split --merge ~/Models/XXXXX-00001-of-00005.gguf ~/Models/XXXX-merged
 ## 2025-09-30 已验证：Qwen3-Next-80B-A3B-Instruct、Qwen3-Coder-30B-A3B-Instruct 
 <img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/c37da729-a692-4b20-b7f5-b7798acd22c4" />
  
-
-# 当前限制：
-1. 仅支下列类型的模型："bfloat16" 和 "float16" [2025-12-14：AWQ-4bit量化模型（对称量化）推理支持，2025年10月19日：FP8支持GPU NUMA混合推理MOE模型，2025年10月30日：仅支持Qwen3系列的GGUF模型混合推理（不包含Qwen3 Next）单个gguf文件]
-
-2、仅支持compilation_config.cudagraph_mode: "NONE" [2025.10.14已没有限制]
-
-3、仅支持moe模型
-
-4、仅支持max_num_batched_tokens: 1024
-
-5、仅支持单卡推理(2025-11-1支持多GPU张量并行(TP)、流水线并行(PP)推理)
-
-6. **已知问题**：使用torch2.9.0会导致输出乱码，这是torch2.9.0和vllm的兼容性问题
-
-7. **已知问题**：多个请求并发时似乎会轻微干扰输出质量，目前看与LK MOE无关
+ 
 
 ## 安装步骤
 
