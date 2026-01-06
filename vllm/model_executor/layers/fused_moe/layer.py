@@ -2867,8 +2867,8 @@ class FusedMoE(CustomOp):
                 expert_ids_cpu = topk_ids.clone().to(dtype=torch.int32, device='cpu', memory_format=torch.contiguous_format)
                 weights_cpu = topk_weights.clone().to(dtype=torch.float32, device='cpu', memory_format=torch.contiguous_format)
                 hidden_states_cpu = hidden_states.clone().to(device='cpu', memory_format=torch.contiguous_format)
-                output_cpu = torch.empty_like(hidden_states_cpu, device='cpu').contiguous()
-                bsz_tensor = torch.tensor([hidden_states_cpu.size(0)], device='cpu', dtype=torch.int32).contiguous()
+                output_cpu = torch.empty_like(hidden_states, device='cpu').contiguous()
+                bsz_tensor = torch.tensor([hidden_states.size(0)], device='cpu', dtype=torch.int32)
                 self.lk_moe.forward(
                     hidden_states.size(0),                         # qlen
                     expert_ids_cpu.size(1),                    # k
@@ -2878,7 +2878,7 @@ class FusedMoE(CustomOp):
                     output_cpu.data_ptr(),                     # output 
                     bsz_tensor.data_ptr()                      # bsz_tensor
                 )      
-                return output_cpu.to(hidden_states.device, non_blocking=non_blocking)  
+                return output_cpu.to(hidden_states.device) 
        
         except Exception as e:
             logger.error(f"lk_moe forward failed with error: {e}, falling back to default path")
