@@ -3001,7 +3001,13 @@ def moe_prefetch(layer, layer_name: str, hidden_states: torch.Tensor,
     
     called_layers.add(layer_name)  
             
-    available_slots = gpu_prefetch_window
+    active_prefetches = 0
+    for k in state.keys():
+        candidate_name = layer_name.replace(f".{layer_idx}.", f".{k}.")
+        if not is_lk_moe_gpu_resident_layer(candidate_name):
+            active_prefetches += 1
+     
+    available_slots = gpu_prefetch_window - active_prefetches
     
     layer_count = len(forward_context.no_compile_layers)
     if available_slots > 0: 
