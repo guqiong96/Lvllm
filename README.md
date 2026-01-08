@@ -4,7 +4,7 @@
 LvLLM is a special extension of vllm that makes full use of CPU and memory resources, reduces GPU memory requirements, and features an efficient GPU parallel and NUMA parallel architecture, supporting hybrid inference for MOE large models.
 
 
-##2026-01-08: lvllm-v1.5.1 - Prefill/Decode Separation for Long Context Scenarios, GPU Prefill with CPU-GPU Hybrid Parallel Decoding
+#2026-01-08: lvllm-v1.5.1 - Prefill/Decode Separation for Long Context Scenarios, GPU Prefill with CPU-GPU Hybrid Parallel Decoding
 
 ```bash
 # Specify MoE layers permanently residing in GPU (not involved in dynamic prefetching)
@@ -23,7 +23,8 @@ LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=8192
 ```
 Currently supports bfloat16 and float16 precision models only.
  
- 
+ <img width="1000" height="500" alt="image" src="https://github.com/user-attachments/assets/610c2b19-d4d8-4107-a427-640b2b880037" />
+
 
 ## 2026-01-04: v1.4.0 Optimize decode to improve speed
 
