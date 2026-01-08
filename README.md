@@ -22,8 +22,8 @@ LVLLM_GPU_PREFETCH_WINDOW=1
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=8192
 ```
 Currently supports bfloat16 and float16 precision models only.
- 
- <img width="1000" height="500" alt="image" src="https://github.com/user-attachments/assets/610c2b19-d4d8-4107-a427-640b2b880037" />
+<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/8b76dbf5-3465-4857-b147-02fcef6e2caf" />
+
 
 
 ## 2026-01-04: v1.4.0 Optimize decode to improve speed
