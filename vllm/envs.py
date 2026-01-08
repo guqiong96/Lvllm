@@ -1852,7 +1852,7 @@ def is_lk_moe_gpu_resident_layer(layer_name: str) -> bool:
   
     disabled_layers_env = environment_variables.get("LVLLM_GPU_RESIDENT_MOE_LAYERS", "")()
     if not disabled_layers_env:
-        return True   
+        return False   
     
     disabled_layers_env = disabled_layers_env.strip()
     
