@@ -258,6 +258,7 @@ LVLLM_GPU_PREFETCH_WINDOW=1
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=8192
 ```
 当前此特性仅支持bfloat16和float16精度模型
+<img width="1000" height="1364" alt="84131c3519cb0dffe94455c75fe15e6d" src="https://github.com/user-attachments/assets/a8f2273e-8f3a-4b2a-a674-d434599184ef" />
 
 
 ## 2026-01-04: v1.4.0 优化decode提升速度
