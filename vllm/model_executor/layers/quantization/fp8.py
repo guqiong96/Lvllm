@@ -784,9 +784,9 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         params_dtype: torch.dtype,
         **extra_weight_attrs,
     ):
-        from vllm.envs import should_use_lk_moe_for_layer
+        from vllm.envs import is_lk_moe_gpu_resident_layer
         device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
-        if isinstance(layer, FusedMoE) and should_use_lk_moe_for_layer(layer.layer_name):
+        if isinstance(layer, FusedMoE) and not is_lk_moe_gpu_resident_layer(layer.layer_name):
             device = "cpu"  
         layer.intermediate_size_per_partition = intermediate_size_per_partition
         layer.hidden_size = hidden_size
@@ -1108,8 +1108,8 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                     )
                     start += shard_size
             w13_weight_scale = max_w13_scales
-        from vllm.envs import should_use_lk_moe_for_layer
-        if isinstance(layer, FusedMoE) and not should_use_lk_moe_for_layer(layer.layer_name):
+        from vllm.envs import is_lk_moe_gpu_resident_layer
+        if is_lk_moe_gpu_resident_layer(layer.layer_name):
             # Shuffle weights into the runtime format.
             self._convert_weights_to_kernel_format(
                 layer, w13_weight, w2_weight, w13_weight_scale, w2_weight_scale

@@ -10,9 +10,9 @@ tokenizer-mode: "auto"
 swap-space: 0
 served-model-name: "Qwen3-Next-80B-A3B-Instruct" 
 compilation_config.cudagraph_mode: "FULL_DECODE_ONLY"
-# enable_prefix_caching: true
+enable_prefix_caching: true
 enable-chunked-prefill: true
-max_num_batched_tokens: 2048
+max_num_batched_tokens: 16384
 dtype: "bfloat16"
 max_num_seqs: 4
 compilation_config.mode: "VLLM_COMPILE"  

@@ -230,8 +230,8 @@ if TYPE_CHECKING:
     VLLM_OBJECT_STORAGE_SHM_BUFFER_NAME: str = "VLLM_OBJECT_STORAGE_SHM_BUFFER"
     LVLLM_MOE_NUMA_ENABLED: bool = False
     LVLLM_MOE_USE_WEIGHT: Literal["KEEP", "TO_DTYPE"] = "TO_DTYPE"
-    LVLLM_DISABLE_LK_MOE_LAYERS: str | None = None
-    LVLLM_GPU_EXPERT_COMPUTATION: bool = False
+    LVLLM_GPU_RESIDENT_MOE_LAYERS: str | None = None
+    LVLLM_GPU_PREFILL_MIN_BATCH_SIZE: int = 0
     LVLLM_GPU_PREFETCH_WINDOW: int = 3
     VLLM_DEEPEP_BUFFER_SIZE_MB: int = 1024
     VLLM_DEEPEP_HIGH_THROUGHPUT_FORCE_INTRA_NODE: bool = False
@@ -1560,10 +1560,10 @@ environment_variables: dict[str, Callable[[], Any]] = {
     lambda: bool(int(os.getenv("LVLLM_MOE_NUMA_ENABLED", "0"))),
     # Weight format for MOE.
     "LVLLM_MOE_USE_WEIGHT": lambda: os.getenv("LVLLM_MOE_USE_WEIGHT", "TO_DTYPE"),
-    "LVLLM_DISABLE_LK_MOE_LAYERS": lambda: os.environ.get("LVLLM_DISABLE_LK_MOE_LAYERS", None),
+    "LVLLM_GPU_RESIDENT_MOE_LAYERS": lambda: os.environ.get("LVLLM_GPU_RESIDENT_MOE_LAYERS", None),
     # Whether to enable GPU expert computation.
-    "LVLLM_GPU_EXPERT_COMPUTATION": lambda: bool(
-        int(os.getenv("LVLLM_GPU_EXPERT_COMPUTATION", "0"))
+    "LVLLM_GPU_PREFILL_MIN_BATCH_SIZE": lambda: int(
+        os.getenv("LVLLM_GPU_PREFILL_MIN_BATCH_SIZE", "0")
     ),
     # Prefetch window size for GPU expert computation.
     "LVLLM_GPU_PREFETCH_WINDOW": lambda: int(
@@ -1729,9 +1729,9 @@ def compile_factors() -> dict[str, object]:
         "CUDA_VISIBLE_DEVICES",
         "NO_COLOR",
         "LVLLM_MOE_NUMA_ENABLED",
-        "LVLLM_DISABLE_LK_MOE_LAYERS",
+        "LVLLM_GPU_RESIDENT_MOE_LAYERS",
         "LVLLM_MOE_USE_WEIGHT",
-        "LVLLM_GPU_EXPERT_COMPUTATION",
+        "LVLLM_GPU_PREFILL_MIN_BATCH_SIZE",
         "LVLLM_GPU_PREFETCH_WINDOW",
     }
 
@@ -1790,8 +1790,11 @@ def is_lk_moe_feature_enabled() -> bool:
         print(f"Error: lk_moe is not available falling back to default behavior." , e)
         return False
 
-def is_gpu_expert_computation_enabled() -> bool:
-    return environment_variables["LVLLM_GPU_EXPERT_COMPUTATION"]()
+def is_lk_moe_use_gpu_prefill() -> bool:
+    return environment_variables["LVLLM_GPU_PREFILL_MIN_BATCH_SIZE"]() > 0
+
+def get_gpu_prefill_min_batch_size() -> int:
+    return environment_variables["LVLLM_GPU_PREFILL_MIN_BATCH_SIZE"]()
 
 def is_lk_moe_use_weight_keep() -> bool:
     return environment_variables["LVLLM_MOE_USE_WEIGHT"]() == "KEEP"
@@ -1831,16 +1834,23 @@ def extract_layer_index(layer_name: str, num_attn_module: int = 1) -> int:
             else int_vals[0]
         )
         return layer_index
-    
-def should_use_lk_moe_for_layer(layer_name: str)-> bool:
 
+def is_lk_moe_gpu_prefill_layer(layer_name: str) -> bool:
+    return is_lk_moe_use_gpu_prefill() and not is_lk_moe_gpu_resident_layer(layer_name)
+    
+def is_lk_moe_cpu_layer(layer_name: str)-> bool:
+
+    return is_lk_moe_feature_enabled() and not is_lk_moe_gpu_resident_layer(layer_name)
+    
+def is_lk_moe_gpu_resident_layer(layer_name: str) -> bool:
+    
     if not is_lk_moe_feature_enabled():
-        return False   
+        return True
     
     layer_id = extract_layer_index(layer_name)
     
   
-    disabled_layers_env = environment_variables.get("LVLLM_DISABLE_LK_MOE_LAYERS", "")()
+    disabled_layers_env = environment_variables.get("LVLLM_GPU_RESIDENT_MOE_LAYERS", "")()
     if not disabled_layers_env:
         return True   
     
@@ -1865,5 +1875,5 @@ def should_use_lk_moe_for_layer(layer_name: str)-> bool:
             except ValueError: 
                 continue
      
-    return layer_id not in disabled_layers
+    return layer_id in disabled_layers
  

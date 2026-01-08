@@ -462,10 +462,10 @@ class AWQMarlinMoEMethod(FusedMoEMethodBase):
         params_dtype: torch.dtype,
         **extra_weight_attrs,
     ):
-        from vllm.envs import should_use_lk_moe_for_layer
+        from vllm.envs import is_lk_moe_gpu_resident_layer
         device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
         origin_device = device
-        if isinstance(layer, FusedMoE) and should_use_lk_moe_for_layer(layer.layer_name):
+        if isinstance(layer, FusedMoE) and not is_lk_moe_gpu_resident_layer(layer.layer_name):
             device = "cpu" 
         extra_weight_attrs.update(
             {
@@ -561,11 +561,14 @@ class AWQMarlinMoEMethod(FusedMoEMethodBase):
         set_weight_attrs(w2_qzeros, extra_weight_attrs)
 
         device = layer.w13_qweight.device
-        if isinstance(layer, FusedMoE) and should_use_lk_moe_for_layer(layer.layer_name):
+        if isinstance(layer, FusedMoE) and not is_lk_moe_gpu_resident_layer(layer.layer_name):
             device = origin_device
         layer.workspace = marlin_make_workspace_new(device, 4)
 
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
+        from vllm.envs import is_lk_moe_gpu_resident_layer
+        if isinstance(layer, FusedMoE) and not is_lk_moe_gpu_resident_layer(layer.layer_name):
+            return
         num_experts = layer.w13_qweight.shape[0]
         device = layer.w13_qweight.device
         is_a_8bit = self.input_dtype is not None and self.input_dtype.itemsize == 1

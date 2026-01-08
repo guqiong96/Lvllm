@@ -4,6 +4,27 @@
 LvLLM is a special extension of vllm that makes full use of CPU and memory resources, reduces GPU memory requirements, and features an efficient GPU parallel and NUMA parallel architecture, supporting hybrid inference for MOE large models.
 
 
+##2026-01-08: lvllm-v1.5.1 - Prefill/Decode Separation for Long Context Scenarios, GPU Prefill with CPU-GPU Hybrid Parallel Decoding
+
+```bash
+# Specify MoE layers permanently residing in GPU (not involved in dynamic prefetching)
+# Format: comma-separated or range, "0-3" indicates first 4 layers always on GPU
+LVLLM_GPU_RESIDENT_MOE_LAYERS=0-3
+
+# GPU prefetch window size, controls number of layers prefetched simultaneously
+# Smaller values reduce memory usage, larger values improve prefetch performance
+LVLLM_GPU_PREFETCH_WINDOW=1
+
+# Minimum batch size to enable GPU prefill
+# GPU prefill is enabled when prefill token count reaches this threshold
+# Note: Also need to increase max_num_batched_tokens parameter accordingly
+# to achieve pipeline balancing between prefill and decode phases
+LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=8192
+```
+Currently supports bfloat16 and float16 precision models only.
+ 
+ 
+
 ## 2026-01-04: v1.4.0 Optimize decode to improve speed
 
 
@@ -216,6 +237,26 @@ You can modify the parameters in the configuration file or adjust the environmen
 # LvLLM GPU、NUMA双并行
 
 ​LvLLM是vllm的特别扩展，充分利用cpu和内存资源，降低显卡显存要求，高效的GPU并行+NUMA并行架构，支持混合推理MOE大模型 
+
+
+
+##2026-01-08: lvllm-v1.5.1 - 针对长上下文场景，支持预填充与解码分离，GPU预填充与CPU-GPU混合解码并行
+
+```bash
+# 指定常驻GPU的MoE层（不参与动态预取）
+# 格式：逗号分隔或范围，"0-3"表示前4层始终在GPU
+LVLLM_GPU_RESIDENT_MOE_LAYERS=0-3
+
+# GPU预取窗口大小，控制同时预取的层数
+# 较小值减少内存占用，较大值提升预取效果,需要与LVLLM_GPU_PREFILL_MIN_BATCH_SIZE参数配合达成流水线平衡
+LVLLM_GPU_PREFETCH_WINDOW=1
+
+# 启用GPU预填充的最小批次大小, 0表示不启用（默认）
+# 预填充token数达到此阈值时，启用GPU预填充
+# 注意：同时需要相应增大max_num_batched_tokens参数(16384 或更大)
+LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=8192
+```
+当前此特性仅支持bfloat16和float16精度模型
 
 
 ## 2026-01-04: v1.4.0 优化decode提升速度
