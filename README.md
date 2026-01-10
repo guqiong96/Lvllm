@@ -8,12 +8,12 @@ LvLLM is a special extension of vllm that makes full use of CPU and memory resou
 
 ```bash
 # Specify MoE layers permanently residing in GPU (not involved in dynamic prefetching)
-# Format: comma-separated or range, "0-3" indicates first 4 layers always on GPU
-LVLLM_GPU_RESIDENT_MOE_LAYERS=0-3
+# Format: comma-separated or range, "0" indicates 0th layer always on GPU
+LVLLM_GPU_RESIDENT_MOE_LAYERS=0
 
 # GPU prefetch window size, controls number of layers prefetched simultaneously
 # Smaller values reduce memory usage, larger values improve prefetch performance
-LVLLM_GPU_PREFETCH_WINDOW=1
+LVLLM_GPU_PREFETCH_WINDOW=2
 
 # Minimum batch size to enable GPU prefill
 # GPU prefill is enabled when prefill token count reaches this threshold
@@ -245,12 +245,12 @@ You can modify the parameters in the configuration file or adjust the environmen
 
 ```bash
 # 指定常驻GPU的MoE层（不参与动态预取）
-# 格式：逗号分隔或范围，"0-3"表示前4层始终在GPU
-LVLLM_GPU_RESIDENT_MOE_LAYERS=0-3
+# 格式：逗号分隔或范围，"0"表示0层始终在GPU
+LVLLM_GPU_RESIDENT_MOE_LAYERS=0
 
 # GPU预取窗口大小，控制同时预取的层数
 # 较小值减少内存占用，较大值提升预取效果,需要与LVLLM_GPU_PREFILL_MIN_BATCH_SIZE参数配合达成流水线平衡
-LVLLM_GPU_PREFETCH_WINDOW=1
+LVLLM_GPU_PREFETCH_WINDOW=2
 
 # 启用GPU预填充的最小批次大小, 0表示不启用（默认）
 # 预填充token数达到此阈值时，启用GPU预填充

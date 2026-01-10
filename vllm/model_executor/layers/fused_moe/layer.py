@@ -2273,8 +2273,7 @@ class FusedMoE(CustomOp):
         assert scale_expanded.shape == (target_rows, target_cols) 
         
         return scale_expanded
-    
-    @torch.compiler.disable
+     
     def _process_compressed_tensors_weights(self, strategy: str): 
         
         from compressed_tensors.quantization import QuantizationStrategy
@@ -2930,6 +2929,8 @@ def moe_cleanup(layer_name: str, hidden_states: torch.Tensor,
                 forward_context: ForwardContext): 
     if torch.cuda.is_current_stream_capturing():
         return
+    if get_gpu_prefill_min_batch_size() <= 0:
+        return
     if not hidden_states.size(0) >= get_gpu_prefill_min_batch_size():
         return
     
@@ -2966,7 +2967,11 @@ def moe_cleanup(layer_name: str, hidden_states: torch.Tensor,
 def moe_prefetch(layer, layer_name: str, hidden_states: torch.Tensor, 
                  forward_context: ForwardContext, gpu_prefetch_window: int): 
     if torch.cuda.is_current_stream_capturing():
-        return 
+        return
+    
+    if get_gpu_prefill_min_batch_size() <= 0:
+        return
+    
     if layer is None or not hidden_states.size(0) >= get_gpu_prefill_min_batch_size():
         return
     
