@@ -22,7 +22,8 @@ LVLLM_GPU_PREFETCH_WINDOW=2
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=8192
 ```
 Currently supports bfloat16 and float16 precision models only.
-<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/8b76dbf5-3465-4857-b147-02fcef6e2caf" />
+<img width="1000" height="1364" alt="image" src="https://github.com/user-attachments/assets/9367db22-155c-4a9c-b57d-0b81b11f6cec" />
+
 
 
 
