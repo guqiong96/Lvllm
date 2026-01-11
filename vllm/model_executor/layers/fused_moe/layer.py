@@ -2273,7 +2273,8 @@ class FusedMoE(CustomOp):
         assert scale_expanded.shape == (target_rows, target_cols) 
         
         return scale_expanded
-     
+    
+    @torch.compiler.disable
     def _process_compressed_tensors_weights(self, strategy: str): 
         
         from compressed_tensors.quantization import QuantizationStrategy
