@@ -277,10 +277,10 @@ enable-auto-tool-choice: true
 https://hf-mirror.com/cyankiwi/MiniMax-M2.1-AWQ-4bit
 
 # fp8 转换为bfloat16或float16精度版本
-LVLLM_MOE_USE_WEIGHT=TO_DTYPE VLLM_TEST_FORCE_FP8_MARLIN=1
+LVLLM_MOE_USE_WEIGHT=TO_DTYPE 
 
 # fp8 原生精度版本
-LVLLM_MOE_USE_WEIGHT=KEEP VLLM_TEST_FORCE_FP8_MARLIN=1
+LVLLM_MOE_USE_WEIGHT=KEEP
 
 ```
 
