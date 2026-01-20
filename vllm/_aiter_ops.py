@@ -196,37 +196,6 @@ def _rocm_aiter_topk_softmax_fake(
     pass
 
 
-def _rocm_aiter_topk_sigmoid_impl(
-    topk_weights: torch.Tensor,
-    topk_indices: torch.Tensor,
-    token_expert_indices: torch.Tensor,
-    gating_output: torch.Tensor,
-    renormalize: bool,
-    e_score_correction_bias: torch.Tensor | None = None,
-) -> None:
-    from aiter import topk_sigmoid
-
-    topk_sigmoid(
-        topk_weights,
-        topk_indices,
-        token_expert_indices,
-        gating_output,
-        renormalize,
-        e_score_correction_bias,
-    )
-
-
-def _rocm_aiter_topk_sigmoid_fake(
-    topk_weights: torch.Tensor,
-    topk_indices: torch.Tensor,
-    token_expert_indices: torch.Tensor,
-    gating_output: torch.Tensor,
-    renormalize: bool,
-    e_score_correction_bias: torch.Tensor | None = None,
-) -> None:
-    pass
-
-
 def _rocm_aiter_biased_grouped_topk_impl(
     gating_output: torch.Tensor,
     correction_bias: torch.Tensor,
@@ -319,7 +288,17 @@ def _check_aiter_mla_fp8_support() -> bool:
             _AITER_MLA_SUPPORTS_FP8 = (
                 "q_scale" in sig.parameters and "kv_scale" in sig.parameters
             )
-        except Exception:
+        except (
+            ImportError,
+            ModuleNotFoundError,
+            AttributeError,
+            ValueError,
+            TypeError,
+        ):
+            # ImportError/ModuleNotFoundError: aiter.mla module not available
+            # AttributeError: mla_decode_fwd doesn't exist
+            # ValueError: mla_decode_fwd has no signature (e.g., built-in)
+            # TypeError: mla_decode_fwd is not a callable
             _AITER_MLA_SUPPORTS_FP8 = False
     return _AITER_MLA_SUPPORTS_FP8
 
@@ -841,7 +820,7 @@ class rocm_aiter_ops:
         - RMS normalization: rms_norm, rms_norm2d_with_add
         - GEMM operations: gemm_a8w8, gemm_a8w8_blockscale
         - Fused MoE: fused_moe, asm_moe_tkw1
-        - Routing: topk_softmax, topk_sigmoid, biased_grouped_topk, grouped_topk
+        - Routing: topk_softmax, biased_grouped_topk, grouped_topk
         - MLA decode: mla_decode_fwd
         - Quantization: per_tensor_quant, per_token_quant, group_fp8_quant
         - Triton ops: triton_rotary_embed, triton_fp8_bmm, triton_gemm_a8w8_blockscale
@@ -854,9 +833,11 @@ class rocm_aiter_ops:
     _FMOE_ENABLED = envs.VLLM_ROCM_USE_AITER_MOE
     _MLA_ENABLED = envs.VLLM_ROCM_USE_AITER_MLA
     _MHA_ENABLED = envs.VLLM_ROCM_USE_AITER_MHA
+    _SHUFFLE_KV_CACHE_ENABLED = envs.VLLM_ROCM_SHUFFLE_KV_CACHE_LAYOUT
     _TRITON_UNIFIED_ATTN_ENABLED = envs.VLLM_ROCM_USE_AITER_UNIFIED_ATTENTION
     # TODO: Consolidate under _LINEAR_ENABLED
     _FP8BMM_ENABLED = envs.VLLM_ROCM_USE_AITER_FP8BMM
+    _FP4BMM_ENABLED = envs.VLLM_ROCM_USE_AITER_FP4BMM
     # TODO: Consolidate under _LINEAR_ENABLED
     _FP4_GEMM_DYNAMIC_QUANT_ASM = envs.VLLM_ROCM_USE_AITER_FP4_ASM_GEMM
     # TODO: Consolidate under VLLM_ROCM_USE_AITER_ROPE
@@ -880,8 +861,10 @@ class rocm_aiter_ops:
         cls._FMOE_ENABLED = envs.VLLM_ROCM_USE_AITER_MOE
         cls._MLA_ENABLED = envs.VLLM_ROCM_USE_AITER_MLA
         cls._MHA_ENABLED = envs.VLLM_ROCM_USE_AITER_MHA
+        cls._SHUFFLE_KV_CACHE_ENABLED = envs.VLLM_ROCM_SHUFFLE_KV_CACHE_LAYOUT
         cls._TRITON_UNIFIED_ATTN_ENABLED = envs.VLLM_ROCM_USE_AITER_UNIFIED_ATTENTION
         cls._FP8BMM_ENABLED = envs.VLLM_ROCM_USE_AITER_FP8BMM
+        cls._FP4BMM_ENABLED = envs.VLLM_ROCM_USE_AITER_FP4BMM
         cls._FP4_GEMM_DYNAMIC_QUANT_ASM = envs.VLLM_ROCM_USE_AITER_FP4_ASM_GEMM
         cls._TRITON_ROTARY_EMBED = envs.VLLM_ROCM_USE_AITER_TRITON_ROPE
         cls._MOE_SHARED_EXPERTS_ENABLED = envs.VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS
@@ -929,6 +912,11 @@ class rocm_aiter_ops:
 
     @classmethod
     @if_aiter_supported
+    def is_shuffle_kv_cache_enabled(cls) -> bool:
+        return cls._AITER_ENABLED and cls._SHUFFLE_KV_CACHE_ENABLED
+
+    @classmethod
+    @if_aiter_supported
     def is_triton_unified_attn_enabled(cls) -> bool:
         return cls._AITER_ENABLED and cls._TRITON_UNIFIED_ATTN_ENABLED
 
@@ -936,6 +924,11 @@ class rocm_aiter_ops:
     @if_aiter_supported
     def is_fp8bmm_enabled(cls) -> bool:
         return cls._AITER_ENABLED and cls._FP8BMM_ENABLED
+
+    @classmethod
+    @if_aiter_supported
+    def is_fp4bmm_enabled(cls) -> bool:
+        return cls._AITER_ENABLED and cls._FP4BMM_ENABLED
 
     @classmethod
     @if_aiter_supported
@@ -985,14 +978,6 @@ class rocm_aiter_ops:
                 op_func=_rocm_aiter_topk_softmax_impl,
                 mutates_args=["topk_weights", "topk_indices", "token_expert_indices"],
                 fake_impl=_rocm_aiter_topk_softmax_fake,
-                dispatch_key=current_platform.dispatch_key,
-            )
-
-            direct_register_custom_op(
-                op_name="rocm_aiter_topk_sigmoid",
-                op_func=_rocm_aiter_topk_sigmoid_impl,
-                mutates_args=["topk_weights", "topk_indices", "token_expert_indices"],
-                fake_impl=_rocm_aiter_topk_sigmoid_fake,
                 dispatch_key=current_platform.dispatch_key,
             )
 
@@ -1276,25 +1261,6 @@ class rocm_aiter_ops:
         return topk_weights, topk_indices
 
     @staticmethod
-    def topk_sigmoid(
-        topk_weights: torch.Tensor,
-        topk_indices: torch.Tensor,
-        token_expert_indices: torch.Tensor,
-        gating_output: torch.Tensor,
-        renormalize: bool,
-        e_score_correction_bias: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, ...]:
-        torch.ops.vllm.rocm_aiter_topk_sigmoid(
-            topk_weights,
-            topk_indices,
-            token_expert_indices,
-            gating_output,
-            renormalize,
-            e_score_correction_bias,
-        )
-        return topk_weights, topk_indices
-
-    @staticmethod
     def biased_grouped_topk(
         gating_output: torch.Tensor,
         correction_bias: torch.Tensor,
@@ -1432,17 +1398,40 @@ class rocm_aiter_ops:
         key_ = key[..., :rotary_dim]
         positions = positions.view(*query.shape[:1])
         rope_cached_thd_positions_2c_fwd_inplace(
-            positions,
-            sin,
-            cos,
             query_,
             key_,
+            cos,
+            sin,
+            positions,
             rotate_style,
             reuse_freqs_front_part=True,
-            is_nope_first=False,
+            nope_first=False,
         )
         query = query.view(query_shape)
         key = key.view(key_shape)
+
+    @staticmethod
+    def batched_gemm_a16wfp4(
+        X: torch.Tensor,
+        W: torch.Tensor,
+        w_scale: torch.Tensor,
+        Y: torch.Tensor,
+        transpose_bm: bool | None = False,
+        prequant: bool | None = False,
+        y_scale: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        # ruff: noqa: E501 # isort: skip
+        from aiter.ops.triton.batched_gemm_a16wfp4 import batched_gemm_a16wfp4
+
+        return batched_gemm_a16wfp4(
+            X,
+            W,
+            w_scale,
+            y=Y,
+            transpose_bm=transpose_bm,
+            prequant=prequant,
+            y_scale=y_scale,
+        )
 
     @staticmethod
     def triton_fp8_bmm(

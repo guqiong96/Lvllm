@@ -8,7 +8,6 @@ import torch.nn.functional as F
 from einops import rearrange
 from torch import nn
 
-from vllm.attention.backends.abstract import AttentionMetadata
 from vllm.config import CacheConfig, ModelConfig, get_current_vllm_config
 from vllm.distributed.communication_op import tensor_model_parallel_all_reduce
 from vllm.distributed.parallel_state import (
@@ -29,6 +28,7 @@ from vllm.model_executor.layers.mamba.mamba_utils import (
 )
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.utils.torch_utils import direct_register_custom_op
+from vllm.v1.attention.backend import AttentionMetadata
 from vllm.v1.attention.backends.linear_attn import LinearAttentionMetadata
 
 
@@ -85,7 +85,7 @@ class MiniMaxText01RMSNormTP(CustomOp):
         k_norm: "MiniMaxText01RMSNormTP",
         q: torch.Tensor,
         k: torch.Tensor,
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         orig_dtype = q.dtype
         q = q.to(torch.float32)
         k = k.to(torch.float32)

@@ -8,13 +8,6 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, m) {
       "token_expert_indices, Tensor gating_output, bool renormalize) -> ()");
   m.impl("topk_softmax", torch::kCUDA, &topk_softmax);
 
-  // Apply topk sigmoid to the gating outputs.
-  m.def(
-      "topk_sigmoid(Tensor! topk_weights, Tensor! topk_indices, Tensor! "
-      "token_expert_indices, Tensor gating_output, bool renormalize, Tensor? "
-      "correction_bias) -> ()");
-  m.impl("topk_sigmoid", torch::kCUDA, &topk_sigmoid);
-
   // Calculate the result of moe by summing up the partial results
   // from all selected experts.
   m.def("moe_sum(Tensor input, Tensor! output) -> ()");
@@ -78,7 +71,7 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, m) {
       "Tensor sorted_token_ids,"
       "Tensor! expert_ids, Tensor! num_tokens_past_padded,"
       "Tensor! topk_weights, int moe_block_size, int top_k, "
-      "bool mul_topk_weights, bool is_ep, int b_type_id,"
+      "bool mul_topk_weights, int b_type_id,"
       "int size_m, int size_n, int size_k,"
       "bool is_full_k, bool use_atomic_add,"
       "bool use_fp32_reduce, bool is_zp_float,"
