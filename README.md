@@ -9,6 +9,7 @@ LvLLM is a special extension of vllm that makes full use of CPU and memory resou
 ```bash
 # GPU prefill and decoding separation not yet supported, unified parameters:
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=0 or remove this parameter
+remove：LVLLM_GPU_RESIDENT_MOE_LAYERS
 
 tool-call-parser: "minimax_m2"
 reasoning-parser: "minimax_m2_append_think"
@@ -270,6 +271,7 @@ You can modify the parameters in the configuration file or adjust the environmen
 ```bash
 #还未支持GPU预填充与解码分离，统一参数：
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=0 或者去掉此参数
+去掉：LVLLM_GPU_RESIDENT_MOE_LAYERS
 
 tool-call-parser: "minimax_m2"
 reasoning-parser: "minimax_m2_append_think"
