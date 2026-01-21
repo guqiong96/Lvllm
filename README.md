@@ -4,7 +4,7 @@
 LvLLM is a special extension of vllm that makes full use of CPU and memory resources, reduces GPU memory requirements, and features an efficient GPU parallel and NUMA parallel architecture, supporting hybrid inference for MOE large models.
 
 
-# 2026-01-21: lvllm-v1.5.6 - Fixed accuracy issues in the MiniMax-M2.1 model
+# 2026-01-21: lvllm-v1.5.7 - Fixed accuracy issues in the MiniMax-M2.1 model
 
 ```bash
 # GPU prefill and decoding separation not yet supported, unified parameters:
@@ -15,12 +15,14 @@ reasoning-parser: "minimax_m2_append_think"
 enable-auto-tool-choice: true
 
 # AWQ-4bit symmetric quantization version
-https://hf-mirror.com/cyankiwi/MiniMax-M2.1-AWQ-4bit
+https://huggingface.co/cyankiwi/MiniMax-M2.1-AWQ-4bit
 
 # fp8 converted to bfloat16 or float16 precision version
+https://huggingface.co/MiniMaxAI/MiniMax-M2.1
 LVLLM_MOE_USE_WEIGHT=TO_DTYPE
 
 # fp8 native precision version
+https://huggingface.co/MiniMaxAI/MiniMax-M2.1
 LVLLM_MOE_USE_WEIGHT=KEEP
 ```
 
@@ -262,7 +264,7 @@ You can modify the parameters in the configuration file or adjust the environmen
 
 
 
-# 2026-01-21: lvllm-v1.5.6 - 修复MiniMax-M2.1模型精度问题
+# 2026-01-21: lvllm-v1.5.7 - 修复MiniMax-M2.1模型精度问题
 
 
 ```bash
@@ -277,9 +279,11 @@ enable-auto-tool-choice: true
 https://hf-mirror.com/cyankiwi/MiniMax-M2.1-AWQ-4bit
 
 # fp8 转换为bfloat16或float16精度版本
+https://hf-mirror.com/MiniMaxAI/MiniMax-M2.1
 LVLLM_MOE_USE_WEIGHT=TO_DTYPE 
 
 # fp8 原生精度版本
+https://hf-mirror.com/MiniMaxAI/MiniMax-M2.1
 LVLLM_MOE_USE_WEIGHT=KEEP
 
 ```
