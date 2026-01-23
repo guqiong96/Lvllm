@@ -273,7 +273,7 @@ You can modify the parameters in the configuration file or adjust the environmen
 ​LvLLM是vllm的特别扩展，充分利用cpu和内存资源，降低显卡显存要求，高效的GPU并行+NUMA并行架构，支持混合推理MOE大模型 
 
 
-# 2026-01-24: lvllm-v1.5.8 - AWQ 4-bit 对称对称量化模型支持GPU Prefill加速
+# 2026-01-24: lvllm-v1.5.8 - AWQ 4-bit 对称量化模型支持GPU Prefill加速
 ```bash
 模型下载: https://hf-mirror.com/cyankiwi
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=2048
