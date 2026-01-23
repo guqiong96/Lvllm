@@ -1,4 +1,4 @@
-model: "/home/guqiong/Models/MiniMax-M2.1-AWQ-4bit"
+model: "/home/guqiong/Downloads/vllm/Qwen3-Next-80B-A3B-Instruct/"
 host: "0.0.0.0"
 port: 8070
 tensor-parallel-size: 2

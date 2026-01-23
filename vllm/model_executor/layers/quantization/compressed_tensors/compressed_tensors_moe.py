@@ -1471,22 +1471,21 @@ class CompressedTensorsWNA16MarlinMoEMethod(CompressedTensorsMoEMethod):
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
         from vllm.envs import is_lk_moe_gpu_resident_layer 
         if isinstance(layer, FusedMoE) and not is_lk_moe_gpu_resident_layer(layer.layer_name): 
-            layer.w13_weight_packed = torch.nn.Parameter(
+            layer.w13_weight_packed_origin = torch.nn.Parameter(
             layer.w13_weight_packed.cpu().transpose(1, 2).contiguous().view(torch.uint8),
                 requires_grad=False,
             )
-            layer.w2_weight_packed = torch.nn.Parameter(
+            layer.w2_weight_packed_origin = torch.nn.Parameter(
                 layer.w2_weight_packed.cpu().transpose(1, 2).contiguous().view(torch.uint8),
                 requires_grad=False,
             )
-            layer.w13_weight_scale = torch.nn.Parameter(
+            layer.w13_weight_scale_origin = torch.nn.Parameter(
                 layer.w13_weight_scale.cpu().transpose(1, 2).contiguous(), requires_grad=False
             )
-            layer.w2_weight_scale = torch.nn.Parameter(
+            layer.w2_weight_scale_origin = torch.nn.Parameter(
                 layer.w2_weight_scale.cpu().transpose(1, 2).contiguous(), requires_grad=False
             )
-            
-            return
+             
 
         num_experts = layer.w13_weight_g_idx.shape[0]
         device = layer.w13_weight_g_idx.device
