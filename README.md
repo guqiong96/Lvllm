@@ -275,7 +275,7 @@ You can modify the parameters in the configuration file or adjust the environmen
 
 # 2026-01-24: lvllm-v1.5.8 - AWQ 4-bit 对称对称量化模型支持GPU Prefill加速
 ```bash
-模型下载: https://huggingface.co/cyankiwi
+模型下载: https://hf-mirror.com/cyankiwi
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=2048
 LVLLM_GPU_RESIDENT_MOE_LAYERS=0-4
 LVLLM_GPU_PREFETCH_WINDOW=1
