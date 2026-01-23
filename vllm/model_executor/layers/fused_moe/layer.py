@@ -81,7 +81,8 @@ logger = init_logger(__name__)
 import threading
 import ctypes
 import numpy as np
-
+from vllm.utils.platform_utils import is_pin_memory_available
+    
 import vllm
 from vllm.envs import is_lk_moe_feature_enabled, is_lk_moe_use_weight_keep, is_lk_moe_cpu_layer, is_lk_moe_gpu_resident_layer, is_lk_moe_gpu_prefill_layer, get_gpu_prefetch_window, get_gpu_prefill_min_batch_size
 if is_lk_moe_feature_enabled():
@@ -2710,29 +2711,31 @@ class FusedMoE(CustomOp):
             hidden_size = self.hidden_size
             buff_dtype = self.moe_config.in_dtype
              
+            pin_memory = is_pin_memory_available()
+            
             FusedMoE.output_gpu[current_device] = [
                 torch.zeros((batch_size, hidden_size), device=current_device, dtype=buff_dtype, requires_grad=False).contiguous()
                 for batch_size in FusedMoE.cuda_graphs
             ]
             
             FusedMoE.input_tensor_cpu[current_device] = [
-                torch.zeros((batch_size, self.hidden_size), device="cpu", dtype=buff_dtype, pin_memory=True, requires_grad=False).contiguous()
+                torch.zeros((batch_size, self.hidden_size), device="cpu", dtype=buff_dtype, pin_memory=pin_memory, requires_grad=False).contiguous()
                 for batch_size in FusedMoE.cuda_graphs
             ]
             FusedMoE.expert_ids_cpu[current_device] = [
-                torch.zeros((batch_size, num_experts_per_tok), device="cpu", dtype=torch.int32, pin_memory=True, requires_grad=False).contiguous()
+                torch.zeros((batch_size, num_experts_per_tok), device="cpu", dtype=torch.int32, pin_memory=pin_memory, requires_grad=False).contiguous()
                 for batch_size in FusedMoE.cuda_graphs
             ]
             FusedMoE.weights_cpu[current_device] = [
-                torch.zeros((batch_size, num_experts_per_tok), device="cpu", dtype=torch.float32, pin_memory=True, requires_grad=False).contiguous()
+                torch.zeros((batch_size, num_experts_per_tok), device="cpu", dtype=torch.float32, pin_memory=pin_memory, requires_grad=False).contiguous()
                 for batch_size in FusedMoE.cuda_graphs
             ]
             FusedMoE.output_cpu[current_device] = [
-                torch.zeros((batch_size, hidden_size), device="cpu", pin_memory=True, dtype=buff_dtype, requires_grad=False).contiguous()
+                torch.zeros((batch_size, hidden_size), device="cpu", pin_memory=pin_memory, dtype=buff_dtype, requires_grad=False).contiguous()
                 for batch_size in FusedMoE.cuda_graphs
             ]
             FusedMoE.bsz_tensor_cpu[current_device] = [
-                torch.zeros((1), device="cpu", dtype=torch.int32, pin_memory=True, requires_grad=False).contiguous()
+                torch.zeros((1), device="cpu", dtype=torch.int32, pin_memory=pin_memory, requires_grad=False).contiguous()
                 for _ in range(len(FusedMoE.cuda_graphs))
             ]
          
@@ -2851,7 +2854,7 @@ class FusedMoE(CustomOp):
                     bsz_tensor.data_ptr()                      # bsz_tensor
                 )     
                
-                output_gpu = output_cpu.to(hidden_states.device)
+                output_gpu = output_cpu.to(torch.cuda.current_device())
                 return output_gpu
        
         except Exception as e:
@@ -3034,36 +3037,56 @@ def moe_prefetch(layer, layer_name: str, hidden_states: torch.Tensor,
                     prefetch_candidates.append((candidate_idx, candidate_layer))
          
         for idx, layer_obj in prefetch_candidates:
-            moe_prepare_gpu_prefill(layer_obj, forward_context, hidden_states.device)
+            moe_prepare_gpu_prefill(layer_obj, forward_context, torch.cuda.current_device())
             state[idx] = 1   
 
-def moe_prepare_gpu_prefill_wna16(layer, forward_context: ForwardContext, device: torch.device):
-    layer.w13_weight_packed.data = layer.w13_weight_packed.data.to(device, non_blocking=True)
-    layer.w2_weight_packed.data = layer.w2_weight_packed.data.to(device, non_blocking=True)
-    layer.w13_weight_scale.data = layer.w13_weight_scale.data.to(device, non_blocking=True)
-    layer.w2_weight_scale.data = layer.w2_weight_scale.data.to(device, non_blocking=True)
-    layer.w13_weight_g_idx.data = layer.w13_weight_g_idx.data.to(device, non_blocking=True)
-    layer.w2_weight_g_idx.data = layer.w2_weight_g_idx.data.to(device, non_blocking=True)
-    layer.w13_g_idx_sort_indices.data = layer.w13_g_idx_sort_indices.data.to(device, non_blocking=True)
-    layer.w2_g_idx_sort_indices.data = layer.w2_g_idx_sort_indices.data.to(device, non_blocking=True) 
+from vllm.model_executor.utils import replace_parameter
+def moe_prepare_gpu_prefill_wna16(layer, forward_context: ForwardContext, device: torch.device): 
+     
+    layer.w13_weight_packed.data = layer.w13_weight_packed.data.to(device=device, non_blocking=True)
+    layer.w2_weight_packed.data = layer.w2_weight_packed.data.to(device=device, non_blocking=True)
+    layer.w13_weight_scale.data = layer.w13_weight_scale.data.to(device=device, non_blocking=True)
+    layer.w2_weight_scale.data = layer.w2_weight_scale.data.to(device=device, non_blocking=True)
+    layer.w13_weight_g_idx.data = layer.w13_weight_g_idx.data.to(device=device, non_blocking=True)
+    layer.w2_weight_g_idx.data = layer.w2_weight_g_idx.data.to(device=device, non_blocking=True)
+    layer.w13_g_idx_sort_indices.data = layer.w13_g_idx_sort_indices.data.to(device=device, non_blocking=True)  
+    layer.w2_g_idx_sort_indices.data = layer.w2_g_idx_sort_indices.data.to(device=device, non_blocking=True) 
+ 
 
-def moe_clean_gpu_prefill_wna16(layer): 
-    layer.w13_weight_packed.data = layer.w13_weight_packed.data.to(device="cpu", non_blocking=True)
-    layer.w2_weight_packed.data = layer.w2_weight_packed.data.to(device="cpu", non_blocking=True)
-    layer.w13_weight_scale.data = layer.w13_weight_scale.data.to(device="cpu", non_blocking=True)
-    layer.w2_weight_scale.data = layer.w2_weight_scale.data.to(device="cpu", non_blocking=True)
-    layer.w13_weight_g_idx.data = layer.w13_weight_g_idx.data.to(device="cpu", non_blocking=True)
-    layer.w2_weight_g_idx.data = layer.w2_weight_g_idx.data.to(device="cpu", non_blocking=True)
-    layer.w13_g_idx_sort_indices.data = layer.w13_g_idx_sort_indices.data.to(device="cpu", non_blocking=True)
-    layer.w2_g_idx_sort_indices.data = layer.w2_g_idx_sort_indices.data.to(device="cpu", non_blocking=True) 
+def moe_clean_gpu_prefill_wna16(layer):   
+    pin_memory = is_pin_memory_available()
+    param_names = [
+        "w13_weight_packed",
+        "w2_weight_packed", 
+        "w13_weight_scale",
+        "w2_weight_scale",
+        "w13_weight_g_idx",
+        "w2_weight_g_idx",
+        "w13_g_idx_sort_indices",
+        "w2_g_idx_sort_indices"
+    ]
+    for param_name in param_names:
+        p = getattr(layer, param_name)
+        cpu_data = torch.empty_strided(
+                            size=p.data.size(),
+                            stride=p.data.stride(),
+                            dtype=p.data.dtype,
+                            layout=p.data.layout,
+                            device="cpu",
+                            pin_memory=pin_memory,
+                        )
+        cpu_data.copy_(p.data)
+        p.data = cpu_data 
+ 
 
 def moe_prepare_gpu_prefill_regular(layer, forward_context: ForwardContext, device: torch.device):
+    pin_memory = is_pin_memory_available()
     w13_weight_cpu = torch.zeros(
             (layer.global_num_experts, layer.intermediate_size_per_partition * 2, layer.hidden_size),
             dtype=layer.moe_config.in_dtype, 
             device="cpu",
             requires_grad=False, 
-            pin_memory=True, 
+            pin_memory=pin_memory, 
         ).contiguous() 
             
     layer.lk_moe.collect_weights(
@@ -3090,7 +3113,7 @@ def moe_prepare_gpu_prefill_regular(layer, forward_context: ForwardContext, devi
         dtype=layer.moe_config.in_dtype,  
         device="cpu",
         requires_grad=False, 
-        pin_memory=True, 
+        pin_memory=pin_memory, 
     ).contiguous() 
     
     layer.lk_moe.collect_weights(

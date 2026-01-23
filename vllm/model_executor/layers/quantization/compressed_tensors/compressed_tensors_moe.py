@@ -1323,7 +1323,7 @@ class CompressedTensorsWNA16MarlinMoEMethod(CompressedTensorsMoEMethod):
         params_dtype: torch.dtype,
         **extra_weight_attrs,
     ):
-        from vllm.envs import is_lk_moe_gpu_resident_layer
+        from vllm.envs import is_lk_moe_gpu_resident_layer, is_lk_moe_cpu_layer
         device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
         if isinstance(layer, FusedMoE) and not is_lk_moe_gpu_resident_layer(layer.layer_name):
             device = "cpu"
@@ -1469,7 +1469,8 @@ class CompressedTensorsWNA16MarlinMoEMethod(CompressedTensorsMoEMethod):
         layer.marlin_state = GPTQMarlinState.REPACK
 
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
-        from vllm.envs import is_lk_moe_gpu_resident_layer 
+        device = torch.cuda.current_device()
+        from vllm.envs import is_lk_moe_gpu_resident_layer, is_lk_moe_cpu_layer
         if isinstance(layer, FusedMoE) and not is_lk_moe_gpu_resident_layer(layer.layer_name): 
             layer.w13_weight_packed_origin = torch.nn.Parameter(
             layer.w13_weight_packed.cpu().transpose(1, 2).contiguous().view(torch.uint8),
@@ -1484,8 +1485,7 @@ class CompressedTensorsWNA16MarlinMoEMethod(CompressedTensorsMoEMethod):
             )
             layer.w2_weight_scale_origin = torch.nn.Parameter(
                 layer.w2_weight_scale.cpu().transpose(1, 2).contiguous(), requires_grad=False
-            )
-             
+            )  
 
         num_experts = layer.w13_weight_g_idx.shape[0]
         device = layer.w13_weight_g_idx.device

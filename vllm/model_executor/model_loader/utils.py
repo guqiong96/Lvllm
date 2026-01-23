@@ -107,6 +107,7 @@ def process_weights_after_loading(
             # parameters onto device for processing and back off after.
             with device_loading_context(module, target_device):
                 quant_method.process_weights_after_loading(module)
+    for _, module in model.named_modules():
         if isinstance(module, FusedMoE):
             module.process_weights_after_loading()
 
