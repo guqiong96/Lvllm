@@ -9,7 +9,13 @@ models: https://huggingface.co/cyankiwi
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=2048
 LVLLM_GPU_RESIDENT_MOE_LAYERS=0-4
 LVLLM_GPU_PREFETCH_WINDOW=1
-Adjust parameters according to VRAM size
+max_num_batched_tokens: 32768 or larger
+Adjust parameters according to VRAM size 
+
+When there is not enough memory, GPU prefill acceleration cannot be enabled. You need to set:
+LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=0
+max_num_batched_tokens: 4096
+
 ```
 
 
@@ -276,10 +282,16 @@ You can modify the parameters in the configuration file or adjust the environmen
 # 2026-01-24: lvllm-v1.5.8 - AWQ 4-bit 对称量化模型支持GPU Prefill加速
 ```bash
 模型下载: https://hf-mirror.com/cyankiwi
+
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=2048
 LVLLM_GPU_RESIDENT_MOE_LAYERS=0-4
 LVLLM_GPU_PREFETCH_WINDOW=1
+max_num_batched_tokens: 32768 或更大
 根据显存大小调节参数
+
+内存不够时不能开启gpu prefill加速，需要设置：
+LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=0
+max_num_batched_tokens: 4096
 ```
 
 # 2026-01-21: lvllm-v1.5.7 - 修复MiniMax-M2.1模型精度问题

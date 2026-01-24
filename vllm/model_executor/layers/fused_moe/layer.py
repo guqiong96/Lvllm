@@ -2138,8 +2138,8 @@ class FusedMoE(CustomOp):
                 if self.quant_method.moe_quant_config is None:
                     from vllm.model_executor.layers.fused_moe.config import int4_w4a16_moe_quant_config
                     self.quant_method.moe_quant_config =  int4_w4a16_moe_quant_config(
-                        w1_scale=self.w13_weight_scale,
-                        w2_scale=self.w2_weight_scale,
+                        w1_scale=self.w13_weight_scale if hasattr(self.quant_method, 'w13_weight_scale') else self.w13_weight_scale_origin,
+                        w2_scale=self.w2_weight_scale if hasattr(self.quant_method, 'w2_weight_scale') else self.w2_weight_scale_origin,
                         w1_zp=None,
                         w2_zp=None,
                         block_shape=[0, self.quant_method.group_size]
@@ -3039,19 +3039,34 @@ def moe_prefetch(layer, layer_name: str, hidden_states: torch.Tensor,
         for idx, layer_obj in prefetch_candidates:
             moe_prepare_gpu_prefill(layer_obj, forward_context, torch.cuda.current_device())
             state[idx] = 1   
-
-from vllm.model_executor.utils import replace_parameter
-def moe_prepare_gpu_prefill_wna16(layer, forward_context: ForwardContext, device: torch.device): 
-     
-    layer.w13_weight_packed.data = layer.w13_weight_packed.data.to(device=device, non_blocking=True)
-    layer.w2_weight_packed.data = layer.w2_weight_packed.data.to(device=device, non_blocking=True)
-    layer.w13_weight_scale.data = layer.w13_weight_scale.data.to(device=device, non_blocking=True)
-    layer.w2_weight_scale.data = layer.w2_weight_scale.data.to(device=device, non_blocking=True)
-    layer.w13_weight_g_idx.data = layer.w13_weight_g_idx.data.to(device=device, non_blocking=True)
-    layer.w2_weight_g_idx.data = layer.w2_weight_g_idx.data.to(device=device, non_blocking=True)
-    layer.w13_g_idx_sort_indices.data = layer.w13_g_idx_sort_indices.data.to(device=device, non_blocking=True)  
-    layer.w2_g_idx_sort_indices.data = layer.w2_g_idx_sort_indices.data.to(device=device, non_blocking=True) 
  
+
+def moe_prepare_gpu_prefill_wna16(layer, forward_context: ForwardContext, device: torch.device):  
+    
+    param_names = [
+        "w13_weight_packed",
+        "w2_weight_packed", 
+        "w13_weight_scale",
+        "w2_weight_scale",
+        "w13_weight_g_idx",
+        "w2_weight_g_idx",
+        "w13_g_idx_sort_indices",
+        "w2_g_idx_sort_indices"
+    ]
+    
+    for param_name in param_names:
+        if hasattr(layer, param_name):
+            p = getattr(layer, param_name)
+             
+            gpu_data = torch.empty_strided(
+                size=p.data.size(),
+                stride=p.data.stride(),
+                dtype=p.data.dtype,
+                layout=p.data.layout,
+                device=device,
+            ) 
+            gpu_data.copy_(p.data, non_blocking=True)
+            p.data = gpu_data 
 
 def moe_clean_gpu_prefill_wna16(layer):   
     pin_memory = is_pin_memory_available()
@@ -3123,7 +3138,7 @@ def moe_prepare_gpu_prefill_regular(layer, forward_context: ForwardContext, devi
         w2_weight_cpu.data_ptr(),  
         2  # w2
     )
-    layer.w2_weight = w2_weight_cpu.to(device, non_blocking=True)
+    layer.w2_weight = w2_weight_cpu.to(device)
     layer._zero_tensor(w13_weight_cpu)
     del w13_weight_cpu
     layer._zero_tensor(w2_weight_cpu)

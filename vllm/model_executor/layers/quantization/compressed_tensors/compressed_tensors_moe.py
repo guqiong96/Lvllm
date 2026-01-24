@@ -1470,7 +1470,7 @@ class CompressedTensorsWNA16MarlinMoEMethod(CompressedTensorsMoEMethod):
 
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
         device = torch.cuda.current_device()
-        from vllm.envs import is_lk_moe_gpu_resident_layer, is_lk_moe_cpu_layer
+        from vllm.envs import is_lk_moe_gpu_resident_layer, is_lk_moe_gpu_prefill_layer
         if isinstance(layer, FusedMoE) and not is_lk_moe_gpu_resident_layer(layer.layer_name): 
             layer.w13_weight_packed_origin = torch.nn.Parameter(
             layer.w13_weight_packed.cpu().transpose(1, 2).contiguous().view(torch.uint8),
@@ -1486,7 +1486,19 @@ class CompressedTensorsWNA16MarlinMoEMethod(CompressedTensorsMoEMethod):
             layer.w2_weight_scale_origin = torch.nn.Parameter(
                 layer.w2_weight_scale.cpu().transpose(1, 2).contiguous(), requires_grad=False
             )  
-
+            if not is_lk_moe_gpu_prefill_layer(layer.layer_name):
+                layer._zero_tensor(layer.w13_weight_packed)
+                layer._zero_tensor(layer.w2_weight_packed)
+                layer._zero_tensor(layer.w13_weight_scale)
+                layer._zero_tensor(layer.w2_weight_scale)
+                layer._zero_tensor(layer.w13_weight_g_idx)
+                layer._zero_tensor(layer.w2_weight_g_idx)
+                layer._zero_tensor(layer.w13_g_idx_sort_indices)
+                layer._zero_tensor(layer.w2_g_idx_sort_indices)
+                del layer.w13_weight_packed, layer.w2_weight_packed, layer.w13_weight_scale, layer.w2_weight_scale
+                del layer.w13_weight_g_idx, layer.w2_weight_g_idx, layer.w13_g_idx_sort_indices, layer.w2_g_idx_sort_indices
+                return
+            
         num_experts = layer.w13_weight_g_idx.shape[0]
         device = layer.w13_weight_g_idx.device
         is_a_8bit = (
@@ -1608,8 +1620,8 @@ class CompressedTensorsWNA16MarlinMoEMethod(CompressedTensorsMoEMethod):
         if self.num_bits != 4:
             return None
         return int4_w4a16_moe_quant_config(
-            w1_scale=layer.w13_weight_scale,
-            w2_scale=layer.w2_weight_scale,
+            w1_scale=layer.w13_weight_scale if hasattr(layer, 'w13_weight_scale') else self.w13_weight_scale_origin,
+            w2_scale=layer.w2_weight_scale if hasattr(layer, 'w2_weight_scale') else self.w2_weight_scale_origin,
             w1_zp=None,
             w2_zp=None,
             block_shape=[0, self.group_size],
