@@ -2170,6 +2170,21 @@ class FusedMoE(CustomOp):
             self.lk_moe = None
             self.lk_moe_config = None
             
+    def clean_weights_after_loading(self):
+        if self.is_gpu_resident_layer:
+            return
+        try:  
+            if isinstance(self.quant_method, UnquantizedFusedMoEMethod): 
+                self._zero_tensor(self.w13_weight)
+                self._zero_tensor(self.w2_weight)
+                del self.w13_weight, self.w2_weight
+                import gc
+                gc.collect()
+        except Exception as e:
+            logger.error(f"Failed to initialize lk_moe: {e}") 
+            self.lk_moe = None
+            self.lk_moe_config = None
+            
     def get_ggml_type_from_dtype(self, dtype):
             if dtype == torch.float32:
                 return 0  # GGML_TYPE_F32
@@ -2702,14 +2717,7 @@ class FusedMoE(CustomOp):
             w13_ptr,                 # w13_ptr 
             w2_ptr,                 # w2_ptr 
         ) 
-        self.lk_moe = lk_moe.MOE(self.lk_moe_config) 
-         
-        self._zero_tensor(self.w13_weight)
-        self._zero_tensor(self.w2_weight)
-        del self.w13_weight, self.w2_weight
- 
-        import gc
-        gc.collect()
+        self.lk_moe = lk_moe.MOE(self.lk_moe_config)  
                 
     def forward_lk(self, hidden_states: torch.Tensor, router_logits: torch.Tensor) -> torch.Tensor:
         return self._process_valid_inputs(hidden_states, router_logits)

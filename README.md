@@ -3,6 +3,8 @@
 
 LvLLM is a special extension of vllm that makes full use of CPU and memory resources, reduces GPU memory requirements, and features an efficient GPU parallel and NUMA parallel architecture, supporting hybrid inference for MOE large models.
 
+# 2026-01-25: lvllm-v1.6.0 - fp8 model supports GPU prefill(High memory usage!)
+
 # 2026-01-24: lvllm-v1.5.8 - AWQ 4-bit symmetric quantization model supports GPU prefill
 ```bash
 models: https://huggingface.co/cyankiwi
@@ -278,6 +280,7 @@ You can modify the parameters in the configuration file or adjust the environmen
 
 ​LvLLM是vllm的特别扩展，充分利用cpu和内存资源，降低显卡显存要求，高效的GPU并行+NUMA并行架构，支持混合推理MOE大模型 
 
+# 2026-01-25: lvllm-v1.6.0 - fp8 模型支持GPU Prefill加速(内存占用很高!)
 
 # 2026-01-24: lvllm-v1.5.8 - AWQ 4-bit 对称量化模型支持GPU Prefill加速
 ```bash

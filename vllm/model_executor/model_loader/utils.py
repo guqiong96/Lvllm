@@ -100,7 +100,6 @@ def process_weights_after_loading(
     for _, module in model.named_modules(): 
         if isinstance(module, FusedMoE) and not getattr(module, "process_lk_moe_already_called", False):
             module.process_weights_after_loading()
-            setattr(module, "process_lk_moe_already_called", True)
         quant_method = getattr(module, "quant_method", None)
         if isinstance(quant_method, QuantizeMethodBase):
             # When quant methods need to process weights after loading
@@ -110,7 +109,10 @@ def process_weights_after_loading(
             # parameters onto device for processing and back off after.
             with device_loading_context(module, target_device):
                 quant_method.process_weights_after_loading(module)
-
+        if isinstance(module, FusedMoE) and not getattr(module, "process_lk_moe_already_called", False):
+            module.clean_weights_after_loading() 
+            setattr(module, "process_lk_moe_already_called", True)
+ 
     # Initialize post-load attention weights for both Attention and MLA.
     # NOTE: Happens after other modules so we can easily decompress weights.
     for _, module in model.named_modules():
