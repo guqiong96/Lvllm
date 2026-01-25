@@ -673,10 +673,9 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         intermediate_size_per_partition: int,
         params_dtype: torch.dtype,
         **extra_weight_attrs,
-    ):
-        from vllm.envs import is_lk_moe_gpu_resident_layer
+    ): 
         device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
-        if isinstance(layer, FusedMoE) and not is_lk_moe_gpu_resident_layer(layer.layer_name):
+        if isinstance(layer, FusedMoE) and not layer.is_gpu_resident_layer:
             device = "cpu"  
         layer.intermediate_size_per_partition = intermediate_size_per_partition
         layer.hidden_size = hidden_size
@@ -804,27 +803,24 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         w13_input_scale: torch.Tensor | None,
         w2_input_scale: torch.Tensor | None,
     ) -> None:
-        from vllm.envs import is_lk_moe_gpu_resident_layer
-        if is_lk_moe_gpu_resident_layer(layer.layer_name):
+        # Shuffle weights to runtime format.
+        w13, w2, w13_scale, w2_scale = convert_to_fp8_moe_kernel_format(
+            fp8_backend=self.fp8_backend,
+            layer=layer,
+            w13=w13,
+            w2=w2,
+            w13_scale=w13_scale,
+            w2_scale=w2_scale,
+            w13_input_scale=w13_input_scale,
+            w2_input_scale=w2_input_scale,
+        )
 
-            # Shuffle weights to runtime format.
-            w13, w2, w13_scale, w2_scale = convert_to_fp8_moe_kernel_format(
-                fp8_backend=self.fp8_backend,
-                layer=layer,
-                w13=w13,
-                w2=w2,
-                w13_scale=w13_scale,
-                w2_scale=w2_scale,
-                w13_input_scale=w13_input_scale,
-                w2_input_scale=w2_input_scale,
-            )
-
-            # Replace parameters with updated versions. Note that this helper
-            # function ensures the replacement is compatible with RL weight reloads.
-            replace_parameter(layer, "w13_weight", w13)
-            replace_parameter(layer, "w2_weight", w2)
-            replace_parameter(layer, f"w13_{self.weight_scale_name}", w13_scale)
-            replace_parameter(layer, f"w2_{self.weight_scale_name}", w2_scale)
+        # Replace parameters with updated versions. Note that this helper
+        # function ensures the replacement is compatible with RL weight reloads.
+        replace_parameter(layer, "w13_weight", w13)
+        replace_parameter(layer, "w2_weight", w2)
+        replace_parameter(layer, f"w13_{self.weight_scale_name}", w13_scale)
+        replace_parameter(layer, f"w2_{self.weight_scale_name}", w2_scale)
 
         # Setup modular kernel for TP case.
         self.moe_quant_config = self.get_fused_moe_quant_config(layer)
@@ -839,7 +835,9 @@ class Fp8MoEMethod(FusedMoEMethodBase):
     def process_weights_after_loading(self, layer: Module) -> None:
         if getattr(layer, "_already_called_process_weights_after_loading", False):
             return
-
+        if isinstance(layer, FusedMoE) and layer.is_cpu_layer: 
+            return
+            
         # Allow for accessing weights and scales in standard way.
         w13 = layer.w13_weight
         w2 = layer.w2_weight
@@ -875,11 +873,9 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         # on disk there is a scale for w1 and w3. Use the max to requantize.
         if not self.block_quant:
             shard_size = layer.intermediate_size_per_partition
-            from vllm.envs import is_lk_moe_gpu_resident_layer
-            if is_lk_moe_gpu_resident_layer(layer.layer_name):
-                w13, w13_scale = process_fp8_weight_tensor_strategy_moe(
-                    w13, w13_scale, shard_size, layer.local_num_experts
-                )
+            w13, w13_scale = process_fp8_weight_tensor_strategy_moe(
+                w13, w13_scale, shard_size, layer.local_num_experts
+            )
 
         # Shuffle weights to runtime format and setup kernel.
         self._setup_kernel(
@@ -981,6 +977,8 @@ class Fp8MoEMethod(FusedMoEMethodBase):
     def get_fused_moe_quant_config(
         self, layer: torch.nn.Module
     ) -> FusedMoEQuantConfig | None:
+        if isinstance(layer, FusedMoE) and  layer.is_cpu_layer:
+            return None
         # TRTLLM does not use Modular Kernel.
         if self.fp8_backend == Fp8MoeBackend.FLASHINFER_TRTLLM:
             return None

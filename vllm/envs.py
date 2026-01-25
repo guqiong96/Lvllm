@@ -1892,7 +1892,7 @@ def is_lk_moe_gpu_prefill_layer(layer_name: str) -> bool:
     
 def is_lk_moe_cpu_layer(layer_name: str)-> bool:
 
-    return is_lk_moe_feature_enabled() and not is_lk_moe_gpu_resident_layer(layer_name)
+    return is_lk_moe_feature_enabled() and not is_lk_moe_gpu_resident_layer(layer_name) and not is_lk_moe_gpu_prefill_layer(layer_name)
     
 def is_lk_moe_gpu_resident_layer(layer_name: str) -> bool:
     

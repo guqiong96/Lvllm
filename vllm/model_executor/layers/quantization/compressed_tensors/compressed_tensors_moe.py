@@ -763,9 +763,8 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
         params_dtype: torch.dtype,
         **extra_weight_attrs,
     ):
-        from vllm.envs import is_lk_moe_gpu_resident_layer
         device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
-        if isinstance(layer, FusedMoE) and not is_lk_moe_gpu_resident_layer(layer.layer_name):
+        if isinstance(layer, FusedMoE) and not layer.is_gpu_resident_layer:
             device = "cpu"
         layer.intermediate_size_per_partition = intermediate_size_per_partition
         layer.hidden_size = hidden_size
@@ -922,6 +921,8 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
 
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
         # Allow for accessing weights and scales in standard way.
+        if isinstance(layer, FusedMoE) and layer.is_cpu_layer:
+            return
         w13 = layer.w13_weight
         w2 = layer.w2_weight
         w13_scale = layer.w13_weight_scale
@@ -958,19 +959,17 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
                 num_experts=layer.num_local_experts,
                 is_act_and_mul=self.moe.is_act_and_mul,
             )
-        from vllm.envs import is_lk_moe_gpu_resident_layer
 
-        if is_lk_moe_gpu_resident_layer(layer.layer_name):
-            w13, w2, w13_scale, w2_scale = convert_to_fp8_moe_kernel_format(
-                fp8_backend=self.fp8_backend,
-                layer=layer,
-                w13=w13,
-                w2=w2,
-                w13_scale=w13_scale,
-                w2_scale=w2_scale,
-                w13_input_scale=w13_input_scale,
-                w2_input_scale=w2_input_scale,
-            )
+        w13, w2, w13_scale, w2_scale = convert_to_fp8_moe_kernel_format(
+            fp8_backend=self.fp8_backend,
+            layer=layer,
+            w13=w13,
+            w2=w2,
+            w13_scale=w13_scale,
+            w2_scale=w2_scale,
+            w13_input_scale=w13_input_scale,
+            w2_input_scale=w2_input_scale,
+        )
 
         # Replace parameters with updated versions. Note that this helper
         # function ensures the replacement is compatible with RL weight reloads.
@@ -1323,9 +1322,8 @@ class CompressedTensorsWNA16MarlinMoEMethod(CompressedTensorsMoEMethod):
         params_dtype: torch.dtype,
         **extra_weight_attrs,
     ):
-        from vllm.envs import is_lk_moe_gpu_resident_layer, is_lk_moe_cpu_layer
         device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
-        if isinstance(layer, FusedMoE) and not is_lk_moe_gpu_resident_layer(layer.layer_name):
+        if isinstance(layer, FusedMoE) and not layer.is_gpu_resident_layer:
             device = "cpu"
         intermediate_size_full = extra_weight_attrs.pop("intermediate_size_full")
         w13_num_shards = 2 if self.moe.is_act_and_mul else 1
@@ -1468,36 +1466,9 @@ class CompressedTensorsWNA16MarlinMoEMethod(CompressedTensorsMoEMethod):
         layer.a2_scale = None
         layer.marlin_state = GPTQMarlinState.REPACK
 
-    def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
-        device = torch.cuda.current_device()
-        from vllm.envs import is_lk_moe_gpu_resident_layer, is_lk_moe_gpu_prefill_layer
-        if isinstance(layer, FusedMoE) and not is_lk_moe_gpu_resident_layer(layer.layer_name): 
-            layer.w13_weight_packed_origin = torch.nn.Parameter(
-            layer.w13_weight_packed.cpu().transpose(1, 2).contiguous().view(torch.uint8),
-                requires_grad=False,
-            )
-            layer.w2_weight_packed_origin = torch.nn.Parameter(
-                layer.w2_weight_packed.cpu().transpose(1, 2).contiguous().view(torch.uint8),
-                requires_grad=False,
-            )
-            layer.w13_weight_scale_origin = torch.nn.Parameter(
-                layer.w13_weight_scale.cpu().transpose(1, 2).contiguous(), requires_grad=False
-            )
-            layer.w2_weight_scale_origin = torch.nn.Parameter(
-                layer.w2_weight_scale.cpu().transpose(1, 2).contiguous(), requires_grad=False
-            )  
-            if not is_lk_moe_gpu_prefill_layer(layer.layer_name):
-                layer._zero_tensor(layer.w13_weight_packed)
-                layer._zero_tensor(layer.w2_weight_packed)
-                layer._zero_tensor(layer.w13_weight_scale)
-                layer._zero_tensor(layer.w2_weight_scale)
-                layer._zero_tensor(layer.w13_weight_g_idx)
-                layer._zero_tensor(layer.w2_weight_g_idx)
-                layer._zero_tensor(layer.w13_g_idx_sort_indices)
-                layer._zero_tensor(layer.w2_g_idx_sort_indices)
-                del layer.w13_weight_packed, layer.w2_weight_packed, layer.w13_weight_scale, layer.w2_weight_scale
-                del layer.w13_weight_g_idx, layer.w2_weight_g_idx, layer.w13_g_idx_sort_indices, layer.w2_g_idx_sort_indices
-                return
+    def process_weights_after_loading(self, layer: torch.nn.Module) -> None: 
+        if isinstance(layer, FusedMoE) and layer.is_cpu_layer: 
+            return
             
         num_experts = layer.w13_weight_g_idx.shape[0]
         device = layer.w13_weight_g_idx.device
@@ -1617,11 +1588,13 @@ class CompressedTensorsWNA16MarlinMoEMethod(CompressedTensorsMoEMethod):
     def get_fused_moe_quant_config(
         self, layer: torch.nn.Module
     ) -> FusedMoEQuantConfig | None:
+        if isinstance(layer, FusedMoE) and layer.is_cpu_layer:
+            return None
         if self.num_bits != 4:
             return None
         return int4_w4a16_moe_quant_config(
-            w1_scale=layer.w13_weight_scale if hasattr(layer, 'w13_weight_scale') else self.w13_weight_scale_origin,
-            w2_scale=layer.w2_weight_scale if hasattr(layer, 'w2_weight_scale') else self.w2_weight_scale_origin,
+            w1_scale=layer.w13_weight_scale,
+            w2_scale=layer.w2_weight_scale,
             w1_zp=None,
             w2_zp=None,
             block_shape=[0, self.group_size],
@@ -1736,9 +1709,8 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
         params_dtype: torch.dtype,
         **extra_weight_attrs,
     ):
-        from vllm.envs import is_lk_moe_gpu_resident_layer
         device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
-        if isinstance(layer, FusedMoE) and not is_lk_moe_gpu_resident_layer(layer.layer_name):
+        if isinstance(layer, FusedMoE) and not layer.is_gpu_resident_layer:
             device = "cpu"
         # Will transpose the loaded weight along the
         # intermediate and hidden dim sizes. Will
