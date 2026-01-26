@@ -140,11 +140,7 @@ def device_loading_context(module: torch.nn.Module, target_device: torch.device)
     for name, p in module.named_parameters():
         if p.device.type == "cpu":
             original_device_states[name] = p.device
-            original_data = p.data
-            new_data = original_data.to(target_device)
-            p.data = new_data
-            del original_data
-
+            p.data = p.data.to(target_device)
         # Parameters already on target device are not touched
 
     try:

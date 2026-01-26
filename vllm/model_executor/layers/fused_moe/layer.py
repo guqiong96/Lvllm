@@ -84,7 +84,8 @@ import numpy as np
 from vllm.utils.platform_utils import is_pin_memory_available
     
 import vllm
-from vllm.envs import is_lk_moe_feature_enabled, is_lk_moe_use_weight_keep, is_lk_moe_cpu_layer, is_lk_moe_gpu_resident_layer, is_lk_moe_gpu_prefill_layer, get_gpu_prefetch_window, get_gpu_prefill_min_batch_size, is_lk_moe_use_gpu_prefill
+from vllm.envs import MoeComputeStrategy
+from vllm.envs import is_lk_moe_feature_enabled, get_moe_compute_strategy, is_lk_moe_cpu_layer, is_lk_moe_gpu_resident_layer, is_lk_moe_gpu_prefill_layer, get_gpu_prefetch_window, get_gpu_prefill_min_batch_size, is_lk_moe_use_gpu_prefill
 if is_lk_moe_feature_enabled():
     import  lk_moe
     GGML_TYPE_TO_TORCH_DTYPE = {
@@ -2112,7 +2113,9 @@ class FusedMoE(CustomOp):
     def _zero_tensor(self, tensor: torch.Tensor):
         if tensor is not None:
             tensor.data = torch.empty(0, dtype=tensor.dtype, device=tensor.device)
-            
+    
+           
+           
     def process_weights_after_loading(self):
         if self.is_gpu_resident_layer:
             logger.info(f"Initialized lk_moe with {self.local_num_experts} experts for layer {self.layer_name} [" + 
@@ -2142,17 +2145,23 @@ class FusedMoE(CustomOp):
                 find_weight = True
                 
             if isinstance(self.quant_method, Fp8MoEMethod):
-                if is_lk_moe_use_weight_keep():
+                strategy = get_moe_compute_strategy()
+                if strategy == MoeComputeStrategy.KEEP:
                     self._process_fp8_weights(self.quant_method.block_quant)
-                else: 
+                elif strategy == MoeComputeStrategy.TO_DTYPE:
                     self._process_block_weights()
+                else:
+                    self._process_block_weights_quant(strategy)
                 find_weight = True
                 
             if isinstance(self.quant_method, CompressedTensorsW8A8Fp8MoEMethod):
-                if is_lk_moe_use_weight_keep():
+                strategy = get_moe_compute_strategy()
+                if strategy == MoeComputeStrategy.KEEP:
                     self._process_fp8_weights(False)
-                else:
+                elif strategy == MoeComputeStrategy.TO_DTYPE:
                     self._process_channel_weights() 
+                else:
+                    self._process_channel_weights_quant(strategy)
                 find_weight = True
             if isinstance(self.quant_method, UnquantizedFusedMoEMethod): 
                 self._process_regular_weights()
@@ -2490,6 +2499,101 @@ class FusedMoE(CustomOp):
             import gc
             gc.collect()  
    
+    def _process_block_weights_quant(self, moe_compute_strategy: MoeComputeStrategy):  
+        
+        if moe_compute_strategy not in {MoeComputeStrategy.INT4, MoeComputeStrategy.INT8}:
+            print(f"Warning: moe_compute_strategy {moe_compute_strategy} is not supported for lk moe , use INT4 instead ...")
+            moe_compute_strategy = MoeComputeStrategy.INT4
+        
+        w13_weight = self.w13_weight
+        w2_weight = self.w2_weight
+        w13_weight_scale_inv = self.w13_weight_scale_inv
+        w2_weight_scale_inv = self.w2_weight_scale_inv
+        
+        group_shape = self.quant_method.weight_block_size
+        num_experts, total_intermediate_size, hidden_size = w13_weight.shape
+        intermediate_size = total_intermediate_size // 2
+         
+        assert w2_weight.shape == (num_experts, hidden_size, intermediate_size)
+        
+        dequant_device = w13_weight.device
+        w13_fp32_list = []
+        w2_fp32_list = [] 
+         
+        for expert_idx in range(num_experts): 
+            expert_w13_weight = w13_weight[expert_idx]
+            expert_w13_scale_inv = w13_weight_scale_inv[expert_idx]
+            expert_w2_weight = w2_weight[expert_idx]
+            expert_w2_scale_inv = w2_weight_scale_inv[expert_idx]
+             
+            w13_float = expert_w13_weight.to(dtype=torch.float32)
+            w2_float = expert_w2_weight.to(dtype=torch.float32)
+            
+            w13_scale_inv_expanded = self._block_scale_broadcast_fixed(
+                expert_w13_scale_inv, w13_float.shape, group_shape)
+            w13_fp32 = w13_float * w13_scale_inv_expanded
+            
+            w2_scale_inv_expanded = self._block_scale_broadcast_fixed(
+                expert_w2_scale_inv, w2_float.shape, group_shape)
+            w2_fp32 = w2_float * w2_scale_inv_expanded
+             
+            w13_fp32_list.append(w13_fp32)
+            w2_fp32_list.append(w2_fp32) 
+             
+            del expert_w13_weight, expert_w13_scale_inv, expert_w2_weight, expert_w2_scale_inv
+            del w13_float, w2_float, w13_scale_inv_expanded, w2_scale_inv_expanded
+            del w13_fp32, w2_fp32
+         
+        w13_fp32_tensor = torch.stack(w13_fp32_list, dim=0).cpu()
+        w2_fp32_tensor = torch.stack(w2_fp32_list, dim=0).cpu() 
+         
+        w13_fp32_list.clear()  # Python 3.3+
+        w2_fp32_list.clear()
+        del w13_fp32_list, w2_fp32_list
+         
+        w13_weight_ptr = w13_fp32_tensor.contiguous().data_ptr()
+        w2_weight_ptr = w2_fp32_tensor.contiguous().data_ptr()
+          
+         
+        hidden_ggml_type = self.get_ggml_type_from_dtype(self.moe_config.in_dtype)
+         
+        group_size = getattr(self.quant_method, 'group_size', 32)
+        num_bits = 4 if moe_compute_strategy == MoeComputeStrategy.INT4 else 8
+         
+        num_processes, process_id = self._get_processes_info()
+         
+        self.lk_moe_config = lk_moe.MOE_QuantConfig(
+            num_processes,                     # num_processes
+            process_id,                        # process_id
+            self.local_num_experts,            # expert_num
+            self.top_k,                        # routed_expert_num
+            self.hidden_size,                  # hidden_size
+            self.intermediate_size_per_partition,  # intermediate_size
+            32,                                # stride
+            10,                                # group_min_len
+            self.moe_config.max_num_tokens,   # group_max_len
+            hidden_ggml_type,                  # hidden_type 
+            0,                                 # w13_weight_data_type: 0 for fp32
+            0,                                # w2_weight_data_type: 0 for fp32
+            w13_weight_ptr,                    # w13_weight_ptr 
+            w2_weight_ptr,                     # w2_weight_ptr   
+            group_size,                        # group_size 
+            num_bits,                          # num_bits 
+        )
+         
+        self.lk_moe = lk_moe.MOE_Quant(self.lk_moe_config)
+          
+        del w13_weight_ptr, w2_weight_ptr
+        del w13_fp32_tensor, w2_fp32_tensor
+         
+        if self.is_cpu_layer: 
+            
+            del self.w13_weight_scale_inv, self.w2_weight_scale_inv
+            del self.w13_weight, self.w2_weight
+            
+        import gc
+        gc.collect()
+    
     def _process_block_weights(self):  
  
         w13_weight = self.w13_weight
@@ -2548,6 +2652,10 @@ class FusedMoE(CustomOp):
                  
         w13_tensor = torch.stack(w13_projs, dim=0).to('cpu')
         w2_tensor = torch.stack(w2_projs, dim=0).to('cpu') 
+        
+        w13_projs.clear()
+        w2_projs.clear()
+        
         del w13_projs, w2_projs  
         
         w13_ptr = w13_tensor.contiguous().data_ptr()
@@ -2573,21 +2681,113 @@ class FusedMoE(CustomOp):
         )
         self.lk_moe = lk_moe.MOE(self.lk_moe_config)
          
+        del w13_ptr, w2_ptr
         del w13_weight, w2_weight, w13_weight_scale_inv, w2_weight_scale_inv
         
-        if self.is_cpu_layer:
-            self._zero_tensor(self.w13_weight_scale_inv)
-            self._zero_tensor(self.w2_weight_scale_inv)
+        if self.is_cpu_layer: 
             del self.w13_weight_scale_inv
-            del self.w2_weight_scale_inv
-            self._zero_tensor(self.w13_weight)
-            self._zero_tensor(self.w2_weight)
+            del self.w2_weight_scale_inv 
             del self.w13_weight
             del self.w2_weight   
             
-            import gc
-            gc.collect()
+        import gc
+        gc.collect()
          
+    def _process_channel_weights_quant(self, moe_compute_strategy: MoeComputeStrategy):  
+    
+        if moe_compute_strategy not in {MoeComputeStrategy.INT4, MoeComputeStrategy.INT8}:
+            print(f"Warning: moe_compute_strategy {moe_compute_strategy} is not supported for lk moe , use INT4 instead ...")
+            moe_compute_strategy = MoeComputeStrategy.INT4
+        
+        w13_weight = self.w13_weight
+        w2_weight = self.w2_weight
+        w13_weight_scale = self.w13_weight_scale
+        w2_weight_scale = self.w2_weight_scale
+        
+        num_experts, total_intermediate_size, hidden_size = w13_weight.shape
+        intermediate_size = total_intermediate_size // 2 
+         
+        assert w2_weight.shape == (num_experts, hidden_size, intermediate_size)
+         
+        assert w13_weight_scale.shape == (num_experts, total_intermediate_size, 1)
+        assert w2_weight_scale.shape == (num_experts, hidden_size, 1)
+        
+        dequant_device = w13_weight.device
+        w13_fp32_list = []
+        w2_fp32_list = [] 
+        
+        for expert_idx in range(num_experts): 
+            expert_w13_weight = w13_weight[expert_idx].to(dequant_device)  # [intermediate_size, hidden_size]
+            expert_w13_scale = w13_weight_scale[expert_idx].to(dequant_device)  # [total_intermediate_size, 1]
+            expert_w2_weight = w2_weight[expert_idx].to(dequant_device)  # [hidden_size, intermediate_size]
+            expert_w2_scale = w2_weight_scale[expert_idx].to(dequant_device)  # [hidden_size, 1]
+             
+            w13_float = expert_w13_weight.to(dtype=torch.float32)
+            w2_float = expert_w2_weight.to(dtype=torch.float32)
+             
+            w13_scale_expanded = expert_w13_scale.expand_as(w13_float)  # [intermediate_size, hidden_size]
+            w2_scale_expanded = expert_w2_scale.expand_as(w2_float)  # [hidden_size, intermediate_size]
+             
+            w13_fp32 = w13_float * w13_scale_expanded
+            w2_fp32 = w2_float * w2_scale_expanded
+             
+            w13_fp32_list.append(w13_fp32)
+            w2_fp32_list.append(w2_fp32)
+             
+            del expert_w13_weight, expert_w13_scale, expert_w2_weight, expert_w2_scale
+            del w13_float, w2_float, w13_scale_expanded, w2_scale_expanded
+            del w13_fp32, w2_fp32
+         
+        w13_fp32_tensor = torch.stack(w13_fp32_list, dim=0).cpu()
+        w2_fp32_tensor = torch.stack(w2_fp32_list, dim=0).cpu()
+         
+        w13_fp32_list.clear()
+        w2_fp32_list.clear()
+    
+        del w13_fp32_list, w2_fp32_list
+         
+        w13_weight_ptr = w13_fp32_tensor.contiguous().data_ptr()
+        w2_weight_ptr = w2_fp32_tensor.contiguous().data_ptr()
+         
+        hidden_ggml_type = self.get_ggml_type_from_dtype(self.moe_config.in_dtype)
+         
+        group_size = getattr(self.quant_method, 'group_size', 32)
+         
+        num_bits = 4 if moe_compute_strategy == MoeComputeStrategy.INT4 else 8
+         
+        num_processes, process_id = self._get_processes_info()
+         
+        self.lk_moe_config = lk_moe.MOE_Quant_Config(
+            num_processes,                     # num_processes
+            process_id,                        # process_id
+            self.local_num_experts,            # expert_num
+            self.top_k,                        # routed_expert_num
+            self.hidden_size,                  # hidden_size
+            self.intermediate_size_per_partition,  # intermediate_size
+            32,                                # stride
+            10,                                # group_min_len
+            self.moe_config.max_num_tokens,   # group_max_len
+            hidden_ggml_type,                  # hidden_type 
+            0,                                 # weight_data_type: 0 for fp32
+            w13_weight_ptr,                    # w13_weight_ptr 
+            w2_weight_ptr,                     # w2_weight_ptr   
+            group_size,                        # group_size 
+            num_bits,                          # num_bits 
+        )
+         
+        self.lk_moe = lk_moe.MOE_Quant(self.lk_moe_config)
+        
+        del w13_weight_ptr, w2_weight_ptr
+        del w13_fp32_tensor, w2_fp32_tensor
+         
+        if self.is_cpu_layer:
+            
+            del self.w13_weight, self.w2_weight
+            del self.w13_weight_scale, self.w2_weight_scale
+            
+        import gc
+        gc.collect()
+            
     def _process_channel_weights(self):  
          
         w13_weight = self.w13_weight
@@ -2671,17 +2871,13 @@ class FusedMoE(CustomOp):
         del w13_ptr, w2_ptr 
         
         if self.is_cpu_layer:
-            self._zero_tensor(self.w13_weight)
-            self._zero_tensor(self.w2_weight)
-            self._zero_tensor(self.w13_weight_scale)
-            self._zero_tensor(self.w2_weight_scale)
             del self.w13_weight
             del self.w2_weight
             del self.w13_weight_scale
             del self.w2_weight_scale
         
-            import gc
-            gc.collect()
+        import gc
+        gc.collect()
             
     def _process_regular_weights(self):  
                
@@ -2718,7 +2914,8 @@ class FusedMoE(CustomOp):
             w2_ptr,                 # w2_ptr 
         ) 
         self.lk_moe = lk_moe.MOE(self.lk_moe_config)  
-                
+        del w13_ptr, w2_ptr
+        
     def forward_lk(self, hidden_states: torch.Tensor, router_logits: torch.Tensor) -> torch.Tensor:
         return self._process_valid_inputs(hidden_states, router_logits)
  

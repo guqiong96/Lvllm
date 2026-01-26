@@ -1832,8 +1832,14 @@ def compile_factors() -> dict[str, object]:
         factors[var] = normalize_value(os.getenv(var))
 
     return factors
-
-
+ 
+from enum import Enum
+class MoeComputeStrategy(str, Enum): 
+        TO_DTYPE = "TO_DTYPE"      
+        KEEP = "KEEP"              
+        INT8 = "INT8"             
+        INT4 = "INT4" 
+        
 def is_lk_moe_feature_enabled() -> bool:
     try:
         import  lk_moe  
@@ -1846,10 +1852,15 @@ def is_lk_moe_use_gpu_prefill() -> bool:
     return environment_variables["LVLLM_GPU_PREFILL_MIN_BATCH_SIZE"]() > 0
 
 def get_gpu_prefill_min_batch_size() -> int:
-    return environment_variables["LVLLM_GPU_PREFILL_MIN_BATCH_SIZE"]()
-
-def is_lk_moe_use_weight_keep() -> bool:
-    return environment_variables["LVLLM_MOE_USE_WEIGHT"]() == "KEEP"
+    return environment_variables["LVLLM_GPU_PREFILL_MIN_BATCH_SIZE"]() 
+def get_moe_compute_strategy() -> MoeComputeStrategy: 
+    strategy = environment_variables["LVLLM_MOE_USE_WEIGHT"]()
+    
+    try:
+        return MoeComputeStrategy(strategy.upper())
+    except ValueError: 
+        print(f"Warning: Invalid LVLLM_MOE_USE_WEIGHT value '{strategy}', using 'TO_DTYPE'")
+        return MoeComputeStrategy.TO_DTYPE   
 
 def get_gpu_prefetch_window() -> int:
     return environment_variables["LVLLM_GPU_PREFETCH_WINDOW"]()
