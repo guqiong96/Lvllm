@@ -2113,9 +2113,7 @@ class FusedMoE(CustomOp):
     def _zero_tensor(self, tensor: torch.Tensor):
         if tensor is not None:
             tensor.data = torch.empty(0, dtype=tensor.dtype, device=tensor.device)
-    
-           
-           
+            
     def process_weights_after_loading(self):
         if self.is_gpu_resident_layer:
             logger.info(f"Initialized lk_moe with {self.local_num_experts} experts for layer {self.layer_name} [" + 
@@ -2296,7 +2294,7 @@ class FusedMoE(CustomOp):
             self.intermediate_size_per_partition,             # intermediate_size
             32,                            # stride
             10,                            # group_min_len
-            1024,                          # group_max_len
+            self.moe_config.max_num_tokens,                          # group_max_len
             hidden_ggml_type,           
             w13_ggml_type,                # gate_type  
             w2_ggml_type,                # down_type   
@@ -2415,7 +2413,7 @@ class FusedMoE(CustomOp):
             self.intermediate_size_per_partition,             # intermediate_size
             32,                            # stride
             10,                            # group_min_len
-            1024,                         # group_max_len
+            self.moe_config.max_num_tokens,                         # group_max_len
             hidden_ggml_type,              # hidden_type 
             2,
             2,
@@ -2498,7 +2496,7 @@ class FusedMoE(CustomOp):
             self.intermediate_size_per_partition,             # intermediate_size
             32,                            # stride
             10,                            # group_min_len
-            1024,                          # group_max_len
+            self.moe_config.max_num_tokens,                          # group_max_len
             hidden_ggml_type,              # hidden_type 
             8,
             8,
@@ -2589,7 +2587,7 @@ class FusedMoE(CustomOp):
             self.intermediate_size_per_partition,  # intermediate_size
             32,                                # stride
             10,                                # group_min_len
-            1024,   # group_max_len
+            self.moe_config.max_num_tokens,   # group_max_len
             hidden_ggml_type,                  # hidden_type 
             0,                                 # w13_weight_data_type: 0 for fp32
             0,                                # w2_weight_data_type: 0 for fp32
@@ -2686,7 +2684,7 @@ class FusedMoE(CustomOp):
             self.intermediate_size_per_partition,             # intermediate_size
             32,                            # stride
             10,                            # group_min_len
-            1024,                          # group_max_len 
+            self.moe_config.max_num_tokens,                          # group_max_len 
             hidden_ggml_type,                # hidden_type 
             w13_ggml_type,                  # w13_type  
             w2_ggml_type,                # w2_type   
@@ -2774,7 +2772,7 @@ class FusedMoE(CustomOp):
             self.intermediate_size_per_partition,  # intermediate_size
             32,                                # stride
             10,                                # group_min_len
-            1024,   # group_max_len
+            self.moe_config.max_num_tokens,   # group_max_len
             hidden_ggml_type,                  # hidden_type 
             0,                                 # weight_data_type: 0 for fp32
             w13_weight_ptr,                    # w13_weight_ptr 
@@ -2861,7 +2859,7 @@ class FusedMoE(CustomOp):
             self.intermediate_size_per_partition,             # intermediate_size
             32,                            # stride
             10,                            # group_min_len
-            1024,                          # group_max_len 
+            self.moe_config.max_num_tokens,                          # group_max_len 
             hidden_ggml_type,                # hidden_type  
             w13_ggml_type,                  # w13_type  
             w2_ggml_type,                # w2_type   
@@ -2909,7 +2907,7 @@ class FusedMoE(CustomOp):
             self.intermediate_size_per_partition,             # intermediate_size
             32,                            # stride
             10,                            # group_min_len
-            1024,                          # group_max_len
+            self.moe_config.max_num_tokens,                          # group_max_len
             hidden_ggml_type,            
             w13_ggml_type,                # gate_type  
             w2_ggml_type,                # down_type  
