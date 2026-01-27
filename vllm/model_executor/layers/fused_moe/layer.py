@@ -2178,17 +2178,73 @@ class FusedMoE(CustomOp):
             logger.error(f"Failed to initialize lk_moe: {e}") 
             self.lk_moe = None
             self.lk_moe_config = None
+    
+    def distribute_weight_tensor(self, param_name: str, weight: torch.Tensor):  
+        origin_dtype = weight.dtype
+        origin_shape = weight.shape
+        setattr(self, param_name + "_origin_dtype", origin_dtype)
+        setattr(self, param_name + "_origin_shape", origin_shape)
+         
+        new_weight = weight.data.view(torch.uint8).contiguous()
+        new_dtype = weight.dtype
+        new_shape = weight.shape
+        setattr(self, param_name + "_new_dtype", new_dtype)
+        setattr(self, param_name + "_new_shape", new_shape)
+         
+        shape_array = torch.tensor(new_shape, dtype=torch.int64).contiguous()
+         
+        self.lk_moe.distributeWeight(param_name, new_weight.data_ptr(), shape_array.data_ptr())
+        
+        del shape_array 
             
     def clean_weights_after_loading(self):
+        from vllm.model_executor.layers.quantization.fp8 import Fp8MoEMethod
+        from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsWNA16MarlinMoEMethod
+        from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsWNA16MoEMethod 
         if self.is_gpu_resident_layer:
             return
         try:  
             if isinstance(self.quant_method, UnquantizedFusedMoEMethod): 
-                self._zero_tensor(self.w13_weight)
-                self._zero_tensor(self.w2_weight)
                 del self.w13_weight, self.w2_weight
-                import gc
-                gc.collect()
+                
+            if isinstance(self.quant_method, Fp8MoEMethod):
+                param_names = [
+                        "w13_weight",
+                        "w2_weight", 
+                        "w13_weight_scale_inv" if self.quant_method.block_quant else "w13_weight_scale",
+                        "w2_weight_scale_inv" if self.quant_method.block_quant else "w2_weight_scale",   
+                    ]
+                if self.is_cpu_layer: 
+                    pass
+                else:
+                    for param_name in param_names: 
+                            weight = getattr(self, param_name) 
+                            self.distribute_weight_tensor(param_name, weight) 
+                            delattr(self, param_name)
+                            
+            if (isinstance(self.quant_method, CompressedTensorsWNA16MarlinMoEMethod) or isinstance(self.quant_method, CompressedTensorsWNA16MoEMethod)) \
+                and hasattr(self.quant_method, 'strategy'):
+                param_names = [
+                    "w13_weight_packed",
+                    "w2_weight_packed", 
+                    "w13_weight_scale",
+                    "w2_weight_scale",
+                    "w13_weight_g_idx",
+                    "w2_weight_g_idx",
+                    "w13_g_idx_sort_indices",
+                    "w2_g_idx_sort_indices"
+                ]
+                if self.is_cpu_layer: 
+                    pass
+                else:
+                    for param_name in param_names: 
+                            weight = getattr(self, param_name) 
+                            self.distribute_weight_tensor(param_name, weight) 
+                            delattr(self, param_name)
+                         
+                
+            import gc
+            gc.collect()
         except Exception as e:
             logger.error(f"Failed to initialize lk_moe: {e}") 
             self.lk_moe = None
@@ -2246,7 +2302,7 @@ class FusedMoE(CustomOp):
             self.intermediate_size_per_partition,             # intermediate_size
             32,                            # stride
             10,                            # group_min_len
-            self.moe_config.max_num_tokens,                          # group_max_len
+            1024,                          # group_max_len
             hidden_ggml_type,           
             w13_ggml_type,                # gate_type  
             w2_ggml_type,                # down_type   
@@ -2255,8 +2311,7 @@ class FusedMoE(CustomOp):
         )
         self.lk_moe = lk_moe.MOE(self.lk_moe_config) 
           
-        self._zero_tensor(self.w13_qweight)
-        self._zero_tensor(self.w2_qweight)
+        del w13_ptr, w2_ptr
         del self.w13_qweight, self.w2_qweight
  
         import gc
@@ -2366,7 +2421,7 @@ class FusedMoE(CustomOp):
             self.intermediate_size_per_partition,             # intermediate_size
             32,                            # stride
             10,                            # group_min_len
-            self.moe_config.max_num_tokens,                         # group_max_len
+            1024,                         # group_max_len
             hidden_ggml_type,              # hidden_type 
             2,
             2,
@@ -2382,28 +2437,13 @@ class FusedMoE(CustomOp):
             group_size,                        # group_size
         ) 
         self.lk_moe = lk_moe.MOE_WNA16Repack(self.lk_moe_config) 
+         
         
-        self._zero_tensor(w13_weight)
-        self._zero_tensor(w2_weight)
-        self._zero_tensor(w13_scale)
-        self._zero_tensor(w2_scale)
-        
-        del w13_weight, w2_weight, w13_scale, w2_scale
-        
-        if self.is_cpu_layer: 
-            
-            self._zero_tensor(self.w13_weight_packed)
-            self._zero_tensor(self.w2_weight_packed)
-            self._zero_tensor(self.w13_weight_scale)
-            self._zero_tensor(self.w2_weight_scale)
-            
-            del self.w13_weight_packed
-            del self.w2_weight_packed
-            del self.w13_weight_scale
-            del self.w2_weight_scale
+        del w13_weight_ptr, w2_weight_ptr
+        del w13_weight, w2_weight, w13_scale, w2_scale 
     
-            import gc
-            gc.collect()  
+        import gc
+        gc.collect()
             
     
     
@@ -2464,7 +2504,7 @@ class FusedMoE(CustomOp):
             self.intermediate_size_per_partition,             # intermediate_size
             32,                            # stride
             10,                            # group_min_len
-            self.moe_config.max_num_tokens,                          # group_max_len
+            1024,                          # group_max_len
             hidden_ggml_type,              # hidden_type 
             8,
             8,
@@ -2478,26 +2518,10 @@ class FusedMoE(CustomOp):
         )
         self.lk_moe = lk_moe.MOE_FP8(self.lk_moe_config) 
           
+        del w13_weight_ptr, w2_weight_ptr, w13_weight_scale_ptr, w2_weight_scale_ptr
         del w13_weight, w2_weight, w13_weight_scale, w2_weight_scale
         
-        if self.is_cpu_layer: 
-            if block_quant:
-                self._zero_tensor(self.w13_weight_scale_inv)
-                self._zero_tensor(self.w2_weight_scale_inv)
-                del self.w13_weight_scale_inv
-                del self.w2_weight_scale_inv
-            else:
-                self._zero_tensor(self.w13_weight_scale)
-                self._zero_tensor(self.w2_weight_scale)
-                del self.w13_weight_scale
-                del self.w2_weight_scale
-            self._zero_tensor(self.w13_weight)
-            self._zero_tensor(self.w2_weight)
-            del self.w13_weight
-            del self.w2_weight   
-    
-            import gc
-            gc.collect()  
+
    
     def _process_block_weights_quant(self, moe_compute_strategy: MoeComputeStrategy):  
         
@@ -2571,7 +2595,7 @@ class FusedMoE(CustomOp):
             self.intermediate_size_per_partition,  # intermediate_size
             32,                                # stride
             10,                                # group_min_len
-            self.moe_config.max_num_tokens,   # group_max_len
+            1024,   # group_max_len
             hidden_ggml_type,                  # hidden_type 
             0,                                 # w13_weight_data_type: 0 for fp32
             0,                                # w2_weight_data_type: 0 for fp32
@@ -2582,15 +2606,11 @@ class FusedMoE(CustomOp):
         )
          
         self.lk_moe = lk_moe.MOE_Quant(self.lk_moe_config)
+         
           
         del w13_weight_ptr, w2_weight_ptr
         del w13_fp32_tensor, w2_fp32_tensor
-         
-        if self.is_cpu_layer: 
-            
-            del self.w13_weight_scale_inv, self.w2_weight_scale_inv
-            del self.w13_weight, self.w2_weight
-            
+        
         import gc
         gc.collect()
     
@@ -2672,7 +2692,7 @@ class FusedMoE(CustomOp):
             self.intermediate_size_per_partition,             # intermediate_size
             32,                            # stride
             10,                            # group_min_len
-            self.moe_config.max_num_tokens,                          # group_max_len 
+            1024,                          # group_max_len 
             hidden_ggml_type,                # hidden_type 
             w13_ggml_type,                  # w13_type  
             w2_ggml_type,                # w2_type   
@@ -2683,13 +2703,7 @@ class FusedMoE(CustomOp):
          
         del w13_ptr, w2_ptr
         del w13_weight, w2_weight, w13_weight_scale_inv, w2_weight_scale_inv
-        
-        if self.is_cpu_layer: 
-            del self.w13_weight_scale_inv
-            del self.w2_weight_scale_inv 
-            del self.w13_weight
-            del self.w2_weight   
-            
+             
         import gc
         gc.collect()
          
@@ -2766,7 +2780,7 @@ class FusedMoE(CustomOp):
             self.intermediate_size_per_partition,  # intermediate_size
             32,                                # stride
             10,                                # group_min_len
-            self.moe_config.max_num_tokens,   # group_max_len
+            1024,   # group_max_len
             hidden_ggml_type,                  # hidden_type 
             0,                                 # weight_data_type: 0 for fp32
             w13_weight_ptr,                    # w13_weight_ptr 
@@ -2779,12 +2793,7 @@ class FusedMoE(CustomOp):
         
         del w13_weight_ptr, w2_weight_ptr
         del w13_fp32_tensor, w2_fp32_tensor
-         
-        if self.is_cpu_layer:
-            
-            del self.w13_weight, self.w2_weight
-            del self.w13_weight_scale, self.w2_weight_scale
-            
+ 
         import gc
         gc.collect()
             
@@ -2858,7 +2867,7 @@ class FusedMoE(CustomOp):
             self.intermediate_size_per_partition,             # intermediate_size
             32,                            # stride
             10,                            # group_min_len
-            self.moe_config.max_num_tokens,                          # group_max_len 
+            1024,                          # group_max_len 
             hidden_ggml_type,                # hidden_type  
             w13_ggml_type,                  # w13_type  
             w2_ggml_type,                # w2_type   
@@ -2906,7 +2915,7 @@ class FusedMoE(CustomOp):
             self.intermediate_size_per_partition,             # intermediate_size
             32,                            # stride
             10,                            # group_min_len
-            self.moe_config.max_num_tokens,                          # group_max_len
+            1024,                          # group_max_len
             hidden_ggml_type,            
             w13_ggml_type,                # gate_type  
             w2_ggml_type,                # down_type  
@@ -3266,48 +3275,57 @@ def moe_prefetch(layer, layer_name: str, hidden_states: torch.Tensor,
             moe_prepare_gpu_prefill(layer_obj, forward_context, torch.cuda.current_device())
             state[idx] = 1   
             
+def collect_weight_from_moe(layer, param_name: str) -> torch.Tensor:
+    pin_memory = is_pin_memory_available()
+    shape_name = param_name + "_origin_shape"
+    dtype_name = param_name + "_origin_dtype"
+    if hasattr(layer, shape_name) and hasattr(layer, dtype_name):
+        origin_shape = getattr(layer, shape_name)
+        origin_dtype = getattr(layer, dtype_name)
+        new_shape = getattr(layer, param_name + "_new_shape")
+        shape_array = torch.tensor(new_shape, dtype=torch.int64)
+        weight_cpu = torch.zeros(
+            origin_shape,
+            dtype=origin_dtype, 
+            device="cpu",
+            requires_grad=False, 
+            pin_memory=pin_memory, 
+        ).contiguous() 
+        layer.lk_moe.collectWeight(
+                param_name,
+                weight_cpu.data_ptr(),
+                shape_array.data_ptr()
+            )
+        del shape_array
+        return weight_cpu
+        
+                
 def moe_prepare_gpu_prefill_fp8(layer, forward_context: ForwardContext, device: torch.device): 
+    
     param_names = [
         "w13_weight",
-        "w2_weight", 
-        "w13_weight_scale" if hasattr(layer, "w13_weight_scale") else "w13_weight_scale_inv",
-        "w2_weight_scale" if hasattr(layer, "w2_weight_scale") else "w2_weight_scale_inv",   
+        "w2_weight",  
+        "w13_weight_scale_inv" if layer.quant_method.block_quant else "w13_weight_scale",
+        "w2_weight_scale_inv" if layer.quant_method.block_quant else "w2_weight_scale",  
     ]
     
     for param_name in param_names:
-        if hasattr(layer, param_name):
-            p = getattr(layer, param_name)
-             
-            gpu_data = torch.empty_strided(
-                size=p.data.size(),
-                stride=p.data.stride(),
-                dtype=p.data.dtype,
-                layout=p.data.layout,
-                device=device,
-            ) 
-            gpu_data.copy_(p.data) 
-            p.data = gpu_data 
-            
-def moe_clean_gpu_prefill_fp8(layer):   
-    pin_memory = is_pin_memory_available()
+        weight_cpu = collect_weight_from_moe(layer, param_name)
+        setattr(layer, param_name, weight_cpu.to(device))
+        del weight_cpu
+  
+def moe_clean_gpu_prefill_fp8(layer):    
     param_names = [
         "w13_weight",
         "w2_weight", 
-        "w13_weight_scale" if hasattr(layer, "w13_weight_scale") else "w13_weight_scale_inv",
-        "w2_weight_scale" if hasattr(layer, "w2_weight_scale") else "w2_weight_scale_inv",  
+        "w13_weight_scale_inv" if layer.quant_method.block_quant else "w13_weight_scale",
+        "w2_weight_scale_inv" if layer.quant_method.block_quant else "w2_weight_scale",   
     ]
     for param_name in param_names:
-        p = getattr(layer, param_name)
-        cpu_data = torch.empty_strided(
-                            size=p.data.size(),
-                            stride=p.data.stride(),
-                            dtype=p.data.dtype,
-                            layout=p.data.layout,
-                            device="cpu",
-                            pin_memory=pin_memory,
-                        )
-        cpu_data.copy_(p.data) 
-        p.data = cpu_data     
+        if hasattr(layer, param_name):
+            delattr(layer, param_name)
+    
+          
 
 def moe_prepare_gpu_prefill_wna16(layer, forward_context: ForwardContext, device: torch.device):  
     
@@ -3320,24 +3338,16 @@ def moe_prepare_gpu_prefill_wna16(layer, forward_context: ForwardContext, device
         "w2_weight_g_idx",
         "w13_g_idx_sort_indices",
         "w2_g_idx_sort_indices"
-    ]
+    ] 
     
     for param_name in param_names:
-        if hasattr(layer, param_name):
-            p = getattr(layer, param_name)
-             
-            gpu_data = torch.empty_strided(
-                size=p.data.size(),
-                stride=p.data.stride(),
-                dtype=p.data.dtype,
-                layout=p.data.layout,
-                device=device,
-            ) 
-            gpu_data.copy_(p.data)
-            p.data = gpu_data 
+        weight_cpu = collect_weight_from_moe(layer, param_name)
+        setattr(layer, param_name, weight_cpu.to(device))
+        del weight_cpu
+     
+     
 
-def moe_clean_gpu_prefill_wna16(layer):   
-    pin_memory = is_pin_memory_available()
+def moe_clean_gpu_prefill_wna16(layer):    
     param_names = [
         "w13_weight_packed",
         "w2_weight_packed", 
@@ -3349,18 +3359,8 @@ def moe_clean_gpu_prefill_wna16(layer):
         "w2_g_idx_sort_indices"
     ]
     for param_name in param_names:
-        p = getattr(layer, param_name)
-        cpu_data = torch.empty_strided(
-                            size=p.data.size(),
-                            stride=p.data.stride(),
-                            dtype=p.data.dtype,
-                            layout=p.data.layout,
-                            device="cpu",
-                            pin_memory=pin_memory,
-                        )
-        cpu_data.copy_(p.data)
-        p.data = cpu_data 
- 
+        if hasattr(layer, param_name):
+            delattr(layer, param_name) 
 
 def moe_prepare_gpu_prefill_regular(layer, forward_context: ForwardContext, device: torch.device):
     pin_memory = is_pin_memory_available()
@@ -3406,15 +3406,11 @@ def moe_prepare_gpu_prefill_regular(layer, forward_context: ForwardContext, devi
         w2_weight_cpu.data_ptr(),  
         2  # w2
     )
-    layer.w2_weight = w2_weight_cpu.to(device)
-    layer._zero_tensor(w13_weight_cpu)
-    del w13_weight_cpu
-    layer._zero_tensor(w2_weight_cpu)
+    layer.w2_weight = w2_weight_cpu.to(device) 
+    del w13_weight_cpu 
     del w2_weight_cpu 
 
-def moe_clean_gpu_prefill_regular(layer): 
-    layer._zero_tensor(layer.w13_weight)
-    layer._zero_tensor(layer.w2_weight)
+def moe_clean_gpu_prefill_regular(layer):  
     del layer.w13_weight
     del layer.w2_weight
      

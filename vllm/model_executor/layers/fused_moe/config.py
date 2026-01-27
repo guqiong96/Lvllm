@@ -707,8 +707,8 @@ def nvfp4_w4a16_moe_quant_config(
 
 
 def int4_w4a16_moe_quant_config(
-    w1_scale: torch.Tensor,
-    w2_scale: torch.Tensor,
+    w1_scale: torch.Tensor | None,
+    w2_scale: torch.Tensor | None,
     w1_zp: torch.Tensor | None,
     w2_zp: torch.Tensor | None,
     block_shape: list[int] | None = None,
