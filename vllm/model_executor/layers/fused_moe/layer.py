@@ -2183,17 +2183,11 @@ class FusedMoE(CustomOp):
         origin_dtype = weight.dtype
         origin_shape = weight.shape
         setattr(self, param_name + "_origin_dtype", origin_dtype)
-        setattr(self, param_name + "_origin_shape", origin_shape)
+        setattr(self, param_name + "_origin_shape", origin_shape) 
          
-        new_weight = weight.data.view(torch.uint8).contiguous()
-        new_dtype = weight.dtype
-        new_shape = weight.shape
-        setattr(self, param_name + "_new_dtype", new_dtype)
-        setattr(self, param_name + "_new_shape", new_shape)
+        shape_array = torch.tensor(origin_shape, dtype=torch.int64).contiguous()
          
-        shape_array = torch.tensor(new_shape, dtype=torch.int64).contiguous()
-         
-        self.lk_moe.distributeWeight(param_name, new_weight.data_ptr(), shape_array.data_ptr())
+        self.lk_moe.distributeWeight(param_name, weight.contiguous().data_ptr(), shape_array.data_ptr(), weight[0].nbytes)
         
         del shape_array 
             
@@ -2218,9 +2212,9 @@ class FusedMoE(CustomOp):
                     pass
                 else:
                     for param_name in param_names: 
-                            weight = getattr(self, param_name) 
-                            self.distribute_weight_tensor(param_name, weight) 
-                            delattr(self, param_name)
+                        weight = getattr(self, param_name) 
+                        self.distribute_weight_tensor(param_name, weight) 
+                        delattr(self, param_name)
                             
             if (isinstance(self.quant_method, CompressedTensorsWNA16MarlinMoEMethod) or isinstance(self.quant_method, CompressedTensorsWNA16MoEMethod)) \
                 and hasattr(self.quant_method, 'strategy'):
@@ -2238,9 +2232,9 @@ class FusedMoE(CustomOp):
                     pass
                 else:
                     for param_name in param_names: 
-                            weight = getattr(self, param_name) 
-                            self.distribute_weight_tensor(param_name, weight) 
-                            delattr(self, param_name)
+                        weight = getattr(self, param_name) 
+                        self.distribute_weight_tensor(param_name, weight) 
+                        delattr(self, param_name)
                          
                 
             import gc
@@ -3281,9 +3275,8 @@ def collect_weight_from_moe(layer, param_name: str) -> torch.Tensor:
     dtype_name = param_name + "_origin_dtype"
     if hasattr(layer, shape_name) and hasattr(layer, dtype_name):
         origin_shape = getattr(layer, shape_name)
-        origin_dtype = getattr(layer, dtype_name)
-        new_shape = getattr(layer, param_name + "_new_shape")
-        shape_array = torch.tensor(new_shape, dtype=torch.int64)
+        origin_dtype = getattr(layer, dtype_name) 
+        shape_array = torch.tensor(origin_shape, dtype=torch.int64)
         weight_cpu = torch.zeros(
             origin_shape,
             dtype=origin_dtype, 
@@ -3294,7 +3287,8 @@ def collect_weight_from_moe(layer, param_name: str) -> torch.Tensor:
         layer.lk_moe.collectWeight(
                 param_name,
                 weight_cpu.data_ptr(),
-                shape_array.data_ptr()
+                shape_array.data_ptr(), 
+                weight_cpu[0].nbytes,
             )
         del shape_array
         return weight_cpu
