@@ -73,6 +73,7 @@ from vllm.model_executor.layers.fused_moe.fused_moe_modular_method import (
 from vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method import (
     UnquantizedFusedMoEMethod,
 )
+from vllm.model_executor.utils import replace_parameter
 
 logger = init_logger(__name__)
 import threading
@@ -2145,12 +2146,13 @@ class FusedMoE(CustomOp):
                         "w2_weight_scale_inv" if self.quant_method.block_quant else "w2_weight_scale",   
                     ]
                 if self.is_cpu_layer: 
-                    pass
+                    for param_name in param_names: 
+                        delattr(self, param_name)
                 else:
                     for param_name in param_names: 
                         weight = getattr(self, param_name) 
                         self.distribute_weight_tensor(param_name, weight) 
-                        delattr(self, param_name)
+                        setattr(self, param_name, torch.nn.Parameter(torch.empty(0), requires_grad=False))
                             
             if (isinstance(self.quant_method, CompressedTensorsWNA16MarlinMoEMethod) or isinstance(self.quant_method, CompressedTensorsWNA16MoEMethod)) \
                 and hasattr(self.quant_method, 'strategy'):
@@ -2158,20 +2160,38 @@ class FusedMoE(CustomOp):
                     "w13_weight_packed",
                     "w2_weight_packed", 
                     "w13_weight_scale",
-                    "w2_weight_scale",
+                    "w2_weight_scale", 
+                ]
+                keep_gpu_params = [
                     "w13_weight_g_idx",
                     "w2_weight_g_idx",
                     "w13_g_idx_sort_indices",
-                    "w2_g_idx_sort_indices"
+                    "w2_g_idx_sort_indices",
+                    "w13_weight_shape",
+                    "w2_weight_shape", 
                 ]
+    
                 if self.is_cpu_layer: 
-                    pass
+                    for param_name in param_names: 
+                        delattr(self, param_name)
+                    for keep_gpu_param in keep_gpu_params:
+                        delattr(self, keep_gpu_param)
                 else:
                     for param_name in param_names: 
                         weight = getattr(self, param_name) 
                         self.distribute_weight_tensor(param_name, weight) 
-                        delattr(self, param_name)
-                         
+                        setattr(self, param_name, torch.nn.Parameter(torch.empty(0), requires_grad=False))
+                    for keep_gpu_param in keep_gpu_params:
+                        p = getattr(self, keep_gpu_param)
+                        gpu_data = torch.empty_strided(
+                                            size=p.data.size(),
+                                            stride=p.data.stride(),
+                                            dtype=p.data.dtype,
+                                            layout=p.data.layout,
+                                            device=torch.cuda.current_device(), 
+                                        )
+                        gpu_data.copy_(p.data) 
+                        p.data = gpu_data
                 
             import gc
             gc.collect()
@@ -3232,7 +3252,7 @@ def collect_weight_from_moe(layer, param_name: str) -> torch.Tensor:
         del shape_array
         return weight_cpu
         
-                
+            
 def moe_prepare_gpu_prefill_fp8(layer, forward_context: ForwardContext, device: torch.device): 
     
     param_names = [
@@ -3244,8 +3264,8 @@ def moe_prepare_gpu_prefill_fp8(layer, forward_context: ForwardContext, device: 
     
     for param_name in param_names:
         weight_cpu = collect_weight_from_moe(layer, param_name)
-        setattr(layer, param_name, weight_cpu.to(device))
-        del weight_cpu
+        setattr(layer, param_name, torch.nn.Parameter(weight_cpu.to(device), requires_grad=False))
+        del weight_cpu 
   
 def moe_clean_gpu_prefill_fp8(layer):    
     param_names = [
@@ -3256,7 +3276,7 @@ def moe_clean_gpu_prefill_fp8(layer):
     ]
     for param_name in param_names:
         if hasattr(layer, param_name):
-            delattr(layer, param_name)
+           setattr(layer, param_name, torch.nn.Parameter(torch.empty(0), requires_grad=False))
     
           
 
@@ -3267,33 +3287,23 @@ def moe_prepare_gpu_prefill_wna16(layer, forward_context: ForwardContext, device
         "w2_weight_packed", 
         "w13_weight_scale",
         "w2_weight_scale",
-        "w13_weight_g_idx",
-        "w2_weight_g_idx",
-        "w13_g_idx_sort_indices",
-        "w2_g_idx_sort_indices"
     ] 
     
     for param_name in param_names:
         weight_cpu = collect_weight_from_moe(layer, param_name)
-        setattr(layer, param_name, weight_cpu.to(device))
-        del weight_cpu
-     
-     
-
+        setattr(layer, param_name, torch.nn.Parameter(weight_cpu.to(device), requires_grad=False))
+        del weight_cpu 
+        
 def moe_clean_gpu_prefill_wna16(layer):    
     param_names = [
         "w13_weight_packed",
         "w2_weight_packed", 
         "w13_weight_scale",
         "w2_weight_scale",
-        "w13_weight_g_idx",
-        "w2_weight_g_idx",
-        "w13_g_idx_sort_indices",
-        "w2_g_idx_sort_indices"
     ]
     for param_name in param_names:
         if hasattr(layer, param_name):
-            delattr(layer, param_name) 
+           setattr(layer, param_name, torch.nn.Parameter(torch.empty(0), requires_grad=False))
 
 def moe_prepare_gpu_prefill_regular(layer, forward_context: ForwardContext, device: torch.device):
     pin_memory = is_pin_memory_available()
