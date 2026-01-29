@@ -41,6 +41,50 @@ from vllm.model_executor.layers.quantization.utils.quant_utils import (
 from vllm.platforms import current_platform
 from vllm.scalar_type import ScalarType, scalar_types
 
+def check_tensor_stats(tensor, name, threshold=1e6):
+    
+    if torch.cuda.is_current_stream_capturing():
+        return 
+    with torch.no_grad(): 
+        info = {
+            'name': name,
+            'dtype': str(tensor.dtype),
+            'shape': tensor.shape,
+            'device': tensor.device,
+        }
+         
+        if tensor.is_floating_point():
+            try:
+                info.update({
+                    'mean': float(tensor.mean()),
+                    'std': float(tensor.std()),
+                    'min': float(tensor.min()),
+                    'max': float(tensor.max()),
+                    'has_nan': bool(tensor.isnan().any()),
+                    'has_inf': bool(tensor.isinf().any()),
+                })
+            except Exception as e:
+                info['error'] = f"Failed to compute stats: {e}"
+         
+        elif tensor.dtype in [torch.int8, torch.int16, torch.int32, torch.int64,
+                              torch.uint8, torch.bool]:
+            info.update({
+                'min': int(tensor.min()),
+                'max': int(tensor.max()),
+            })
+         
+        if tensor.is_floating_point() and 'max' in info:
+            if abs(info['max']) > threshold:
+                info['warning'] = f"Extreme value: {info['max']:.2e}"
+         
+        # if 'has_nan' in info and info['has_nan']:
+        #     print(f"WARNING: {name} contains NaN")
+        # if 'has_inf' in info and info['has_inf']:
+        #     print(f"WARNING: {name} contains Inf")
+        # if 'warning' in info:
+        #     print(f"WARNING: {info['warning']}")
+        
+        return info
 
 def _fused_marlin_moe(
     hidden_states: torch.Tensor,
@@ -80,6 +124,9 @@ def _fused_marlin_moe(
     input_dtype: torch.dtype | None = None,
     is_k_full: bool = True,
 ) -> torch.Tensor:
+    check_tensor_stats(hidden_states, "hidden_states_input")
+    check_tensor_stats(w1, "w1_weight")
+    check_tensor_stats(w1_scale, "w1_scale")
     assert hidden_states.ndim == 2
     M, K = hidden_states.size()
     N = marlin_moe_intermediate_size(w1, w2)
@@ -146,11 +193,13 @@ def _fused_marlin_moe(
         use_fp32_reduce=True,
         is_zp_float=False,
     )
+    check_tensor_stats(intermediate_cache1, "gemm1_output")
     activation_func(
         activation,
         intermediate_cache2,
         intermediate_cache1.view(-1, w13_num_shards * N),
     )
+    check_tensor_stats(intermediate_cache2, "post_activation")
 
     if output is None:
         output = intermediate_cache3
@@ -198,7 +247,7 @@ def _fused_marlin_moe(
         use_fp32_reduce=True,
         is_zp_float=False,
     )
-
+    check_tensor_stats(output, "final_output")
     return output
 
 
@@ -324,8 +373,8 @@ def fused_marlin_moe(
         w2=w2,
         bias1=bias1,
         bias2=bias2,
-        w1_scale=w1_scale.to(hidden_states.device),
-        w2_scale=w2_scale.to(hidden_states.device),
+        w1_scale=w1_scale,
+        w2_scale=w2_scale,
         topk_weights=topk_weights,
         num_topk=topk,
         quant_type=quant_type,
