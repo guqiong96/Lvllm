@@ -76,13 +76,7 @@ def check_tensor_stats(tensor, name, threshold=1e6):
         if tensor.is_floating_point() and 'max' in info:
             if abs(info['max']) > threshold:
                 info['warning'] = f"Extreme value: {info['max']:.2e}"
-         
-        # if 'has_nan' in info and info['has_nan']:
-        #     print(f"WARNING: {name} contains NaN")
-        # if 'has_inf' in info and info['has_inf']:
-        #     print(f"WARNING: {name} contains Inf")
-        # if 'warning' in info:
-        #     print(f"WARNING: {info['warning']}")
+        
         
         return info
 
@@ -373,8 +367,8 @@ def fused_marlin_moe(
         w2=w2,
         bias1=bias1,
         bias2=bias2,
-        w1_scale=w1_scale,
-        w2_scale=w2_scale,
+        w1_scale=w1_scale.to(hidden_states.device),
+        w2_scale=w2_scale.to(hidden_states.device),
         topk_weights=topk_weights,
         num_topk=topk,
         quant_type=quant_type,

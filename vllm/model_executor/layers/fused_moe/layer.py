@@ -2158,7 +2158,7 @@ class FusedMoE(CustomOp):
                         for param_name in param_names: 
                             weight = getattr(self, param_name) 
                             self.distribute_weight_tensor(param_name, weight) 
-                            setattr(self, param_name, torch.nn.Parameter(torch.empty(0), requires_grad=False))
+                            setattr(self, param_name, torch.nn.Parameter(torch.empty(0, device=torch.cuda.current_device()), requires_grad=False))
                                 
                 if (isinstance(self.quant_method, CompressedTensorsWNA16MarlinMoEMethod) or isinstance(self.quant_method, CompressedTensorsWNA16MoEMethod)) \
                     and hasattr(self.quant_method, 'strategy'):
@@ -3291,7 +3291,7 @@ def moe_clean_gpu_prefill_fp8(layer):
     ]
     for param_name in param_names:
         if hasattr(layer, param_name):
-           setattr(layer, param_name, torch.nn.Parameter(torch.empty(0), requires_grad=False))
+           setattr(layer, param_name, torch.nn.Parameter(torch.empty(0, device=torch.cuda.current_device()), requires_grad=False))
     
           
 
