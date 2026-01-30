@@ -1,0 +1,236 @@
+# LvLLM GPU、NUMA 双并行 [[English]](./README.md)
+
+LvLLM是vllm的特别扩展，充分利用CPU和GPU计算资源，高效的GPU并行+NUMA并行架构，适用于MOE模型混合推理。
+
+## 系统特性
+
+- **GPU + NUMA 双并行**: 支持CPU-GPU混合解码、CPU-GPU混合预填充、GPU预填充三种计算方式
+- **显存 + 内存负载均衡**: 模型总体占用=显存+内存，容纳模型1+1=2, 100%显存利用率 <sup>注1</sup>
+- **GPU 预填充优化**: GPU预填充与CPU-GPU混合解码并行，接近100%显卡利用率
+- **NUMA 线程优化**: 跨节点通信占比低至3%，三级缓存命中50%以上，解码阶段可推动GPU负载达到33%至50% 
+ 
+注1：除BF16、F16原版模型以外开启GPU预填充将额外占用内存[!非显存]
+
+## 与vLLM的关系
+
+Lvllm使用最新的vLLM源码，重新设计实现了MOE模型混合推理模块，保持了对vLLM的100%完全兼容。
+
+## 使用说明 [[English]](./README.md)
+- [版本变更](#版本变更)
+- [支持的模型](#支持的模型)
+- [性能参考](#性能参考)
+- [运行命令](#运行命令)
+- [配置文件](#配置文件)
+- [安装步骤](#安装步骤) 
+- [更新](#更新) 
+
+## 版本变更
+ 
+```bash  
+2026-01-26: lvllm-v1.6.1 - fp8 模型支持 FP8 + INT4 推理，支持GPU Prefill加速(内存占用很高!) 
+2026-01-25: lvllm-v1.6.0 - fp8 模型支持 GPU Prefill加速(内存占用很高!)
+2026-01-24: lvllm-v1.5.8 - AWQ 4-bit 对称量化模型支持 GPU Prefill加速
+2026-01-21: lvllm-v1.5.7 - 修复MiniMax-M2.1模型数值计算稳定问题
+2026-01-08: lvllm-v1.5.1 - 针对长上下文场景，支持预填充与解码分离，GPU预填充与CPU-GPU混合解码并行
+2026-01-04: v1.4.0 优化decode提升速度
+2025-12-28：优化推理速度：bfloat16、awq4bit；优化多GPU的NUMA数据访问；为多GPU启用NUMA节点以实现最佳性能; 取消GGUF模型支持 
+2025-12-16 v1.2.0 同步上游vllm代码至最新，lk_moe优化降低内存占用
+2025-12-14 v1.1.2 增加AWQ-4bit量化模型（对称量化 avx2版本）推理支持 -，验证通过 cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit and cpatonn/
+2025-12-9: 增加LVLLM_MOE_USE_WEIGHT环境变量，支持MOE模块使用两种模式推理fp8模型：
+2025-11-1： 支持张量并行、流水线多卡推理 https://b23.tv/xzHieMs
+2025-10-30: 支持Qwen3系列模型GGUF混合推理（不包含Qwen3-Coder-30B-A3B-Instruct GGUF） [查看config.yaml里面的新参数]
+2025-10-19: FP8支持GPU+NUMA 混合推理MOE模型！！ [显存FP8精度，内存FP16精度] 已验证GLM-4.5-Air-FP8
+2025-10-14: 开启cuda graph , decode 速度翻倍！！ 输出质量提高！！
+2025-09-30 已验证：Qwen3-Next-80B-A3B-Instruct、Qwen3-Coder-30B-A3B-Instruct 
+ 
+```
+
+## 支持的模型
+
+vLLM已验证的大部分原版MOE模型
+ 
+| 模型名称 | 状态 |
+|---------|------|
+| Qwen3-Next-80B-A3B-Instruct | ✅ 已测试通过 |
+| Qwen3-Coder-30B-A3B-Instruct | ✅ 已测试通过 |
+| Qwen3-VL-30B-A3B-Instruct | ✅ 已测试通过 | 
+| MiniMax-M2.1 | ✅ 已测试通过 |
+| GLM-4.7 | ✅ 已测试通过 |
+| GLM-4.7-Flash  | ✅ 已测试通过 |
+| GLM-4.6V | ✅ 已测试通过 |
+| Kimi k2.5 | ✅ 已测试通过 |
+
+未列出的Qwen3系列、GLM系列、MiniMax系列的原版MOE模型理论上支持，待实际测试。
+
+
+## 尚未支持的模型
+
+| 模型名称 | 状态 |
+|---------|------|
+| DeepSeek-V3.2| 待定 |
+ 
+
+## 支持的模型权重格式及运行时格式
+
+| 模型文件 | 运行时格式 | 
+|---------|------------|
+| bfloat16 | bfloat16/float16| 
+| float16 | bfloat16/float16| 
+| fp8模型 | fp8、fp8+bfloat16、fp8+int4 | 
+| awq 4bit对称量化模型 | int4 | 
+
+
+## 性能参考
+
+| 模型 | 运行时格式 | 预填充速度(tokens/s) | 解码速度(tokens/s) | CPU | GPU |内存 |
+|------|----------|---------------------|-------------------|----------|---------|---------|
+| Qwen3-Next-80B-A3B-Instruct原版 | bfloat16 |15000 | 90 | 双路 EPYC 9555ES  | 单卡 Nvidia RTX Pro 6000 | 6400MT/s  |
+| MiniMax-M2.1原版 | fp8+bfloat16 | 5000 | 29 | 双路 EPYC 9684x  | 单卡 Nvidia RTX 5090 | 4800MT/s  |
+
+## 运行命令
+ 
+```bash 
+LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS=88 OMP_NUM_THREADS=88 vllm serve --config config.yaml # 未启用GPU预填充
+```
+
+```bash 
+LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS=88 OMP_NUM_THREADS=88 LVLLM_MOE_USE_WEIGHT=INT4 LVLLM_GPU_RESIDENT_MOE_LAYERS=0 LVLLM_GPU_PREFETCH_WINDOW=1 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 vllm serve --config config.yaml # 启用GPU预填充
+```
+
+| 环境变量 | 类型 | 默认值 | 说明 | 备注 |
+|--------|------|--------|------|------|
+| `LVLLM_MOE_NUMA_ENABLED` | 核心参数 | `0` | 是否启用混合推理: `1`-启用，`0`-禁用 | 设置为`0`禁用混合推理，行为与vLLM相同 |
+| `LK_THREADS` | 性能参数 | 自动计算 | 线程数量: 物理核心数-4 | 多GPU多进程时，物理核心数-4除以进程数量 |
+| `OMP_NUM_THREADS` | 性能参数 | 系统逻辑核心数量 | OpenMP线程数: 设置为`LK_THREADS`相同 |   | 
+| `LVLLM_MOE_USE_WEIGHT` | 性能参数 | `TO_DTYPE` | 运行时专家权重格式`TO_DTYPE`: 与config.yaml中dtype一致,bfloat16/float16, `KEEP`: 与模型一致，`INT4`: int4  |
+| `LVLLM_GPU_RESIDENT_MOE_LAYERS` | GPU预填充参数 | 无 | 常驻GPU的MOE专家层`0`: 第0层，`0-1`: 第0层到第1层，`0,9`: 第0层和第9层 | 留足KV Cache显存后，分配多层可增加性能，并减少对应的内存占用，包含0层才有加速效果 |
+| `LVLLM_GPU_PREFETCH_WINDOW` | GPU预填充参数 | 无 | 预取窗口大小`1`: 预取1层MOE专家 |  一般预取1到2层即可 |
+| `LVLLM_GPU_PREFILL_MIN_BATCH_SIZE` | GPU预填充参数 | 无 | 使用GPU预填充的最小输入长度`4096`：输入长度达到该值后，启动GPU预填充 | 设置值不宜过小，设置为0则关闭GPU预填充功能 |
+
+
+## 配置文件
+
+config.yaml示例, `建议值`在运行不同模型时无需修改
+
+```bash  
+model: "/home/guqiong/Models/GLM-4.7-Flash-AWQ-4bit"  #模型目录
+host: "0.0.0.0"                                       # 服务绑定IP地址
+port: 8070                                            # 服务绑定端口号
+tensor-parallel-size: 2                               # 张量并行大小， 小于等于GPU数量，   
+#pipeline-parallel-size: 2                            # 流水线并行大小， 小于等于GPU数量     
+max-model-len: 18000                                  # 最大上下文长度， 小于等于模型最大长度
+gpu-memory-utilization: 0.92                          # 分配给lvllm的GPU显存分配百分比， 小于等于1
+trust-remote-code: true                               # 是否信任远程代码， 建议值
+tokenizer-mode: "auto"                                # 分词器模式， 建议值
+swap-space: 0                                         # 交换空间大小， 单位GB， 建议值
+served-model-name: "GLM-4.7-Flash-AWQ-4bit"           # 服务模型名称
+compilation_config.cudagraph_mode: "FULL_DECODE_ONLY" # 启用CUDA图模式， 建议值
+enable_prefix_caching: true                           # 启用前缀缓存， 建议值
+enable-chunked-prefill: true                          # 启用分块预填充， 建议值  
+max_num_batched_tokens: 18000                         # 最大批量填充令牌数， 关闭GPU预填充时建议值：1024，开启GPU预填充时建议值：同max-model-len
+dtype: "bfloat16"                                     # 模型中间计算数据类型， 建议值bfloat16或float16
+max_num_seqs: 4                                       # 最大并发请求序列， 建议值1到4
+compilation_config.mode: "VLLM_COMPILE"               # 优化模型， 建议值
+# kv_cache_dtype: "fp8"                               # KV Cache数据类型， 40系、50系GPU可开启 
+# speculative-config: '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'  # 推测解码， 建议值关闭
+# tool-call-parser: "minimax_m2"                      # MiniMax M2.1 模型配置参数
+# reasoning-parser: "minimax_m2_append_think"         # MiniMax M2.1 模型配置参数
+# enable-auto-tool-choice: true                       # MiniMax M2.1 、GLM4.7、Kimi k2.5 模型配置参数 
+# tool-call-parser: glm47                             # GLM4.7 模型配置参数
+# reasoning-parser: glm45                             # GLM4.7 模型配置参数
+# tool-call-parser: "kimi_k2"                        # Kimi k2.5 模型配置参数
+# reasoning-parser: "kimi_k2"                        # Kimi k2.5 模型配置参数
+```
+
+
+## 安装步骤
+
+### 1. 安装CUDA 12.9
+
+```bash
+# 卸载旧版本CUDA和NVIDIA驱动
+sudo /usr/local/cuda/bin/cuda-uninstaller   
+sudo nvidia-uninstall
+
+# 下载并安装CUDA 12.9 
+wget https://developer.download.nvidia.com/compute/cuda/12.9.1/local_installers/cuda_12.9.1_575.57.08_linux.run
+sudo sh cuda_12.9.1_575.57.08_linux.run
+```
+
+### 2. 创建Python环境
+
+```bash
+conda create -n Lvllm python==3.12.11
+conda activate Lvllm
+
+# 升级libstdcxx-ng（避免glibcxx版本问题）
+conda install -c conda-forge libstdcxx-ng
+export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
+
+# 安装NUMA库
+sudo apt-get install libnuma-dev      # Ubuntu
+sudo dnf install numactl-devel        # Rocky Linux
+```
+
+### 3. 安装依赖
+
+```bash
+# 克隆仓库
+git clone https://github.com/guqiong96/Lvllm.git
+cd Lvllm
+
+# 安装PyTorch 2.9.1（可选）
+pip install torch==2.9.1 xformers
+
+# 使用现有PyTorch
+python use_existing_torch.py
+
+# 安装构建依赖
+pip install -r requirements/build.txt
+```
+ 
+### 4. 安装Lvllm
+
+```bash 
+MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release  CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
+```
+
+**参数说明：**
+- `MAX_JOBS=32 NVCC_THREADS=1`: 减少编译内存占用
+- `CMAKE_BUILD_TYPE=Release`: 性能优化选项
+- `CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release`: 性能优化选项
+ 
+ 
+ 
+## 更新
+
+如果已安装Lvllm，需要更新到最新版本，请执行以下命令：
+
+```bash
+# 正常情况
+git pull --force
+# 如果出现冲突
+git fetch origin
+git reset --hard origin/main
+
+# 安装PyTorch 2.9.1 
+pip uninstall torchaudio triton torchvision torch
+pip install torchaudio triton torchvision torch==2.9.1
+
+# Qwen3-VL GLM4.6V 需要安装 xformers
+  
+# 编译安装
+python use_existing_torch.py 
+pip install -r requirements/build.txt
+MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
+
+rm -rf ~/.cache/vllm
+```
+
+简单更新Lvllm，当Lvllm的更新没有涉及上游vllm的更新时，只需要执行以下命令：
+```bash
+git pull --force
+pip uninstall lk_moe
+pip install lk_moe
+rm -rf ~/.cache/vllm
+```
