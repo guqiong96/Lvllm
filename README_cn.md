@@ -22,7 +22,7 @@ Lvllm使用最新的vLLM源码，重新设计实现了MOE模型混合推理模�
 - [运行命令](#运行命令)
 - [配置文件](#配置文件)
 - [安装步骤](#安装步骤) 
-- [更新](#更新) 
+- [更新](#更新)
 
 ## 版本变更
  
@@ -77,15 +77,18 @@ vLLM已验证的大部分原版MOE模型
 | bfloat16 | bfloat16/float16| 
 | float16 | bfloat16/float16| 
 | fp8模型 | fp8、fp8+bfloat16、fp8+int4 | 
-| awq 4bit对称量化模型 | int4 | 
+| awq 4bit对称量化模型 <sup>注1</sup>| int4 | 
 
+注1：https://hf-mirror.com/cyankiwi 提供AWQ 4bit对称量化模型
 
 ## 性能参考
 
 | 模型 | 运行时格式 | 预填充速度(tokens/s) | 解码速度(tokens/s) | CPU | GPU |内存 |
 |------|----------|---------------------|-------------------|----------|---------|---------|
-| Qwen3-Next-80B-A3B-Instruct原版 | bfloat16 |15000 | 90 | 双路 EPYC 9555ES  | 单卡 Nvidia RTX Pro 6000 | 6400MT/s  |
-| MiniMax-M2.1原版 | fp8+bfloat16 | 5000 | 29 | 双路 EPYC 9684x  | 单卡 Nvidia RTX 5090 | 4800MT/s  |
+| Qwen3-Next-80B-A3B-Instruct原版 | bfloat16 |15000 <sup>注1</sup> | 90 | 双路 EPYC 9555ES  | 单卡 Nvidia RTX Pro 6000 | 6400MT/s  |
+| MiniMax-M2.1原版 | fp8+bfloat16 | 5000 <sup>注1</sup> | 29 | 双路 EPYC 9684x  | 单卡 Nvidia RTX 5090 | 4800MT/s  |
+
+注1：开启GPU预填充，输入长度32K-64K
 
 ## 运行命令
  

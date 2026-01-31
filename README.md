@@ -75,14 +75,19 @@ Unlisted original MOE models from Qwen3 series, GLM series, and MiniMax series a
 | bfloat16 | bfloat16/float16| 
 | float16 | bfloat16/float16| 
 | fp8 model | fp8, fp8+bfloat16, fp8+int4 | 
-| awq 4bit symmetric quantized model | int4 |
+| awq 4bit symmetric quantized model <sup>Note 1</sup> | int4 |
+
+Note 1: https://hf-mirror.com/cyankiwi provides AWQ 4bit symmetric quantized models
+
 
 ## Performance Reference
 
 | Model | Runtime Format | Prefill Speed (tokens/s) | Decode Speed (tokens/s) | CPU | GPU | Memory |
 |------|----------|---------------------|-------------------|----------|---------|---------|
-| Qwen3-Next-80B-A3B-Instruct Original | bfloat16 |15000 | 90 | Dual EPYC 9555ES | Single Nvidia RTX Pro 6000 | 6400MT/s |
-| MiniMax-M2.1 Original | fp8+bfloat16 | 5000 | 29 | Dual EPYC 9684x | Single Nvidia RTX 5090 | 4800MT/s |
+| Qwen3-Next-80B-A3B-Instruct Original | bfloat16 |15000 <sup>Note 1</sup> | 90 | Dual EPYC 9555ES | Single Nvidia RTX Pro 6000 | 6400MT/s |
+| MiniMax-M2.1 Original | fp8+bfloat16 | 5000 <sup>Note 1</sup> | 29 | Dual EPYC 9684x | Single Nvidia RTX 5090 | 4800MT/s |
+
+Note 1: Enabling GPU Prefill, Input Length 32K-64K
 
 ## Running Commands
 
@@ -174,8 +179,8 @@ sudo dnf install numactl-devel        # Rocky Linux
 git clone https://github.com/guqiong96/Lvllm.git
 cd Lvllm
 
-# Install PyTorch 2.9.1 (optional)
-pip install torch==2.9.1 xformers
+# Install PyTorch 2.9.1
+pip install torchaudio triton torchvision torch==2.9.1
 
 # Use existing PyTorch
 python use_existing_torch.py

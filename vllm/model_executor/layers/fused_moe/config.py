@@ -274,6 +274,10 @@ class FusedMoEQuantConfig:
     def w1_scale(self) -> torch.Tensor | None:
         assert self._w1.scale is None or isinstance(self._w1.scale, torch.Tensor)
         return self._w1.scale
+    
+    @w1_scale.setter
+    def w1_scale(self, value: torch.Tensor | None):
+        self._w1.scale = value
 
     @property
     def w1_zp(self) -> torch.Tensor | None:
@@ -296,6 +300,10 @@ class FusedMoEQuantConfig:
     def w2_scale(self) -> torch.Tensor | None:
         assert self._w2.scale is None or isinstance(self._w2.scale, torch.Tensor)
         return self._w2.scale
+    
+    @w2_scale.setter
+    def w2_scale(self, value: torch.Tensor | None):
+        self._w2.scale = value
 
     @property
     def w2_zp(self) -> torch.Tensor | None:

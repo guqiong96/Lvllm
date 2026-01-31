@@ -2159,7 +2159,11 @@ class FusedMoE(CustomOp):
                             weight = getattr(self, param_name) 
                             self.distribute_weight_tensor(param_name, weight) 
                             setattr(self, param_name, torch.nn.Parameter(torch.empty(0, device=torch.cuda.current_device()), requires_grad=False))
-                                
+                        if hasattr(self, "moe_quant_config"):
+                            self.distribute_weight_tensor("moe_quant_config_w1_scale", self.moe_quant_config.w1_scale)
+                            setattr(self, "moe_quant_config_w1_scale", torch.nn.Parameter(torch.empty(0, device=torch.cuda.current_device()), requires_grad=False))
+                            self.distribute_weight_tensor("moe_quant_config_w2_scale", self.moe_quant_config.w2_scale)
+                            setattr(self, "moe_quant_config_w2_scale", torch.nn.Parameter(torch.empty(0, device=torch.cuda.current_device()), requires_grad=False))
                 if (isinstance(self.quant_method, CompressedTensorsWNA16MarlinMoEMethod) or isinstance(self.quant_method, CompressedTensorsWNA16MoEMethod)) \
                     and hasattr(self.quant_method, 'strategy'):
                     param_names = [
@@ -3273,27 +3277,47 @@ def moe_prepare_gpu_prefill_fp8(layer, forward_context: ForwardContext, device: 
     
     param_names = [
         "w13_weight",
-        "w2_weight",  
+        "w2_weight", 
+    ]
+    
+    scale_names = [
         "w13_weight_scale_inv" if layer.quant_method.block_quant else "w13_weight_scale",
         "w2_weight_scale_inv" if layer.quant_method.block_quant else "w2_weight_scale",  
     ]
-    
     for param_name in param_names:
         weight_cpu = collect_weight_from_moe(layer, param_name)
         setattr(layer, param_name, torch.nn.Parameter(weight_cpu.to(device, non_blocking=True), requires_grad=False))
+    if hasattr(layer, "moe_quant_config") and hasattr(layer.moe_quant_config, "w1_scale"):
+        w1_scale_cpu = collect_weight_from_moe(layer, "moe_quant_config_w1_scale")
+        setattr(layer.moe_quant_config, "w1_scale", torch.nn.Parameter(w1_scale_cpu.to(device, non_blocking=True), requires_grad=False))
+        w2_scale_cpu = collect_weight_from_moe(layer, "moe_quant_config_w2_scale")
+        setattr(layer.moe_quant_config, "w2_scale", torch.nn.Parameter(w2_scale_cpu.to(device, non_blocking=True), requires_grad=False))
+    else:
+        for scale_name in scale_names:
+            weight_cpu = collect_weight_from_moe(layer, scale_name)
+            setattr(layer, scale_name, torch.nn.Parameter(weight_cpu.to(device, non_blocking=True), requires_grad=False))
+        
   
 def moe_clean_gpu_prefill_fp8(layer):    
     param_names = [
         "w13_weight",
-        "w2_weight", 
+        "w2_weight",  
+    ]
+    scale_names = [
         "w13_weight_scale_inv" if layer.quant_method.block_quant else "w13_weight_scale",
-        "w2_weight_scale_inv" if layer.quant_method.block_quant else "w2_weight_scale",   
+        "w2_weight_scale_inv" if layer.quant_method.block_quant else "w2_weight_scale",  
     ]
     for param_name in param_names:
         if hasattr(layer, param_name):
            setattr(layer, param_name, torch.nn.Parameter(torch.empty(0, device=torch.cuda.current_device()), requires_grad=False))
-    
-          
+    if hasattr(layer, "moe_quant_config") and hasattr(layer.moe_quant_config, "w1_scale"):
+        setattr(layer.moe_quant_config, "w1_scale", torch.nn.Parameter(torch.empty(0, device=torch.cuda.current_device()), requires_grad=False))
+        setattr(layer.moe_quant_config, "w2_scale", torch.nn.Parameter(torch.empty(0, device=torch.cuda.current_device()), requires_grad=False))
+    else:
+        for scale_name in scale_names:
+            if hasattr(layer, scale_name):
+                setattr(layer, scale_name, torch.nn.Parameter(torch.empty(0, device=torch.cuda.current_device()), requires_grad=False))
+        
 
 def moe_prepare_gpu_prefill_wna16(layer, forward_context: ForwardContext, device: torch.device):  
     

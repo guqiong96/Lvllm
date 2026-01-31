@@ -1,18 +1,18 @@
-model: "/home/guqiong/Models/GLM-4.7-Flash"
+model: "/home/guqiong/Models/MiniMax-M2.1"
 host: "0.0.0.0"
 port: 8070
 tensor-parallel-size: 2
-#pipeline-parallel-size: 2
-max-model-len: 38000 
-gpu-memory-utilization: 0.85
+#pipeline-parallel-size: 2 
+max-model-len: 18000 
+gpu-memory-utilization: 0.92
 trust-remote-code: true
 tokenizer-mode: "auto"
 swap-space: 0
-served-model-name: "GLM-4.7-Flash" 
+served-model-name: "MiniMax-M2.1"
 compilation_config.cudagraph_mode: "FULL_DECODE_ONLY"
 enable_prefix_caching: true
 enable-chunked-prefill: true
-max_num_batched_tokens: 38000
+max_num_batched_tokens: 18000
 dtype: "bfloat16"
 max_num_seqs: 4
 compilation_config.mode: "VLLM_COMPILE"
@@ -20,11 +20,14 @@ compilation_config.mode: "VLLM_COMPILE"
 # hf-config-path: "/home/guqiong/Models/MiniMax-M2.1-AWQ-4bit"
 # tokenizer: "/home/guqiong/Models/MiniMax-M2.1-AWQ-4bit"
 # speculative-config: '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
-# tool-call-parser: "minimax_m2"
-# reasoning-parser: "minimax_m2_append_think"
+tool-call-parser: "minimax_m2"
+reasoning-parser: "minimax_m2_append_think"
 enable-auto-tool-choice: true 
-speculative-config.method: mtp
-speculative-config.num_speculative_tokens: 1
-tool-call-parser: glm47
-reasoning-parser: glm45
+# speculative-config.method: mtp
+# speculative-config.num_speculative_tokens: 1
+# tool-call-parser: glm47
+# reasoning-parser: glm45
+# tool-call-parser: "kimi_k2"
+# reasoning-parser: "kimi_k2"
+disable_custom_all_reduce: True
  
