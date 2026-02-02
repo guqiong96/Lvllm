@@ -98,6 +98,9 @@ LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS=88 OMP_NUM_THREADS=88 vllm serve --config co
 ```bash
 LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS=88 OMP_NUM_THREADS=88 LVLLM_MOE_USE_WEIGHT=INT4 LVLLM_GPU_RESIDENT_MOE_LAYERS=0 LVLLM_GPU_PREFETCH_WINDOW=1 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 vllm serve --config config.yaml # GPU prefill enabled
 ```
+```bash 
+--enable_expert_parallel # EP parallelism enabled，run MiniMax-M2.1 model with 8 GPUs
+```
 
 | Environment Variable | Type | Default Value | Description | Notes |
 |--------|------|--------|------|------|

@@ -3,7 +3,7 @@ host: "0.0.0.0"
 port: 8070
 tensor-parallel-size: 2
 #pipeline-parallel-size: 2 
-max-model-len: 18000 
+max-model-len: 38000 
 gpu-memory-utilization: 0.92
 trust-remote-code: true
 tokenizer-mode: "auto"
@@ -12,13 +12,11 @@ served-model-name: "MiniMax-M2.1"
 compilation_config.cudagraph_mode: "FULL_DECODE_ONLY"
 enable_prefix_caching: true
 enable-chunked-prefill: true
-max_num_batched_tokens: 18000
+max_num_batched_tokens: 38000
 dtype: "bfloat16"
 max_num_seqs: 4
 compilation_config.mode: "VLLM_COMPILE"
-# kv_cache_dtype: "fp8" 
-# hf-config-path: "/home/guqiong/Models/MiniMax-M2.1-AWQ-4bit"
-# tokenizer: "/home/guqiong/Models/MiniMax-M2.1-AWQ-4bit"
+# kv_cache_dtype: "fp8"  
 # speculative-config: '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
 tool-call-parser: "minimax_m2"
 reasoning-parser: "minimax_m2_append_think"
@@ -28,6 +26,5 @@ enable-auto-tool-choice: true
 # tool-call-parser: glm47
 # reasoning-parser: glm45
 # tool-call-parser: "kimi_k2"
-# reasoning-parser: "kimi_k2"
-disable_custom_all_reduce: True
+# reasoning-parser: "kimi_k2" 
  

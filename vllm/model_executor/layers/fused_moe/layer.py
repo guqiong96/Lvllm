@@ -1739,10 +1739,12 @@ class FusedMoE(CustomOp):
                         hidden_states=staged_hidden_states,
                         router_logits=router_logits,
                     )
+                   
+                    local_topk_ids = self.global_to_local_expert_ids(topk_ids) if self.use_ep else topk_ids
                     final_hidden_states = self.forward_lk( 
                         staged_hidden_states,
                         topk_weights, 
-                        topk_ids
+                        local_topk_ids
                     )
                 else:
                     final_hidden_states = self.quant_method.apply_monolithic(
@@ -1758,11 +1760,12 @@ class FusedMoE(CustomOp):
 
                 if self.capture is not None:
                     self.capture(topk_ids)
+                local_topk_ids = self.global_to_local_expert_ids(topk_ids) if self.use_ep else topk_ids
                 if not self.is_gpu_resident_layer and not self.should_use_gpu_prefill(hidden_states):
                     final_hidden_states = self.forward_lk(
                         staged_hidden_states,
                         topk_weights, 
-                        topk_ids
+                        local_topk_ids
                     )
                 else:
                     final_hidden_states = self.quant_method.apply(
@@ -1951,10 +1954,11 @@ class FusedMoE(CustomOp):
                         hidden_states=x,
                         router_logits=router_logits,
                     )
+                    local_topk_ids = self.global_to_local_expert_ids(topk_ids) if self.use_ep else topk_ids
                     final_hidden_states = self.forward_lk( 
                         x,
                         topk_weights, 
-                        topk_ids
+                        local_topk_ids  
                     )
                 else:
                     final_hidden_states = self.quant_method.apply_monolithic(
@@ -1972,10 +1976,11 @@ class FusedMoE(CustomOp):
                     self.capture(topk_ids)
                     
                 if not self.is_gpu_resident_layer and not self.should_use_gpu_prefill(hidden_states):
+                    local_topk_ids = self.global_to_local_expert_ids(topk_ids) if self.use_ep else topk_ids
                     final_hidden_states = self.forward_lk(
                         x,
                         topk_weights, 
-                        topk_ids
+                        local_topk_ids
                     )
                 else:
                     final_hidden_states = self.quant_method.apply(
@@ -2024,6 +2029,20 @@ class FusedMoE(CustomOp):
                 )
             else:
                 return combine_output(final_hidden_states)
+    
+    def global_to_local_expert_ids(self, topk_ids): 
+        expert_map = self._expert_map.to(topk_ids.device)
+        max_idx = len(self._expert_map) - 1
+        
+        # 原地修改 - 会改变原始张量！
+        clamped = torch.clamp(topk_ids, 0, max_idx)
+        result = expert_map[clamped]
+        
+        # 将无效位置设为 -1
+        mask = topk_ids < 0
+        result[mask] = -1
+        
+        return result
     
     def should_use_gpu_prefill(self, hidden_states: torch.Tensor) -> bool:  
         return (not torch.cuda.is_current_stream_capturing() and 
@@ -2250,7 +2269,9 @@ class FusedMoE(CustomOp):
             else:
                 raise ValueError(f"Unsupported dtype {dtype}")
     
-    def _get_processes_info(self) -> tuple[int, int]:   
+    def _get_processes_info(self) -> tuple[int, int]: 
+        if self.use_ep:
+            return self.ep_size, self.ep_rank  
         return self.tp_size, self.tp_rank    
                    
     def _process_gguf_weights(self):  

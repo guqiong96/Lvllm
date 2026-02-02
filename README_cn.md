@@ -100,6 +100,10 @@ LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS=88 OMP_NUM_THREADS=88 vllm serve --config co
 LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS=88 OMP_NUM_THREADS=88 LVLLM_MOE_USE_WEIGHT=INT4 LVLLM_GPU_RESIDENT_MOE_LAYERS=0 LVLLM_GPU_PREFETCH_WINDOW=1 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 vllm serve --config config.yaml # 启用GPU预填充
 ```
 
+```bash 
+--enable_expert_parallel # 启用EP并行, 8卡运行minimax-m2.1模型需设置
+```
+
 | 环境变量 | 类型 | 默认值 | 说明 | 备注 |
 |--------|------|--------|------|------|
 | `LVLLM_MOE_NUMA_ENABLED` | 核心参数 | `0` | 是否启用混合推理: `1`-启用，`0`-禁用 | 设置为`0`禁用混合推理，行为与vLLM相同 |
