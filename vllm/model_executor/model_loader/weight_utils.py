@@ -961,6 +961,11 @@ def gguf_quant_weights_iterator(
             name = gguf_to_hf_name_map[tensor.name]
             if weight_type.name not in ("F32", "BF16", "F16"):
                 name = name.replace("weight", "qweight")
+            device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
+            from vllm.envs import is_lk_moe_feature_enabled
+            if is_lk_moe_feature_enabled() and (".gate_proj." in name or ".up_proj." in name or ".down_proj." in name):
+                device = "cpu"
+                
             if weight_type.name == "BF16" and tensor.data.dtype == np.uint8:
                 # BF16 is currently the only "quantization" type that isn't
                 # actually quantized but is read as a raw byte tensor.
@@ -969,9 +974,9 @@ def gguf_quant_weights_iterator(
                 if reader.byte_order == "S":
                     # GGUF endianness != system endianness
                     weight = weight.byteswap()
-                param = torch.tensor(weight).view(torch.bfloat16)
+                param = torch.tensor(weight, device=device).view(torch.bfloat16)
             else:
-                param = torch.tensor(weight)
+                param = torch.tensor(weight, device=device)
             yield name, param
 
 

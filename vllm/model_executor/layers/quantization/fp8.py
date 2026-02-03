@@ -696,7 +696,10 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         intermediate_size_per_partition: int,
         params_dtype: torch.dtype,
         **extra_weight_attrs,
-    ):
+    ): 
+        device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
+        if isinstance(layer, FusedMoE) and not layer.is_gpu_resident_layer:
+            device = "cpu"  
         layer.intermediate_size_per_partition = intermediate_size_per_partition
         layer.hidden_size = hidden_size
         layer.num_experts = num_experts
@@ -739,6 +742,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                 2 * intermediate_size_per_partition,
                 hidden_size,
                 dtype=params_dtype,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -751,6 +755,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                 hidden_size,
                 intermediate_size_per_partition,
                 dtype=params_dtype,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -760,21 +765,21 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         # WEIGHT_SCALES
         if not self.block_quant:
             # For per-tensor quant, the scales are per expert and weight.
-            w13_scale_data = torch.ones(num_experts, 2, dtype=torch.float32)
-            w2_scale_data = torch.ones(num_experts, dtype=torch.float32)
+            w13_scale_data = torch.ones(num_experts, 2, dtype=torch.float32, device=device)
+            w2_scale_data = torch.ones(num_experts, dtype=torch.float32, device=device)
         else:
             # For block quant, the scales are per block (typically 128x128).
             w13_scale_data = torch.ones(
                 num_experts,
                 2 * ((intermediate_size_per_partition + block_n - 1) // block_n),
                 (hidden_size + block_k - 1) // block_k,
-                dtype=torch.float32,
+                dtype=torch.float32, device=device
             )
             w2_scale_data = torch.ones(
                 num_experts,
                 (hidden_size + block_n - 1) // block_n,
                 (intermediate_size_per_partition + block_k - 1) // block_k,
-                dtype=torch.float32,
+                dtype=torch.float32, device=device
             )
         w13_weight_scale = torch.nn.Parameter(w13_scale_data, requires_grad=False)
         w2_weight_scale = torch.nn.Parameter(w2_scale_data, requires_grad=False)
@@ -796,13 +801,13 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         if self.quant_config.activation_scheme == "static":
             assert not self.block_quant
             w13_input_scale = torch.nn.Parameter(
-                torch.ones(num_experts, dtype=torch.float32), requires_grad=False
+                torch.ones(num_experts, dtype=torch.float32, device=device), requires_grad=False
             )
             layer.register_parameter("w13_input_scale", w13_input_scale)
             set_weight_attrs(w13_input_scale, extra_weight_attrs)
 
             w2_input_scale = torch.nn.Parameter(
-                torch.ones(num_experts, dtype=torch.float32), requires_grad=False
+                torch.ones(num_experts, dtype=torch.float32, device=device), requires_grad=False
             )
             layer.register_parameter("w2_input_scale", w2_input_scale)
             set_weight_attrs(w2_input_scale, extra_weight_attrs)
@@ -860,7 +865,9 @@ class Fp8MoEMethod(FusedMoEMethodBase):
     def process_weights_after_loading(self, layer: Module) -> None:
         if getattr(layer, "_already_called_process_weights_after_loading", False):
             return
-
+        if isinstance(layer, FusedMoE) and layer.is_cpu_layer: 
+            return
+            
         # Allow for accessing weights and scales in standard way.
         w13 = layer.w13_weight
         w2 = layer.w2_weight
@@ -941,6 +948,8 @@ class Fp8MoEMethod(FusedMoEMethodBase):
     def get_fused_moe_quant_config(
         self, layer: torch.nn.Module
     ) -> FusedMoEQuantConfig | None:
+        if isinstance(layer, FusedMoE) and  layer.is_cpu_layer:
+            return None
         # TRTLLM does not use Modular Kernel.
         if self.fp8_backend == Fp8MoeBackend.FLASHINFER_TRTLLM:
             return None

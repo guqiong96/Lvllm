@@ -1,103 +1,239 @@
-<!-- markdownlint-disable MD001 MD041 -->
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/vllm-project/vllm/main/docs/assets/logos/vllm-logo-text-dark.png">
-    <img alt="vLLM" src="https://raw.githubusercontent.com/vllm-project/vllm/main/docs/assets/logos/vllm-logo-text-light.png" width=55%>
-  </picture>
-</p>
+# LvLLM GPU and NUMA Dual Parallelism [[中文说明]](./README_cn.md)
 
-<h3 align="center">
-Easy, fast, and cheap LLM serving for everyone
-</h3>
+LvLLM is a special extension of vLLM that fully utilizes CPU and GPU computing resources with an efficient GPU parallel + NUMA parallel architecture, suitable for MOE model hybrid inference.
 
-<p align="center">
-| <a href="https://docs.vllm.ai"><b>Documentation</b></a> | <a href="https://blog.vllm.ai/"><b>Blog</b></a> | <a href="https://arxiv.org/abs/2309.06180"><b>Paper</b></a> | <a href="https://x.com/vllm_project"><b>Twitter/X</b></a> | <a href="https://discuss.vllm.ai"><b>User Forum</b></a> | <a href="https://slack.vllm.ai"><b>Developer Slack</b></a> |
-</p>
+## System Features
 
-🔥 We have built a vllm website to help you get started with vllm. Please visit [vllm.ai](https://vllm.ai) to learn more.
-For events, please visit [vllm.ai/events](https://vllm.ai/events) to join us.
+- **GPU + NUMA Dual Parallelism**: Supports three computing modes: CPU-GPU hybrid decoding, CPU-GPU hybrid prefill, and GPU prefill
+- **VRAM + Memory Load Balancing**: Total model footprint = VRAM + memory, accommodating 1+1=2 models, with 100% VRAM utilization <sup>Note 1</sup>
+- **GPU Prefill Optimization**: GPU prefill runs in parallel with CPU-GPU hybrid decoding, achieving nearly 100% GPU utilization
+- **NUMA Thread Optimization**: Cross-node communication reduced to as low as 3%, L3 cache hit rate over 50%, GPU load can reach 33% to 50% during decoding
 
----
+Note 1: Enabling GPU prefill for models other than BF16 and F16 original models will additionally occupy memory [!not VRAM]
 
-## About
+## Relationship with vLLM
 
-vLLM is a fast and easy-to-use library for LLM inference and serving.
+Lvllm uses the latest vLLM source code and has redesigned and implemented MOE model hybrid inference modules, maintaining 100% full compatibility with vLLM.
 
-Originally developed in the [Sky Computing Lab](https://sky.cs.berkeley.edu) at UC Berkeley, vLLM has evolved into a community-driven project with contributions from both academia and industry.
+## Usage Instructions [[中文说明]](./README_cn.md)
+- [Version Changes](#version-changes)
+- [Supported Models](#supported-models)
+- [Performance Reference](#performance-reference)
+- [Running Commands](#running-commands)
+- [Configuration File](#configuration-file)
+- [Installation Steps](#installation-steps)
+- [Update](#update)
 
-vLLM is fast with:
-
-- State-of-the-art serving throughput
-- Efficient management of attention key and value memory with [**PagedAttention**](https://blog.vllm.ai/2023/06/20/vllm.html)
-- Continuous batching of incoming requests
-- Fast model execution with CUDA/HIP graph
-- Quantizations: [GPTQ](https://arxiv.org/abs/2210.17323), [AWQ](https://arxiv.org/abs/2306.00978), [AutoRound](https://arxiv.org/abs/2309.05516), INT4, INT8, and FP8
-- Optimized CUDA kernels, including integration with FlashAttention and FlashInfer
-- Speculative decoding
-- Chunked prefill
-
-vLLM is flexible and easy to use with:
-
-- Seamless integration with popular Hugging Face models
-- High-throughput serving with various decoding algorithms, including *parallel sampling*, *beam search*, and more
-- Tensor, pipeline, data and expert parallelism support for distributed inference
-- Streaming outputs
-- OpenAI-compatible API server
-- Support for NVIDIA GPUs, AMD CPUs and GPUs, Intel CPUs and GPUs, PowerPC CPUs, Arm CPUs, and TPU. Additionally, support for diverse hardware plugins such as Intel Gaudi, IBM Spyre and Huawei Ascend.
-- Prefix caching support
-- Multi-LoRA support
-
-vLLM seamlessly supports most popular open-source models on HuggingFace, including:
-
-- Transformer-like LLMs (e.g., Llama)
-- Mixture-of-Expert LLMs (e.g., Mixtral, Deepseek-V2 and V3)
-- Embedding Models (e.g., E5-Mistral)
-- Multi-modal LLMs (e.g., LLaVA)
-
-Find the full list of supported models [here](https://docs.vllm.ai/en/latest/models/supported_models.html).
-
-## Getting Started
-
-Install vLLM with `pip` or [from source](https://docs.vllm.ai/en/latest/getting_started/installation/gpu/index.html#build-wheel-from-source):
+## Version Changes
 
 ```bash
-pip install vllm
+2026-02-02：lvllm-v1.7.0 - support for EP parallelism, 8-card running minimax-m2.1 model requires setting --enable_expert_parallel
+2026-01-26: lvllm-v1.6.1 - fp8 model support for FP8 + INT4 inference, support for GPU Prefill acceleration (high memory usage!)
+2026-01-25: lvllm-v1.6.0 - fp8 model support for GPU Prefill acceleration (high memory usage!)
+2026-01-24: lvllm-v1.5.8 - AWQ 4-bit symmetric quantized model support for GPU Prefill acceleration
+2026-01-21: lvllm-v1.5.7 - Fixed numerical calculation stability issues in MiniMax-M2.1 model
+2026-01-08: lvllm-v1.5.1 - For long context scenarios, supports separation of prefill and decoding, GPU prefill runs in parallel with CPU-GPU hybrid decoding
+2026-01-04: v1.4.0 Optimized decode speed
+2025-12-28: Optimized inference speed: bfloat16, awq4bit; optimized NUMA data access for multi-GPU; enabled NUMA nodes for multi-GPU for best performance; removed GGUF model support
+2025-12-16 v1.2.0 Synchronized upstream vllm code to latest, optimized lk_moe to reduce memory usage
+2025-12-14 v1.1.2 Added AWQ-4bit quantized model (symmetric quantization avx2 version) inference support - verified with cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit and cpatonn/
+2025-12-9: Added LVLLM_MOE_USE_WEIGHT environment variable, supporting MOE modules to use two modes for fp8 model inference:
+2025-11-1: Supports tensor parallelism, pipeline multi-card inference https://b23.tv/xzHieMs
+2025-10-30: Supports Qwen3 series model GGUF hybrid inference (excluding Qwen3-Coder-30B-A3B-Instruct GGUF) [Check new parameters in config.yaml]
+2025-10-19: FP8 supports GPU+NUMA hybrid inference for MOE models!! [VRAM FP8 precision, memory FP16 precision] Verified with GLM-4.5-Air-FP8
+2025-10-14: Enabled cuda graph, decode speed doubled!! Output quality improved!!
+2025-09-30 Verified: Qwen3-Next-80B-A3B-Instruct, Qwen3-Coder-30B-A3B-Instruct
+
 ```
 
-Visit our [documentation](https://docs.vllm.ai/en/latest/) to learn more.
+## Supported Models
 
-- [Installation](https://docs.vllm.ai/en/latest/getting_started/installation.html)
-- [Quickstart](https://docs.vllm.ai/en/latest/getting_started/quickstart.html)
-- [List of Supported Models](https://docs.vllm.ai/en/latest/models/supported_models.html)
+Most of the original MOE models verified by vLLM
 
-## Contributing
+| Model Name | Status |
+|---------|------|
+| Qwen3-Next-80B-A3B-Instruct | ✅ Tested |
+| Qwen3-Coder-30B-A3B-Instruct | ✅ Tested |
+| Qwen3-VL-30B-A3B-Instruct | ✅ Tested |
+| MiniMax-M2.1 | ✅ Tested |
+| GLM-4.7 | ✅ Tested |
+| GLM-4.7-Flash | ✅ Tested |
+| GLM-4.6V | ✅ Tested |
+| Kimi k2.5 | ✅ Tested |
 
-We welcome and value any contributions and collaborations.
-Please check out [Contributing to vLLM](https://docs.vllm.ai/en/latest/contributing/index.html) for how to get involved.
+Unlisted original MOE models from Qwen3 series, GLM series, and MiniMax series are theoretically supported and pending actual testing.
 
-## Citation
+## Unsupported Models
 
-If you use vLLM for your research, please cite our [paper](https://arxiv.org/abs/2309.06180):
+| Model Name | Status |
+|---------|------|
+| DeepSeek-V3.2| Pending |
 
-```bibtex
-@inproceedings{kwon2023efficient,
-  title={Efficient Memory Management for Large Language Model Serving with PagedAttention},
-  author={Woosuk Kwon and Zhuohan Li and Siyuan Zhuang and Ying Sheng and Lianmin Zheng and Cody Hao Yu and Joseph E. Gonzalez and Hao Zhang and Ion Stoica},
-  booktitle={Proceedings of the ACM SIGOPS 29th Symposium on Operating Systems Principles},
-  year={2023}
-}
+## Supported Model Weight Formats and Runtime Formats
+
+| Model File | Runtime Format |
+|---------|------------|
+| bfloat16 | bfloat16/float16| 
+| float16 | bfloat16/float16| 
+| fp8 model | fp8, fp8+bfloat16, fp8+int4 | 
+| awq 4bit symmetric quantized model <sup>Note 1</sup> | int4 |
+
+Note 1: https://hf-mirror.com/cyankiwi provides AWQ 4bit symmetric quantized models
+
+
+## Performance Reference
+
+| Model | Runtime Format | Prefill Speed (tokens/s) | Decode Speed (tokens/s) | CPU | GPU | Memory |
+|------|----------|---------------------|-------------------|----------|---------|---------|
+| Qwen3-Next-80B-A3B-Instruct Original | bfloat16 |15000 <sup>Note 1</sup> | 90 | Dual EPYC 9555ES | Single Nvidia RTX Pro 6000 | 6400MT/s |
+| MiniMax-M2.1 Original | fp8+bfloat16 | 5000 <sup>Note 1</sup> | 29 | Dual EPYC 9684x | Single Nvidia RTX 5090 | 4800MT/s |
+
+Note 1: Enabling GPU Prefill, Input Length 32K-64K
+
+## Running Commands
+
+```bash
+LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS=88 OMP_NUM_THREADS=88 vllm serve --config config.yaml # GPU prefill not enabled
 ```
 
-## Contact Us
+```bash
+LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS=88 OMP_NUM_THREADS=88 LVLLM_MOE_USE_WEIGHT=INT4 LVLLM_GPU_RESIDENT_MOE_LAYERS=0 LVLLM_GPU_PREFETCH_WINDOW=1 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 vllm serve --config config.yaml # GPU prefill enabled
+```
+```bash 
+--enable_expert_parallel # EP parallelism enabled，run MiniMax-M2.1 model with 8 GPUs
+```
 
-<!-- --8<-- [start:contact-us] -->
-- For technical questions and feature requests, please use GitHub [Issues](https://github.com/vllm-project/vllm/issues)
-- For discussing with fellow users, please use the [vLLM Forum](https://discuss.vllm.ai)
-- For coordinating contributions and development, please use [Slack](https://slack.vllm.ai)
-- For security disclosures, please use GitHub's [Security Advisories](https://github.com/vllm-project/vllm/security/advisories) feature
-- For collaborations and partnerships, please contact us at [collaboration@vllm.ai](mailto:collaboration@vllm.ai)
-<!-- --8<-- [end:contact-us] -->
+| Environment Variable | Type | Default Value | Description | Notes |
+|--------|------|--------|------|------|
+| `LVLLM_MOE_NUMA_ENABLED` | Core Parameter | `0` | Whether to enable hybrid inference: `1`-enabled, `0`-disabled | Set to `0` to disable hybrid inference, behavior is the same as vLLM |
+| `LK_THREADS` | Performance Parameter | Auto-calculated | Number of threads: physical cores - 4 | For multi-GPU multi-process, (physical cores - 4) divided by number of processes |
+| `OMP_NUM_THREADS` | Performance Parameter | System logical core count | OpenMP thread count: set to same as `LK_THREADS` | |
+| `LVLLM_MOE_USE_WEIGHT` | Performance Parameter | `TO_DTYPE` | Runtime expert weight format `TO_DTYPE`: same as dtype in config.yaml, bfloat16/float16, `KEEP`: same as model, `INT4`: int4 |
+| `LVLLM_GPU_RESIDENT_MOE_LAYERS` | GPU Prefill Parameter | None | MOE expert layers resident on GPU `0`: layer 0, `0-1`: layers 0 to 1, `0,9`: layers 0 and 9 | After reserving sufficient KV Cache VRAM, allocating multiple layers can increase performance and reduce corresponding memory usage, including layer 0 to achieve acceleration effect |
+| `LVLLM_GPU_PREFETCH_WINDOW` | GPU Prefill Parameter | None | Prefetch window size `1`: prefetch 1 layer of MOE experts | Generally, prefetching 1 to 2 layers is sufficient |
+| `LVLLM_GPU_PREFILL_MIN_BATCH_SIZE` | GPU Prefill Parameter | None | Minimum input length for using GPU prefill `4096`: when input length reaches this value, start GPU prefill | The value should not be too small, set to 0 to disable GPU prefill function |
 
-## Media Kit
+## Configuration File
 
-- If you wish to use vLLM's logo, please refer to [our media kit repo](https://github.com/vllm-project/media-kit)
+Example config.yaml, `Recommended values` do not need to be modified when running different models
+
+```bash
+model: "/home/guqiong/Models/GLM-4.7-Flash-AWQ-4bit"  # Model directory
+host: "0.0.0.0"                                       # Service binding IP address
+port: 8070                                            # Service binding port number
+tensor-parallel-size: 2                               # Tensor parallelism size, less than or equal to number of GPUs,
+#pipeline-parallel-size: 2                            # Pipeline parallelism size, less than or equal to number of GPUs
+max-model-len: 18000                                  # Maximum context length, less than or equal to model maximum length
+gpu-memory-utilization: 0.92                          # GPU VRAM allocation percentage for lvllm, less than or equal to 1
+trust-remote-code: true                               # Whether to trust remote code, recommended value
+tokenizer-mode: "auto"                                # Tokenizer mode, recommended value
+swap-space: 0                                         # Swap space size, in GB, recommended value
+served-model-name: "GLM-4.7-Flash-AWQ-4bit"           # Service model name
+compilation_config.cudagraph_mode: "FULL_DECODE_ONLY" # Enable CUDA graph mode, recommended value
+enable_prefix_caching: true                           # Enable prefix caching, recommended value
+enable-chunked-prefill: true                          # Enable chunked prefill, recommended value
+max_num_batched_tokens: 18000                         # Maximum number of batched tokens, recommended value when GPU prefill is disabled: 1024, recommended value when GPU prefill is enabled: same as max-model-len
+dtype: "bfloat16"                                     # Model intermediate calculation data type, recommended value bfloat16 or float16
+max_num_seqs: 4                                       # Maximum concurrent request sequences, recommended value 1 to 4
+compilation_config.mode: "VLLM_COMPILE"               # Optimize model, recommended value
+# kv_cache_dtype: "fp8"                               # KV Cache data type, can be enabled for 40-series, 50-series GPUs
+# speculative-config: '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'  # Speculative decoding, recommended to disable
+# tool-call-parser: "minimax_m2"                      # MiniMax M2.1 model configuration parameter
+# reasoning-parser: "minimax_m2_append_think"         # MiniMax M2.1 model configuration parameter
+# enable-auto-tool-choice: true                       # MiniMax M2.1, GLM4.7, Kimi k2.5 model configuration parameter
+# tool-call-parser: glm47                             # GLM4.7 model configuration parameter
+# reasoning-parser: glm45                             # GLM4.7 model configuration parameter
+# tool-call-parser: "kimi_k2"                        # Kimi k2.5 model configuration parameter
+# reasoning-parser: "kimi_k2"                        # Kimi k2.5 model configuration parameter
+```
+
+## Installation Steps
+
+### 1. Install CUDA 12.9
+
+```bash
+# Uninstall old version CUDA and NVIDIA drivers
+sudo /usr/local/cuda/bin/cuda-uninstaller
+sudo nvidia-uninstall
+
+# Download and install CUDA 12.9
+wget https://developer.download.nvidia.com/compute/cuda/12.9.1/local_installers/cuda_12.9.1_575.57.08_linux.run
+sudo sh cuda_12.9.1_575.57.08_linux.run
+```
+
+### 2. Create Python Environment
+
+```bash
+conda create -n Lvllm python==3.12.11
+conda activate Lvllm
+
+# Upgrade libstdcxx-ng (avoid glibcxx version issues)
+conda install -c conda-forge libstdcxx-ng
+export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
+
+# Install NUMA library
+sudo apt-get install libnuma-dev      # Ubuntu
+sudo dnf install numactl-devel        # Rocky Linux
+```
+
+### 3. Install Dependencies
+
+```bash
+# Clone repository
+git clone https://github.com/guqiong96/Lvllm.git
+cd Lvllm
+
+# Install PyTorch 2.9.1
+pip install torchaudio triton torchvision torch==2.9.1
+
+# Use existing PyTorch
+python use_existing_torch.py
+
+# Install build dependencies
+pip install -r requirements/build.txt
+```
+
+### 4. Install Lvllm
+
+```bash
+MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release  CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
+```
+
+**Parameter Explanation:**
+- `MAX_JOBS=32 NVCC_THREADS=1`: Reduce compilation memory usage
+- `CMAKE_BUILD_TYPE=Release`: Performance optimization option
+- `CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release"`: Performance optimization option
+
+
+## Update
+
+If Lvllm is already installed and you need to update to the latest version, execute the following commands:
+
+```bash
+# Normal situation
+git pull --force
+# If conflicts occur
+git fetch origin
+git reset --hard origin/main
+
+# Install PyTorch 2.9.1
+pip uninstall torchaudio triton torchvision torch
+pip install torchaudio triton torchvision torch==2.9.1
+
+# Qwen3-VL GLM4.6V requires xformers to be installed
+
+# Compile and install
+python use_existing_torch.py
+pip install -r requirements/build.txt
+MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
+
+rm -rf ~/.cache/vllm
+```
+
+Simple update of Lvllm, when Lvllm's update does not involve upstream vllm updates, only need to execute the following commands:
+```bash
+git pull --force
+pip uninstall lk_moe
+pip install lk_moe
+rm -rf ~/.cache/vllm
+```

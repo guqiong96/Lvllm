@@ -777,6 +777,9 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
         params_dtype: torch.dtype,
         **extra_weight_attrs,
     ):
+        device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
+        if isinstance(layer, FusedMoE) and not layer.is_gpu_resident_layer:
+            device = "cpu"
         layer.intermediate_size_per_partition = intermediate_size_per_partition
         layer.hidden_size = hidden_size
         layer.num_experts = num_experts
@@ -819,6 +822,7 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
                 w13_num_shards * intermediate_size_per_partition,
                 hidden_size,
                 dtype=params_dtype,
+                device=device
             ),
             requires_grad=False,
         )
@@ -831,6 +835,7 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
                 hidden_size,
                 intermediate_size_per_partition,
                 dtype=params_dtype,
+                device=device
             ),
             requires_grad=False,
         )
@@ -843,12 +848,12 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
             # They will be combined to a single scale after weight loading.
             # For non-gated MoE, allocate 1 scale for w13.
             w13_weight_scale = torch.nn.Parameter(
-                torch.ones(num_experts, w13_num_shards, dtype=torch.float32),
+                torch.ones(num_experts, w13_num_shards, dtype=torch.float32, device=device),
                 requires_grad=False,
             )
             layer.register_parameter("w13_weight_scale", w13_weight_scale)
             w2_weight_scale = torch.nn.Parameter(
-                torch.ones(num_experts, dtype=torch.float32), requires_grad=False
+                torch.ones(num_experts, dtype=torch.float32, device=device), requires_grad=False
             )
             layer.register_parameter("w2_weight_scale", w2_weight_scale)
             # Add PER-TENSOR quantization for FusedMoE.weight_loader.
@@ -865,12 +870,13 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
                     w13_num_shards * intermediate_size_per_partition,
                     1,
                     dtype=torch.float32,
+                    device=device
                 ),
                 requires_grad=False,
             )
             layer.register_parameter("w13_weight_scale", w13_weight_scale)
             w2_weight_scale = torch.nn.Parameter(
-                torch.ones(num_experts, hidden_size, 1, dtype=torch.float32),
+                torch.ones(num_experts, hidden_size, 1, dtype=torch.float32, device=device),
                 requires_grad=False,
             )
             layer.register_parameter("w2_weight_scale", w2_weight_scale)
@@ -913,13 +919,13 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
         # INPUT_SCALES
         if self.static_input_scales:
             w13_input_scale = torch.nn.Parameter(
-                torch.ones(num_experts, dtype=torch.float32), requires_grad=False
+                torch.ones(num_experts, dtype=torch.float32, device=device), requires_grad=False
             )
             layer.register_parameter("w13_input_scale", w13_input_scale)
             set_weight_attrs(w13_input_scale, extra_weight_attrs)
 
             w2_input_scale = torch.nn.Parameter(
-                torch.ones(num_experts, dtype=torch.float32), requires_grad=False
+                torch.ones(num_experts, dtype=torch.float32, device=device), requires_grad=False
             )
             layer.register_parameter("w2_input_scale", w2_input_scale)
             set_weight_attrs(w2_input_scale, extra_weight_attrs)
@@ -929,6 +935,8 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
 
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
         # Allow for accessing weights and scales in standard way.
+        if isinstance(layer, FusedMoE) and layer.is_cpu_layer:
+            return
         w13 = layer.w13_weight
         w2 = layer.w2_weight
         w13_scale = layer.w13_weight_scale
@@ -1309,6 +1317,9 @@ class CompressedTensorsWNA16MarlinMoEMethod(CompressedTensorsMoEMethod):
         params_dtype: torch.dtype,
         **extra_weight_attrs,
     ):
+        device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
+        if isinstance(layer, FusedMoE) and not layer.is_gpu_resident_layer:
+            device = "cpu"
         intermediate_size_full = extra_weight_attrs.pop("intermediate_size_full")
         w13_num_shards = 2 if self.moe.is_act_and_mul else 1
 
@@ -1324,6 +1335,7 @@ class CompressedTensorsWNA16MarlinMoEMethod(CompressedTensorsMoEMethod):
                 hidden_size // self.packed_factor,
                 w13_num_shards * intermediate_size_per_partition,
                 dtype=torch.int32,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -1336,6 +1348,7 @@ class CompressedTensorsWNA16MarlinMoEMethod(CompressedTensorsMoEMethod):
                 intermediate_size_per_partition // self.packed_factor,
                 hidden_size,
                 dtype=torch.int32,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -1369,6 +1382,7 @@ class CompressedTensorsWNA16MarlinMoEMethod(CompressedTensorsMoEMethod):
                 num_groups_w13,
                 w13_num_shards * intermediate_size_per_partition,
                 dtype=params_dtype,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -1376,7 +1390,7 @@ class CompressedTensorsWNA16MarlinMoEMethod(CompressedTensorsMoEMethod):
         set_weight_attrs(w13_scale, extra_weight_attrs)
 
         w2_scale = torch.nn.Parameter(
-            torch.ones(num_experts, num_groups_w2, hidden_size, dtype=params_dtype),
+            torch.ones(num_experts, num_groups_w2, hidden_size, dtype=params_dtype, device=device),
             requires_grad=False,
         )
         layer.register_parameter("w2_weight_scale", w2_scale)
@@ -1384,12 +1398,12 @@ class CompressedTensorsWNA16MarlinMoEMethod(CompressedTensorsMoEMethod):
         set_weight_attrs(w2_scale, {"load_full_w2": load_full_w2})
 
         w2_weight_shape = torch.nn.Parameter(
-            torch.empty(num_experts, 2), requires_grad=False
+            torch.empty(num_experts, 2, device=device), requires_grad=False
         )
         layer.register_parameter("w2_weight_shape", w2_weight_shape)
         set_weight_attrs(w2_weight_shape, extra_weight_attrs)
         w13_weight_shape = torch.nn.Parameter(
-            torch.empty(num_experts, 2), requires_grad=False
+            torch.empty(num_experts, 2, device=device), requires_grad=False
         )
 
         layer.register_parameter("w13_weight_shape", w13_weight_shape)
@@ -1400,6 +1414,7 @@ class CompressedTensorsWNA16MarlinMoEMethod(CompressedTensorsMoEMethod):
                 num_experts,
                 hidden_size,
                 dtype=torch.int32,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -1411,6 +1426,7 @@ class CompressedTensorsWNA16MarlinMoEMethod(CompressedTensorsMoEMethod):
                 num_experts,
                 intermediate_size_per_partition,
                 dtype=torch.int32,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -1422,6 +1438,7 @@ class CompressedTensorsWNA16MarlinMoEMethod(CompressedTensorsMoEMethod):
                 num_experts,
                 hidden_size,
                 dtype=torch.int32,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -1433,6 +1450,7 @@ class CompressedTensorsWNA16MarlinMoEMethod(CompressedTensorsMoEMethod):
                 num_experts,
                 intermediate_size_per_partition,
                 dtype=torch.int32,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -1443,7 +1461,10 @@ class CompressedTensorsWNA16MarlinMoEMethod(CompressedTensorsMoEMethod):
         layer.a2_scale = None
         layer.marlin_state = GPTQMarlinState.REPACK
 
-    def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
+    def process_weights_after_loading(self, layer: torch.nn.Module) -> None: 
+        if isinstance(layer, FusedMoE) and layer.is_cpu_layer: 
+            return
+            
         num_experts = layer.w13_weight_g_idx.shape[0]
         device = layer.w13_weight_g_idx.device
         is_a_8bit = (
@@ -1562,11 +1583,13 @@ class CompressedTensorsWNA16MarlinMoEMethod(CompressedTensorsMoEMethod):
     def get_fused_moe_quant_config(
         self, layer: torch.nn.Module
     ) -> FusedMoEQuantConfig | None:
+        if isinstance(layer, FusedMoE) and layer.is_cpu_layer:
+            return None
         if self.num_bits != 4:
             return None
         return int4_w4a16_moe_quant_config(
-            w1_scale=layer.w13_weight_scale,
-            w2_scale=layer.w2_weight_scale,
+            w1_scale=layer.w13_weight_scale if hasattr(layer, "w13_weight_scale") else None,
+            w2_scale=layer.w2_weight_scale if hasattr(layer, "w2_weight_scale") else None,
             w1_zp=None,
             w2_zp=None,
             block_shape=[0, self.group_size],
@@ -1677,6 +1700,9 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
         params_dtype: torch.dtype,
         **extra_weight_attrs,
     ):
+        device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
+        if isinstance(layer, FusedMoE) and not layer.is_gpu_resident_layer:
+            device = "cpu"
         # Will transpose the loaded weight along the
         # intermediate and hidden dim sizes. Will
         # shard for TP along the transposed dims
@@ -1690,6 +1716,7 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
                 hidden_size // self.packed_factor,
                 w13_num_shards * intermediate_size_per_partition,
                 dtype=torch.int32,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -1702,6 +1729,7 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
                 intermediate_size_per_partition // self.packed_factor,
                 hidden_size,
                 dtype=torch.int32,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -1723,6 +1751,7 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
                 num_groups_w13,
                 w13_num_shards * intermediate_size_per_partition,
                 dtype=params_dtype,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -1730,7 +1759,7 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
         set_weight_attrs(w13_scale, extra_weight_attrs)
 
         w2_scale = torch.nn.Parameter(
-            torch.ones(num_experts, num_groups_w2, hidden_size, dtype=params_dtype),
+            torch.ones(num_experts, num_groups_w2, hidden_size, dtype=params_dtype, device=device),
             requires_grad=False,
         )
         layer.register_parameter("w2_weight_scale", w2_scale)
@@ -1738,12 +1767,12 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
         set_weight_attrs(w2_scale, {"load_full_w2": False})
 
         w2_weight_shape = torch.nn.Parameter(
-            torch.empty(num_experts, 2), requires_grad=False
+            torch.empty(num_experts, 2, device=device), requires_grad=False
         )
         layer.register_parameter("w2_weight_shape", w2_weight_shape)
         set_weight_attrs(w2_weight_shape, extra_weight_attrs)
         w13_weight_shape = torch.nn.Parameter(
-            torch.empty(num_experts, 2), requires_grad=False
+            torch.empty(num_experts, 2, device=device), requires_grad=False
         )
 
         layer.register_parameter("w13_weight_shape", w13_weight_shape)
@@ -1754,6 +1783,7 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
                 num_experts,
                 hidden_size,
                 dtype=torch.int32,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -1765,6 +1795,7 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
                 num_experts,
                 intermediate_size_per_partition,
                 dtype=torch.int32,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -1776,6 +1807,7 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
                 num_experts,
                 hidden_size,
                 dtype=torch.int32,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -1787,6 +1819,7 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
                 num_experts,
                 intermediate_size_per_partition,
                 dtype=torch.int32,
+                device=device,
             ),
             requires_grad=False,
         )

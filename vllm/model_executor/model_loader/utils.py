@@ -20,6 +20,7 @@ from vllm.model_executor.layers.quantization.base_config import (
 )
 from vllm.model_executor.models.interfaces import SupportsQuant
 from vllm.utils.platform_utils import is_pin_memory_available
+from vllm.model_executor.layers.fused_moe.layer import FusedMoE
 
 logger = init_logger(__name__)
 
@@ -96,7 +97,9 @@ def process_weights_after_loading(
 
     maybe_save_metadata_and_attributes_for_weight_reloading(model, model_config)
 
-    for _, module in model.named_modules():
+    for _, module in model.named_modules(): 
+        if isinstance(module, FusedMoE) and not getattr(module, "process_lk_moe_already_called", False):
+            module.process_weights_after_loading()
         quant_method = getattr(module, "quant_method", None)
         if isinstance(quant_method, QuantizeMethodBase):
             # When quant methods need to process weights after loading
@@ -106,7 +109,10 @@ def process_weights_after_loading(
             # parameters onto device for processing and back off after.
             with device_loading_context(module, target_device):
                 quant_method.process_weights_after_loading(module)
-
+        if isinstance(module, FusedMoE) and not getattr(module, "process_lk_moe_already_called", False):
+            module.clean_weights_after_loading() 
+            setattr(module, "process_lk_moe_already_called", True)
+ 
     # Initialize post-load attention weights for both Attention and MLA.
     # NOTE: Happens after other modules so we can easily decompress weights.
     for _, module in model.named_modules():
@@ -120,6 +126,9 @@ def process_weights_after_loading(
 
 @contextmanager
 def device_loading_context(module: torch.nn.Module, target_device: torch.device):
+    # if isinstance(module, FusedMoE) and module.is_gpu_resident_layer: 
+    #     yield module
+    #     return
     if target_device.type == "cpu":
         # If target is CPU, no need to move anything
         yield module
@@ -138,6 +147,8 @@ def device_loading_context(module: torch.nn.Module, target_device: torch.device)
         yield module
 
     finally:
+        # if isinstance(module, FusedMoE) and module.is_gpu_resident_layer:  
+        #     return
         # Restore parameters to their original devices, ignoring new parameters
         pin_memory = is_pin_memory_available()
         for name, p in module.named_parameters():
