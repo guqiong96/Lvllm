@@ -95,11 +95,14 @@ vLLM已验证的大部分原版MOE模型
 ## 运行命令
  
 ```bash 
-LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS=88 OMP_NUM_THREADS=88 vllm serve --config config.yaml # 未启用GPU预填充
+LVLLM_MOE_NUMA_ENABLED=1 LK_THREAD_BINDING=CPU_CORE LK_THREADS=88 OMP_NUM_THREADS=88 vllm serve --config config.yaml # 未启用GPU预填充
 ```
 
 ```bash 
-LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS=88 OMP_NUM_THREADS=88 LVLLM_MOE_USE_WEIGHT=INT4 LVLLM_GPU_RESIDENT_MOE_LAYERS=0 LVLLM_GPU_PREFETCH_WINDOW=1 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 vllm serve --config config.yaml # 启用GPU预填充
+LVLLM_MOE_NUMA_ENABLED=1 LK_THREAD_BINDING=CPU_CORE LK_THREADS=88 OMP_NUM_THREADS=88 LVLLM_MOE_USE_WEIGHT=INT4 LVLLM_GPU_RESIDENT_MOE_LAYERS=0 LVLLM_GPU_PREFETCH_WINDOW=1 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 vllm serve --config config.yaml # 启用GPU预填充
+```
+```bash 
+# 遇到性能问题时可尝试按NUMA节点绑定线程, 并减少线程数量
 ```
 
 ```bash 
@@ -109,6 +112,7 @@ LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS=88 OMP_NUM_THREADS=88 LVLLM_MOE_USE_WEIGHT=I
 | 环境变量 | 类型 | 默认值 | 说明 | 备注 |
 |--------|------|--------|------|------|
 | `LVLLM_MOE_NUMA_ENABLED` | 核心参数 | `0` | 是否启用混合推理: `1`-启用，`0`-禁用 | 设置为`0`禁用混合推理，行为与vLLM相同 |
+| `LK_THREAD_BINDING` | 性能参数 | `CPU_CORE` | 线程绑定策略: `CPU_CORE`-按CPU核心绑定，`NUMA_NODE`-按NUMA节点绑定 | 默认按CPU核心绑定, 遇到性能问题时可尝试按NUMA节点绑定 |
 | `LK_THREADS` | 性能参数 | 自动计算 | 线程数量: 物理核心数-4 | 多GPU多进程时，物理核心数-4除以进程数量 |
 | `OMP_NUM_THREADS` | 性能参数 | 系统逻辑核心数量 | OpenMP线程数: 设置为`LK_THREADS`相同 |   | 
 | `LVLLM_MOE_USE_WEIGHT` | 性能参数 | `TO_DTYPE` | 运行时专家权重格式`TO_DTYPE`: 与config.yaml中dtype一致,bfloat16/float16, `KEEP`: 与模型一致，`INT4`: int4  |

@@ -94,12 +94,16 @@ Note 1: Enabling GPU Prefill, Input Length 32K-64K
 ## Running Commands
 
 ```bash
-LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS=88 OMP_NUM_THREADS=88 vllm serve --config config.yaml # GPU prefill not enabled
+LVLLM_MOE_NUMA_ENABLED=1 LK_THREAD_BINDING=CPU_CORE LK_THREADS=88 OMP_NUM_THREADS=88 vllm serve --config config.yaml # GPU prefill not enabled
 ```
 
 ```bash
-LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS=88 OMP_NUM_THREADS=88 LVLLM_MOE_USE_WEIGHT=INT4 LVLLM_GPU_RESIDENT_MOE_LAYERS=0 LVLLM_GPU_PREFETCH_WINDOW=1 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 vllm serve --config config.yaml # GPU prefill enabled
+LVLLM_MOE_NUMA_ENABLED=1 LK_THREAD_BINDING=CPU_CORE LK_THREADS=88 OMP_NUM_THREADS=88 LVLLM_MOE_USE_WEIGHT=INT4 LVLLM_GPU_RESIDENT_MOE_LAYERS=0 LVLLM_GPU_PREFETCH_WINDOW=1 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 vllm serve --config config.yaml # GPU prefill enabled
 ```
+```bash
+# When encountering performance issues, you can try binding threads by NUMA node and reduce the number of threads
+```
+
 ```bash 
 --enable_expert_parallel # EP parallelism enabled，run MiniMax-M2.1 model with 8 GPUs
 ```
@@ -107,6 +111,7 @@ LVLLM_MOE_NUMA_ENABLED=1 LK_THREADS=88 OMP_NUM_THREADS=88 LVLLM_MOE_USE_WEIGHT=I
 | Environment Variable | Type | Default Value | Description | Notes |
 |--------|------|--------|------|------|
 | `LVLLM_MOE_NUMA_ENABLED` | Core Parameter | `0` | Whether to enable hybrid inference: `1`-enabled, `0`-disabled | Set to `0` to disable hybrid inference, behavior is the same as vLLM |
+| `LK_THREAD_BINDING` | Performance Parameter | `CPU_CORE` | Thread binding policy: `CPU_CORE` - bind by CPU core, `NUMA_NODE` - bind by NUMA node | Default is binding by CPU core, when encountering performance issues, you can try binding by NUMA node |
 | `LK_THREADS` | Performance Parameter | Auto-calculated | Number of threads: physical cores - 4 | For multi-GPU multi-process, (physical cores - 4) divided by number of processes |
 | `OMP_NUM_THREADS` | Performance Parameter | System logical core count | OpenMP thread count: set to same as `LK_THREADS` | |
 | `LVLLM_MOE_USE_WEIGHT` | Performance Parameter | `TO_DTYPE` | Runtime expert weight format `TO_DTYPE`: same as dtype in config.yaml, bfloat16/float16, `KEEP`: same as model, `INT4`: int4 |
