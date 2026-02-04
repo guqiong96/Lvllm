@@ -52,6 +52,7 @@ Most of the original MOE models verified by vLLM
 
 | Model Name | Status |
 |---------|------|
+| Qwen3-Coder-Next | ✅ Tested |
 | Qwen3-Next-80B-A3B-Instruct | ✅ Tested |
 | Qwen3-Coder-30B-A3B-Instruct | ✅ Tested |
 | Qwen3-VL-30B-A3B-Instruct | ✅ Tested |

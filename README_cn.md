@@ -52,6 +52,7 @@ vLLM已验证的大部分原版MOE模型
  
 | 模型名称 | 状态 |
 |---------|------|
+| Qwen3-Coder-Next | ✅ 已测试通过 |
 | Qwen3-Next-80B-A3B-Instruct | ✅ 已测试通过 |
 | Qwen3-Coder-30B-A3B-Instruct | ✅ 已测试通过 |
 | Qwen3-VL-30B-A3B-Instruct | ✅ 已测试通过 | 
