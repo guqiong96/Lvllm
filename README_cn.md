@@ -99,7 +99,7 @@ LVLLM_MOE_NUMA_ENABLED=1 LK_THREAD_BINDING=CPU_CORE LK_THREADS=88 OMP_NUM_THREAD
 ```
 
 ```bash 
-LVLLM_MOE_NUMA_ENABLED=1 LK_THREAD_BINDING=CPU_CORE LK_THREADS=88 OMP_NUM_THREADS=88 LVLLM_MOE_USE_WEIGHT=INT4 LVLLM_GPU_RESIDENT_MOE_LAYERS=0 LVLLM_GPU_PREFETCH_WINDOW=1 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 vllm serve --config config.yaml # 启用GPU预填充
+LVLLM_MOE_NUMA_ENABLED=1 LK_THREAD_BINDING=CPU_CORE LK_THREADS=88 OMP_NUM_THREADS=88 LVLLM_MOE_USE_WEIGHT=INT4 LVLLM_GPU_RESIDENT_MOE_LAYERS=0-1 LVLLM_GPU_PREFETCH_WINDOW=1 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 vllm serve --config config.yaml # 启用GPU预填充
 ```
 ```bash 
 # 遇到性能问题时可尝试按NUMA节点绑定线程, 并减少线程数量
@@ -126,7 +126,7 @@ LVLLM_MOE_NUMA_ENABLED=1 LK_THREAD_BINDING=CPU_CORE LK_THREADS=88 OMP_NUM_THREAD
 config.yaml示例, `建议值`在运行不同模型时无需修改
 
 ```bash  
-model: "/home/guqiong/Models/GLM-4.7-Flash-AWQ-4bit"  #模型目录
+model: "/home/guqiong/Models/Models/MiniMax-M2.1"  #模型目录
 host: "0.0.0.0"                                       # 服务绑定IP地址
 port: 8070                                            # 服务绑定端口号
 tensor-parallel-size: 2                               # 张量并行大小， 小于等于GPU数量，   
@@ -136,7 +136,7 @@ gpu-memory-utilization: 0.92                          # 分配给lvllm的GPU显�
 trust-remote-code: true                               # 是否信任远程代码， 建议值
 tokenizer-mode: "auto"                                # 分词器模式， 建议值
 swap-space: 0                                         # 交换空间大小， 单位GB， 建议值
-served-model-name: "GLM-4.7-Flash-AWQ-4bit"           # 服务模型名称
+served-model-name: "Models/MiniMax-M2.1"           # 服务模型名称
 compilation_config.cudagraph_mode: "FULL_DECODE_ONLY" # 启用CUDA图模式， 建议值
 enable_prefix_caching: true                           # 启用前缀缓存， 建议值
 enable-chunked-prefill: true                          # 启用分块预填充， 建议值  
@@ -144,15 +144,23 @@ max_num_batched_tokens: 18000                         # 最大批量填充令牌
 dtype: "bfloat16"                                     # 模型中间计算数据类型， 建议值bfloat16或float16
 max_num_seqs: 4                                       # 最大并发请求序列， 建议值1到4
 compilation_config.mode: "VLLM_COMPILE"               # 优化模型， 建议值
+# enable-auto-tool-choice: true                       # 预先工具调用
 # kv_cache_dtype: "fp8"                               # KV Cache数据类型， 40系、50系GPU可开启 
 # speculative-config: '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'  # 推测解码， 建议值关闭
 # tool-call-parser: "minimax_m2"                      # MiniMax M2.1 模型配置参数
 # reasoning-parser: "minimax_m2_append_think"         # MiniMax M2.1 模型配置参数
-# enable-auto-tool-choice: true                       # MiniMax M2.1 、GLM4.7、Kimi k2.5 模型配置参数 
 # tool-call-parser: glm47                             # GLM4.7 模型配置参数
 # reasoning-parser: glm45                             # GLM4.7 模型配置参数
-# tool-call-parser: "kimi_k2"                        # Kimi k2.5 模型配置参数
-# reasoning-parser: "kimi_k2"                        # Kimi k2.5 模型配置参数
+# tool-call-parser: "kimi_k2"                         # Kimi k2.5 模型配置参数
+# reasoning-parser: "kimi_k2"                         # Kimi k2.5 模型配置参数
+# reasoning-parser: "step3p5"                         # Kimi k2.5 模型配置参数                                              
+# tool-call-parser: "step3p5"                         # Kimi k2.5 模型配置参数                                              
+# hf-overrides.num_nextn_predict_layers: 1            # Kimi k2.5 模型配置参数
+# speculative_config.method: "step3p5_mtp"            # Kimi k2.5 模型配置参数
+# speculative_config.num_speculative_tokens: 1        # Kimi k2.5 模型配置参数
+# disable-cascade-attn: true                          # Step-3.5-Flash 模型配置参数
+# tool-call-parser: "qwen3_coder"                     # Qwen3-Coder-Next 模型配置参数
+
 ```
 
 

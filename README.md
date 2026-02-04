@@ -98,7 +98,7 @@ LVLLM_MOE_NUMA_ENABLED=1 LK_THREAD_BINDING=CPU_CORE LK_THREADS=88 OMP_NUM_THREAD
 ```
 
 ```bash
-LVLLM_MOE_NUMA_ENABLED=1 LK_THREAD_BINDING=CPU_CORE LK_THREADS=88 OMP_NUM_THREADS=88 LVLLM_MOE_USE_WEIGHT=INT4 LVLLM_GPU_RESIDENT_MOE_LAYERS=0 LVLLM_GPU_PREFETCH_WINDOW=1 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 vllm serve --config config.yaml # GPU prefill enabled
+LVLLM_MOE_NUMA_ENABLED=1 LK_THREAD_BINDING=CPU_CORE LK_THREADS=88 OMP_NUM_THREADS=88 LVLLM_MOE_USE_WEIGHT=INT4 LVLLM_GPU_RESIDENT_MOE_LAYERS=0-1 LVLLM_GPU_PREFETCH_WINDOW=1 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 vllm serve --config config.yaml # GPU prefill enabled
 ```
 ```bash
 # When encountering performance issues, you can try binding threads by NUMA node and reduce the number of threads
@@ -143,14 +143,20 @@ dtype: "bfloat16"                                     # Model intermediate calcu
 max_num_seqs: 4                                       # Maximum concurrent request sequences, recommended value 1 to 4
 compilation_config.mode: "VLLM_COMPILE"               # Optimize model, recommended value
 # kv_cache_dtype: "fp8"                               # KV Cache data type, can be enabled for 40-series, 50-series GPUs
-# speculative-config: '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'  # Speculative decoding, recommended to disable
+# enable-auto-tool-choice: true                       # Enable auto tool choice
 # tool-call-parser: "minimax_m2"                      # MiniMax M2.1 model configuration parameter
 # reasoning-parser: "minimax_m2_append_think"         # MiniMax M2.1 model configuration parameter
-# enable-auto-tool-choice: true                       # MiniMax M2.1, GLM4.7, Kimi k2.5 model configuration parameter
 # tool-call-parser: glm47                             # GLM4.7 model configuration parameter
 # reasoning-parser: glm45                             # GLM4.7 model configuration parameter
 # tool-call-parser: "kimi_k2"                        # Kimi k2.5 model configuration parameter
 # reasoning-parser: "kimi_k2"                        # Kimi k2.5 model configuration parameter
+# reasoning-parser: "step3p5"                         # Kimi k2.5 model configuration parameter                                         
+# tool-call-parser: "step3p5"                         # Kimi k2.5 model configuration parameter                                         
+# hf-overrides.num_nextn_predict_layers: 1            # Kimi k2.5 model configuration parameter
+# speculative_config.method: "step3p5_mtp"            # Kimi k2.5 model configuration parameter
+# speculative_config.num_speculative_tokens: 1        # Kimi k2.5 model configuration parameter
+# disable-cascade-attn: true                          # Step-3.5-Flash model configuration parameter
+# tool-call-parser: "qwen3_coder"                     # Qwen3-Coder-Next model configuration parameter
 ```
 
 ## Installation Steps

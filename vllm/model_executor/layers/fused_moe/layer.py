@@ -3118,7 +3118,7 @@ class FusedMoE(CustomOp):
                             output_cpu.data_ptr(),                     # output 
                             bsz_tensor.data_ptr()                      # bsz_tensor
                         )     
-                        output_gpu = output_cpu.to(torch.cuda.current_device(), non_blocking=non_blocking)
+                        output_gpu = output_cpu.to(torch.cuda.current_device(), non_blocking=non_blocking).contiguous()
                         if self.check_nan_in_output:
                             torch.nan_to_num(output_gpu, nan=0.0, out=output_gpu)
                         complete_event = torch.cuda.Event()
