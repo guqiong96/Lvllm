@@ -9,7 +9,6 @@ import torch
 from torch import nn
 from torch.nn.parameter import Parameter
 
-from vllm.attention.layer import Attention
 from vllm.compilation.decorators import support_torch_compile
 from vllm.config import CacheConfig, ModelConfig, VllmConfig
 from vllm.distributed import (
@@ -22,6 +21,7 @@ from vllm.distributed import (
 )
 from vllm.logger import init_logger
 from vllm.model_executor.layers.activation import SiluAndMul, SwigluStepAndMul
+from vllm.model_executor.layers.attention import Attention
 from vllm.model_executor.layers.fused_moe import FusedMoE
 from vllm.model_executor.layers.fused_moe.shared_fused_moe import SharedFusedMoE
 from vllm.model_executor.layers.layernorm import GemmaRMSNorm
@@ -388,6 +388,7 @@ class FusedMoEBlock(nn.Module):
             routed_scaling_factor=config.moe_router_scaling_factor,
             enable_eplb=self.enable_eplb,
             num_redundant_experts=self.n_redundant_experts,
+            router_logits_dtype=torch.float32,
         )
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
