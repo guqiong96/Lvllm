@@ -625,21 +625,149 @@ class Step3p5Model(nn.Module):
 
         return hidden_states
 
+    # def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
+    #     config = self.config
+    #     assert config.num_attention_groups > 1, "Only support GQA"
+    #     qkv_params_mapping = []
+    #     stacked_params_mapping = [
+    #         # (param_name, shard_name, shard_id)
+    #         ("qkv_proj", "q_proj", "q"),
+    #         ("qkv_proj", "k_proj", "k"),
+    #         ("qkv_proj", "v_proj", "v"),
+    #         ("gate_up_proj", "gate_proj", 0),
+    #         ("gate_up_proj", "up_proj", 1),
+    #     ]
+
+    #     params_dict = dict(self.named_parameters())
+    #     loaded_params: set[str] = set()
+
+    #     expert_params_mapping = [
+    #         (".moe.experts.w13_weight", ".moe.gate_proj.weight", "w1"),
+    #         (".moe.experts.w13_weight", ".moe.up_proj.weight", "w3"),
+    #         (".moe.experts.w2_weight", ".moe.down_proj.weight", "w2"),
+    #     ]
+
+    #     disable_moe_stacked_params = [data[1] for data in expert_params_mapping]
+
+    #     for name, loaded_weight in weights:
+    #         if name.startswith("model."):
+    #             local_name = name[len("model.") :]
+    #             full_name = name
+    #         else:
+    #             local_name = name
+    #             full_name = f"model.{name}" if name else "model"
+
+    #         spec_layer = get_spec_layer_idx_from_weight_name(config, full_name)
+    #         if spec_layer is not None:
+    #             continue  # skip spec decode layers for main model
+
+    #         # Skip any layers beyond the main model's depth (e.g., MTP layers)
+    #         if full_name.startswith("model.layers."):
+    #             parts = full_name.split(".")
+    #             if len(parts) > 2 and parts[2].isdigit():
+    #                 layer_idx = int(parts[2])
+    #                 if layer_idx >= config.num_hidden_layers:
+    #                     continue
+
+    #         for param_name, weight_name, shard_id in stacked_params_mapping:
+    #             if weight_name not in local_name:
+    #                 continue
+    #             if any(
+    #                 disable_moe_stacked_param in local_name
+    #                 for disable_moe_stacked_param in disable_moe_stacked_params
+    #             ):
+    #                 continue
+    #             replaced_name = local_name.replace(weight_name, param_name)
+    #             if is_pp_missing_parameter(replaced_name, self):
+    #                 continue
+    #             if replaced_name not in params_dict:
+    #                 continue
+    #             param = params_dict[replaced_name]
+    #             weight_loader = param.weight_loader
+    #             weight_loader(param, loaded_weight, shard_id)
+    #             loaded_params.add(replaced_name)
+    #             break
+    #         else:
+    #             for param_name, weight_name, shard_id in expert_params_mapping:
+    #                 if weight_name not in local_name:
+    #                     continue
+    #                 replaced_name = local_name.replace(weight_name, param_name)
+    #                 if is_pp_missing_parameter(replaced_name, self):
+    #                     continue
+    #                 if (
+    #                     replaced_name.endswith(".bias")
+    #                     or replaced_name.endswith("_bias")
+    #                 ) and replaced_name not in params_dict:
+    #                     continue
+    #                 if replaced_name not in params_dict:
+    #                     continue
+    #                 param = params_dict[replaced_name]
+    #                 weight_loader = param.weight_loader
+    #                 moe_expert_num = self.moe_num_experts
+    #                 assert loaded_weight.shape[0] == moe_expert_num
+    #                 for expert_id in range(moe_expert_num):
+    #                     loaded_weight_expert = loaded_weight[expert_id]
+    #                     weight_loader(
+    #                         param,
+    #                         loaded_weight_expert,
+    #                         replaced_name,
+    #                         shard_id=shard_id,
+    #                         expert_id=expert_id,
+    #                     )
+    #                 loaded_params.add(replaced_name)
+    #                 break
+    #             else:
+    #                 for (
+    #                     param_name,
+    #                     weight_name,
+    #                     start_idx,
+    #                     end_idx,
+    #                 ) in qkv_params_mapping:
+    #                     if weight_name not in local_name:
+    #                         continue
+    #                     replaced_name = local_name.replace(weight_name, param_name)
+    #                     if is_pp_missing_parameter(replaced_name, self):
+    #                         continue
+    #                     if replaced_name not in params_dict:
+    #                         continue
+    #                     param = params_dict[replaced_name]
+    #                     dim = param.shape[param.output_dim]
+    #                     begin_idx = int(start_idx * dim)
+    #                     end_idx = int(end_idx * dim)
+    #                     param_slice = param.narrow(
+    #                         param.output_dim, begin_idx, end_idx - begin_idx
+    #                     )
+    #                     param_slice.copy_(loaded_weight)
+    #                     loaded_params.add(replaced_name)
+    #                     break
+    #                 else:
+    #                     if is_pp_missing_parameter(local_name, self):
+    #                         continue
+    #                     if "expert_bias" in local_name:
+    #                         logger.warning_once("ignore expert_bias")
+    #                         continue
+    #                     if local_name not in params_dict:
+    #                         continue
+    #                     param = params_dict[local_name]
+    #                     weight_loader = getattr(
+    #                         param, "weight_loader", default_weight_loader
+    #                     )
+    #                     weight_loader(param, loaded_weight)
+    #                     loaded_params.add(local_name)
+    #     return loaded_params
+    # 在 Step3p5Model.load_weights 方法中，修改专家权重加载部分
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         config = self.config
         assert config.num_attention_groups > 1, "Only support GQA"
+         
         qkv_params_mapping = []
         stacked_params_mapping = [
-            # (param_name, shard_name, shard_id)
             ("qkv_proj", "q_proj", "q"),
             ("qkv_proj", "k_proj", "k"),
             ("qkv_proj", "v_proj", "v"),
             ("gate_up_proj", "gate_proj", 0),
             ("gate_up_proj", "up_proj", 1),
         ]
-
-        params_dict = dict(self.named_parameters())
-        loaded_params: set[str] = set()
 
         expert_params_mapping = [
             (".moe.experts.w13_weight", ".moe.gate_proj.weight", "w1"),
@@ -649,9 +777,12 @@ class Step3p5Model(nn.Module):
 
         disable_moe_stacked_params = [data[1] for data in expert_params_mapping]
 
+        params_dict = dict(self.named_parameters())
+        loaded_params: set[str] = set()
+
         for name, loaded_weight in weights:
             if name.startswith("model."):
-                local_name = name[len("model.") :]
+                local_name = name[len("model."):]
                 full_name = name
             else:
                 local_name = name
@@ -659,16 +790,59 @@ class Step3p5Model(nn.Module):
 
             spec_layer = get_spec_layer_idx_from_weight_name(config, full_name)
             if spec_layer is not None:
-                continue  # skip spec decode layers for main model
+                continue
 
-            # Skip any layers beyond the main model's depth (e.g., MTP layers)
             if full_name.startswith("model.layers."):
                 parts = full_name.split(".")
                 if len(parts) > 2 and parts[2].isdigit():
                     layer_idx = int(parts[2])
                     if layer_idx >= config.num_hidden_layers:
                         continue
-
+ 
+            is_expert_weight = False
+            for param_name, weight_name, shard_id in expert_params_mapping:
+                if weight_name not in local_name:
+                    continue
+                    
+                replaced_name = local_name.replace(weight_name, param_name)
+                if is_pp_missing_parameter(replaced_name, self):
+                    is_expert_weight = True
+                    break
+                    
+                if replaced_name not in params_dict:
+                    is_expert_weight = True
+                    break
+                    
+                param = params_dict[replaced_name]
+                weight_loader = param.weight_loader
+                 
+                moe_expert_num = self.moe_num_experts
+                if loaded_weight.shape[0] == moe_expert_num: 
+                    weight_loader(
+                        param,
+                        loaded_weight,   
+                        replaced_name,
+                        shard_id=shard_id,
+                        expert_id=None  
+                    )
+                else: 
+                    for expert_id in range(moe_expert_num):
+                        loaded_weight_expert = loaded_weight[expert_id]
+                        weight_loader(
+                            param,
+                            loaded_weight_expert,
+                            replaced_name,
+                            shard_id=shard_id,
+                            expert_id=expert_id,
+                        )
+                
+                loaded_params.add(replaced_name)
+                is_expert_weight = True
+                break
+            
+            if is_expert_weight:
+                continue
+ 
             for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in local_name:
                     continue
@@ -688,73 +862,128 @@ class Step3p5Model(nn.Module):
                 loaded_params.add(replaced_name)
                 break
             else:
-                for param_name, weight_name, shard_id in expert_params_mapping:
+                for param_name, weight_name, start_idx, end_idx in qkv_params_mapping:
                     if weight_name not in local_name:
                         continue
                     replaced_name = local_name.replace(weight_name, param_name)
                     if is_pp_missing_parameter(replaced_name, self):
                         continue
-                    if (
-                        replaced_name.endswith(".bias")
-                        or replaced_name.endswith("_bias")
-                    ) and replaced_name not in params_dict:
-                        continue
                     if replaced_name not in params_dict:
                         continue
                     param = params_dict[replaced_name]
-                    weight_loader = param.weight_loader
-                    moe_expert_num = self.moe_num_experts
-                    assert loaded_weight.shape[0] == moe_expert_num
-                    for expert_id in range(moe_expert_num):
-                        loaded_weight_expert = loaded_weight[expert_id]
-                        weight_loader(
-                            param,
-                            loaded_weight_expert,
-                            replaced_name,
-                            shard_id=shard_id,
-                            expert_id=expert_id,
-                        )
+                    dim = param.shape[param.output_dim]
+                    begin_idx = int(start_idx * dim)
+                    end_idx = int(end_idx * dim)
+                    param_slice = param.narrow(
+                        param.output_dim, begin_idx, end_idx - begin_idx
+                    )
+                    param_slice.copy_(loaded_weight)
                     loaded_params.add(replaced_name)
                     break
                 else:
-                    for (
-                        param_name,
-                        weight_name,
-                        start_idx,
-                        end_idx,
-                    ) in qkv_params_mapping:
-                        if weight_name not in local_name:
-                            continue
-                        replaced_name = local_name.replace(weight_name, param_name)
-                        if is_pp_missing_parameter(replaced_name, self):
-                            continue
-                        if replaced_name not in params_dict:
-                            continue
-                        param = params_dict[replaced_name]
-                        dim = param.shape[param.output_dim]
-                        begin_idx = int(start_idx * dim)
-                        end_idx = int(end_idx * dim)
-                        param_slice = param.narrow(
-                            param.output_dim, begin_idx, end_idx - begin_idx
-                        )
-                        param_slice.copy_(loaded_weight)
-                        loaded_params.add(replaced_name)
-                        break
-                    else:
-                        if is_pp_missing_parameter(local_name, self):
-                            continue
-                        if "expert_bias" in local_name:
-                            logger.warning_once("ignore expert_bias")
-                            continue
-                        if local_name not in params_dict:
-                            continue
-                        param = params_dict[local_name]
-                        weight_loader = getattr(
-                            param, "weight_loader", default_weight_loader
-                        )
-                        weight_loader(param, loaded_weight)
-                        loaded_params.add(local_name)
+                    if is_pp_missing_parameter(local_name, self):
+                        continue
+                    if "expert_bias" in local_name:
+                        logger.warning_once("ignore expert_bias")
+                        continue
+                    if local_name not in params_dict:
+                        continue
+                    param = params_dict[local_name]
+                    weight_loader = getattr(
+                        param, "weight_loader", default_weight_loader
+                    )
+                    weight_loader(param, loaded_weight)
+                    loaded_params.add(local_name)
+        
         return loaded_params
+
+    def _load_expert_weights_batch(
+        self, 
+        expert_weights: dict[str, torch.Tensor],
+        params_dict: dict,
+        loaded_params: set
+    ):
+        """批量加载专家权重"""
+        # 按参数名和层分组权重
+        layer_weights = {}
+        
+        for weight_name, weight_tensor in expert_weights.items():
+            # 提取层索引
+            parts = weight_name.split('.')
+            for i, part in enumerate(parts):
+                if part == "moe":
+                    layer_idx = int(parts[i-1]) if i > 0 and parts[i-1].isdigit() else -1
+                    break
+            else:
+                continue
+                
+            if layer_idx not in layer_weights:
+                layer_weights[layer_idx] = {}
+            layer_weights[layer_idx][weight_name] = weight_tensor
+        
+        # 对每一层进行批量加载
+        for layer_idx, layer_weight_dict in layer_weights.items():
+            # 按参数类型分组
+            gate_weights = []
+            up_weights = []
+            down_weights = []
+            
+            for weight_name, weight_tensor in layer_weight_dict.items():
+                if "gate_proj.weight" in weight_name:
+                    gate_weights.append((weight_name, weight_tensor))
+                elif "up_proj.weight" in weight_name:
+                    up_weights.append((weight_name, weight_tensor))
+                elif "down_proj.weight" in weight_name:
+                    down_weights.append((weight_name, weight_tensor))
+            
+            # 加载w13_weight (gate + up)
+            w13_param_name = f"layers.{layer_idx}.moe.experts.w13_weight"
+            if w13_param_name in params_dict and (gate_weights or up_weights):
+                # 合并gate和up权重
+                all_w13_weights = []
+                
+                # 按专家ID排序
+                gate_weights.sort(key=lambda x: self._extract_expert_id(x[0]))
+                up_weights.sort(key=lambda x: self._extract_expert_id(x[0]))
+                
+                # 确保两个列表长度一致
+                if len(gate_weights) == len(up_weights):
+                    for (gate_name, gate_weight), (up_name, up_weight) in zip(gate_weights, up_weights):
+                        # 在专家维度堆叠：gate + up
+                        combined = torch.cat([gate_weight, up_weight], dim=0)
+                        all_w13_weights.append(combined)
+                    
+                    if all_w13_weights:
+                        # 在所有专家维度堆叠
+                        final_w13_weight = torch.cat(all_w13_weights, dim=0)
+                        param = params_dict[w13_param_name]
+                        weight_loader = param.weight_loader
+                        weight_loader(param, final_w13_weight, shard_id='w13')
+                        loaded_params.add(w13_param_name)
+            
+            # 加载w2_weight (down)
+            w2_param_name = f"layers.{layer_idx}.moe.experts.w2_weight"
+            if w2_param_name in params_dict and down_weights:
+                # 按专家ID排序
+                down_weights.sort(key=lambda x: self._extract_expert_id(x[0]))
+                
+                # 在所有专家维度堆叠down权重
+                all_down_weights = [weight for _, weight in down_weights]
+                if all_down_weights:
+                    final_w2_weight = torch.cat(all_down_weights, dim=0)
+                    param = params_dict[w2_param_name]
+                    weight_loader = param.weight_loader
+                    weight_loader(param, final_w2_weight, shard_id='w2')
+                    loaded_params.add(w2_param_name)
+
+    def _extract_expert_id(self, weight_name: str) -> int:
+        """从权重名称中提取专家ID"""
+        # 例如：从 "layers.0.moe.experts.2.gate_proj.weight" 中提取 2
+        parts = weight_name.split('.')
+        for i, part in enumerate(parts):
+            if part == "experts" and i + 1 < len(parts) and parts[i+1].isdigit():
+                return int(parts[i+1])
+        return 0  # 默认值
 
 
 class Step3p5ForCausalLM(nn.Module, SupportsPP, MixtureOfExperts):
