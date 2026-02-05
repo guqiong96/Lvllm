@@ -53,4 +53,4 @@ model-hosting-container-standards >= 0.1.13, < 1.0.0
 mcp
 grpcio
 grpcio-reflection
-lk_moe==1.7.3
+lk_moe==1.7.4
