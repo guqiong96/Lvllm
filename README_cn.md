@@ -227,12 +227,8 @@ MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release  CMAKE_ARGS="-DCMAKE_BUILD_T
 
 如果已安装Lvllm，需要更新到最新版本，请执行以下命令：
 
-```bash
-# 正常情况
-git pull --force
-# 如果出现冲突
-git fetch origin
-git reset --hard origin/main
+```bash 
+git fetch && git reset --hard origin/main && git clean -fd # 此命令适合普通用户，如果保留本地修改内容的用户应知道提前做处理
 
 # 安装PyTorch 2.9.1 
 pip uninstall torchaudio triton torchvision torch
@@ -250,7 +246,7 @@ rm -rf ~/.cache/vllm
 
 简单更新Lvllm，当Lvllm的更新没有涉及上游vllm的更新时，只需要执行以下命令：
 ```bash
-git pull --force
+git fetch && git reset --hard origin/main && git clean -fd # 此命令适合普通用户，如果保留本地修改内容的用户应知道提前做处理
 pip uninstall lk_moe
 pip install lk_moe
 rm -rf ~/.cache/vllm
