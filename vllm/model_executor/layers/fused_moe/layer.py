@@ -1743,9 +1743,8 @@ class FusedMoE(CustomOp):
                 if not self.is_gpu_resident_layer and not self.should_use_gpu_prefill(hidden_states):
                     topk_weights, topk_ids = self.router.select_experts(
                         hidden_states=staged_hidden_states,
-                        router_logits=router_logits,
+                        router_logits=staged_router_logits,
                     )
-                   
                     local_topk_ids = self.global_to_local_expert_ids(topk_ids) if self.use_ep else topk_ids
                     final_hidden_states = self.forward_lk( 
                         staged_hidden_states,
@@ -2037,12 +2036,10 @@ class FusedMoE(CustomOp):
     def global_to_local_expert_ids(self, topk_ids): 
         expert_map = self._expert_map.to(topk_ids.device)
         max_idx = len(self._expert_map) - 1
-        
-        # 原地修改 - 会改变原始张量！
+         
         clamped = torch.clamp(topk_ids, 0, max_idx)
         result = expert_map[clamped]
-        
-        # 将无效位置设为 -1
+         
         mask = topk_ids < 0
         result[mask] = -1
         
@@ -3119,7 +3116,7 @@ class FusedMoE(CustomOp):
                             output_cpu.data_ptr(),                     # output 
                             bsz_tensor.data_ptr()                      # bsz_tensor
                         )     
-                        output_gpu = output_cpu.to(torch.cuda.current_device(), non_blocking=non_blocking).contiguous()
+                        output_gpu = output_cpu.to(torch.cuda.current_device(), non_blocking=non_blocking)
                         if self.check_nan_in_output:
                             torch.nan_to_num(output_gpu, nan=0.0, out=output_gpu)
                         complete_event = torch.cuda.Event()

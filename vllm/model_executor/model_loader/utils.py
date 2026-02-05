@@ -126,9 +126,9 @@ def process_weights_after_loading(
 
 @contextmanager
 def device_loading_context(module: torch.nn.Module, target_device: torch.device):
-    # if isinstance(module, FusedMoE) and module.is_gpu_resident_layer: 
-    #     yield module
-    #     return
+    if isinstance(module, FusedMoE) and module.is_gpu_resident_layer: 
+        yield module
+        return
     if target_device.type == "cpu":
         # If target is CPU, no need to move anything
         yield module
@@ -147,8 +147,8 @@ def device_loading_context(module: torch.nn.Module, target_device: torch.device)
         yield module
 
     finally:
-        # if isinstance(module, FusedMoE) and module.is_gpu_resident_layer:  
-        #     return
+        if isinstance(module, FusedMoE) and module.is_gpu_resident_layer:  
+            return
         # Restore parameters to their original devices, ignoring new parameters
         pin_memory = is_pin_memory_available()
         for name, p in module.named_parameters():
