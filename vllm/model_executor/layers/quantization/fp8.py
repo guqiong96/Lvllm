@@ -831,16 +831,17 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         w2_input_scale: torch.Tensor | None,
     ) -> None:
         # Shuffle weights to runtime format.
-        w13, w2, w13_scale, w2_scale = convert_to_fp8_moe_kernel_format(
-            fp8_backend=self.fp8_backend,
-            layer=layer,
-            w13=w13,
-            w2=w2,
-            w13_scale=w13_scale,
-            w2_scale=w2_scale,
-            w13_input_scale=w13_input_scale,
-            w2_input_scale=w2_input_scale,
-        )
+        if not (isinstance(layer, FusedMoE) and layer.is_cpu_layer): 
+            w13, w2, w13_scale, w2_scale = convert_to_fp8_moe_kernel_format(
+                fp8_backend=self.fp8_backend,
+                layer=layer,
+                w13=w13,
+                w2=w2,
+                w13_scale=w13_scale,
+                w2_scale=w2_scale,
+                w13_input_scale=w13_input_scale,
+                w2_input_scale=w2_input_scale,
+            )
 
         # Replace parameters with updated versions. Note that this helper
         # function ensures the replacement is compatible with RL weight reloads.
@@ -867,8 +868,6 @@ class Fp8MoEMethod(FusedMoEMethodBase):
 
     def process_weights_after_loading(self, layer: Module) -> None:
         if getattr(layer, "_already_called_process_weights_after_loading", False):
-            return
-        if isinstance(layer, FusedMoE) and layer.is_cpu_layer: 
             return
             
         # Allow for accessing weights and scales in standard way.
@@ -906,9 +905,10 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         # on disk there is a scale for w1 and w3. Use the max to requantize.
         if not self.block_quant:
             shard_size = layer.intermediate_size_per_partition
-            w13, w13_scale = process_fp8_weight_tensor_strategy_moe(
-                w13, w13_scale, shard_size, layer.local_num_experts
-            )
+            if not (isinstance(layer, FusedMoE) and layer.is_cpu_layer): 
+                w13, w13_scale = process_fp8_weight_tensor_strategy_moe(
+                    w13, w13_scale, shard_size, layer.local_num_experts
+                )
 
         # Shuffle weights to runtime format and setup kernel.
         self._setup_kernel(
@@ -937,8 +937,8 @@ class Fp8MoEMethod(FusedMoEMethodBase):
     def get_fused_moe_quant_config(
         self, layer: torch.nn.Module
     ) -> FusedMoEQuantConfig | None:
-        if isinstance(layer, FusedMoE) and  layer.is_cpu_layer:
-            return None
+        # if isinstance(layer, FusedMoE) and layer.is_cpu_layer:
+        #     return None
         # TRTLLM does not use Modular Kernel.
         if self.fp8_backend == Fp8MoeBackend.FLASHINFER_TRTLLM:
             return None

@@ -23,6 +23,7 @@ Lvllm使用最新的vLLM源码，重新设计实现了MOE模型混合推理模�
 - [配置文件](#配置文件)
 - [安装步骤](#安装步骤) 
 - [更新](#更新)
+- [优化](#优化)
 
 ## 版本变更
  
@@ -119,6 +120,7 @@ LVLLM_MOE_NUMA_ENABLED=1 LK_THREAD_BINDING=CPU_CORE LK_THREADS=88 OMP_NUM_THREAD
 | `LVLLM_GPU_RESIDENT_MOE_LAYERS` | GPU预填充参数 | 无 | 常驻GPU的MOE专家层`0`: 第0层，`0-1`: 第0层到第1层，`0,9`: 第0层和第9层 | 留足KV Cache显存后，分配多层可增加性能，并减少对应的内存占用，包含0层才有加速效果 |
 | `LVLLM_GPU_PREFETCH_WINDOW` | GPU预填充参数 | 无 | 预取窗口大小`1`: 预取1层MOE专家 |  一般预取1到2层即可 |
 | `LVLLM_GPU_PREFILL_MIN_BATCH_SIZE` | GPU预填充参数 | 无 | 使用GPU预填充的最小输入长度`4096`：输入长度达到该值后，启动GPU预填充 | 设置值不宜过小，设置为0则关闭GPU预填充功能 |
+| `LK_POWER_SAVING` | cpu节能 | 0 | `1`：启用cpu节能模式，`0`：禁用cpu节能模式 | 建议值：`0` |
 
 
 ## 配置文件
@@ -136,7 +138,7 @@ gpu-memory-utilization: 0.92                          # 分配给lvllm的GPU显�
 trust-remote-code: true                               # 是否信任远程代码， 建议值
 tokenizer-mode: "auto"                                # 分词器模式， 建议值
 swap-space: 0                                         # 交换空间大小， 单位GB， 建议值
-served-model-name: "Models/MiniMax-M2.1"           # 服务模型名称
+served-model-name: "Models/MiniMax-M2.1"              # 服务模型名称
 compilation_config.cudagraph_mode: "FULL_DECODE_ONLY" # 启用CUDA图模式， 建议值
 enable_prefix_caching: true                           # 启用前缀缓存， 建议值
 enable-chunked-prefill: true                          # 启用分块预填充， 建议值  
@@ -144,7 +146,7 @@ max_num_batched_tokens: 18000                         # 最大批量填充令牌
 dtype: "bfloat16"                                     # 模型中间计算数据类型， 建议值bfloat16或float16
 max_num_seqs: 4                                       # 最大并发请求序列， 建议值1到4
 compilation_config.mode: "VLLM_COMPILE"               # 优化模型， 建议值
-# enable-auto-tool-choice: true                       # 预先工具调用
+# enable-auto-tool-choice: true                       # 允许工具调用
 # kv_cache_dtype: "fp8"                               # KV Cache数据类型， 40系、50系GPU可开启 
 # speculative-config: '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'  # 推测解码， 建议值关闭
 # tool-call-parser: "minimax_m2"                      # MiniMax M2.1 模型配置参数
@@ -153,11 +155,12 @@ compilation_config.mode: "VLLM_COMPILE"               # 优化模型， 建议�
 # reasoning-parser: glm45                             # GLM4.7 模型配置参数
 # tool-call-parser: "kimi_k2"                         # Kimi k2.5 模型配置参数
 # reasoning-parser: "kimi_k2"                         # Kimi k2.5 模型配置参数
-# reasoning-parser: "step3p5"                         # Kimi k2.5 模型配置参数                                              
-# tool-call-parser: "step3p5"                         # Kimi k2.5 模型配置参数                                              
-# hf-overrides.num_nextn_predict_layers: 1            # Kimi k2.5 模型配置参数
-# speculative_config.method: "step3p5_mtp"            # Kimi k2.5 模型配置参数
-# speculative_config.num_speculative_tokens: 1        # Kimi k2.5 模型配置参数
+# mm-encoder-tp-mode: "data"                         #  encoder TP mode
+# reasoning-parser: "step3p5"                         # Step-3.5-Flash 模型配置参数                                              
+# tool-call-parser: "step3p5"                         # Step-3.5-Flash 模型配置参数                                              
+# hf-overrides.num_nextn_predict_layers: 1            # Step-3.5-Flash 模型配置参数, 建议不使用
+# speculative_config.method: "step3p5_mtp"            # Step-3.5-Flash 模型配置参数, 建议不使用
+# speculative_config.num_speculative_tokens: 1        # Step-3.5-Flash 模型配置参数, 建议不使用
 # disable-cascade-attn: true                          # Step-3.5-Flash 模型配置参数
 # tool-call-parser: "qwen3_coder"                     # Qwen3-Coder-Next 模型配置参数
 
@@ -251,3 +254,76 @@ pip uninstall lk_moe
 pip install lk_moe
 rm -rf ~/.cache/vllm
 ```
+
+## 优化
+
+### MoE常驻显存, 线性增加decode和prefill速度
+```bash
+LVLLM_GPU_RESIDENT_MOE_LAYERS=0-5 # 0-5层MoE层常驻显存
+#LVLLM_GPU_RESIDENT_MOE_LAYERS=0,1,8-9 # 0,1,8-9层MoE层常驻显存
+#LVLLM_GPU_RESIDENT_MOE_LAYERS="" # 关闭MoE常驻显存
+``` 
+
+### 开启GPU预填充
+```bash
+LVLLM_GPU_RESIDENT_MOE_LAYERS=0-2 # 0-2层MoE常驻显存, 开启GPU预填充包含0层方可发挥最佳性能
+#LVLLM_GPU_RESIDENT_MOE_LAYERS=3-4 # 少数模型起始层号不为0，例如Step-3.5-Flash模型起始为3 
+LVLLM_GPU_PREFETCH_WINDOW=1 # 预取1层, 建议值为1-2, 多了无意义
+LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 #  输入长度达到4096启动GPU prefill，根据cpu prefill性能可减小或加大， 提前或推后启动prefill
+max_num_batched_tokens: 65536 # 与上下文大小相同获得最佳性能，可根据显存情况适当调小，超过上下文大小无意义
+``` 
+
+### 关闭GPU预填充
+```bash
+LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=0 #  关闭GPU预填充
+#LVLLM_GPU_PREFILL_MIN_BATCH_SIZE="" # 关闭GPU预填充 
+max_num_batched_tokens: 1024 # 1024至8192，太大无意义（占用显存及启动时间过长）
+``` 
+
+### 线程绑定到CPU核心
+```bash
+LK_THREAD_BINDING=CPU_CORE # 绑定到CPU核心（包括超线程逻辑核心）, 最佳性能
+#LK_THREAD_BINDING=NUMA_NODE # 绑定到NUMA节点, 次优选择，解决部署在虚拟化平台的极端性能问题
+``` 
+### BIOS NUMA 设置
+```bash
+AMD EPYC：设置NPS4获得最佳性能
+Intel XEON：设置SNC4获得最佳性能
+通常：2,4,8个节点，最多支持32节点，节点越多越好，节点数为GPU倍数获得最佳性能 # 部分虚拟化平台或Intel平台不要设置5、10节点，设置2节点避免性能问题
+```
+
+### 线程数设置
+```bash
+线程数 <= （核心数 - x）/ 张量并行数（TP size）  # x 留给其它任务的线程，至少4线程
+LK_THREADS=44                    # 96核心，2个GPU， 每个GPU 44线程， 88线程, 剩余8线程留给其它任务
+线程数太大可能会引发性能问题        # 虽然系统会自动条件线程数，但建议手动设置进行测试
+```
+### decode性能
+```bash
+compilation_config.mode: "VLLM_COMPILE"                 # 支持2080ti及以上GPU
+compilation_config.cudagraph_mode: "FULL_DECODE_ONLY"   # 开启CUDAGraph
+```
+
+### 显存设置
+```bash
+gpu-memory-utilization: 0.80 # 24G显存开启GPU预填充时，留出足够临时显存用于计算，否则会导致长上下文预填充性能大幅下降，启动时间过长
+# gpu-memory-utilization: 0.92 # 24G显存关闭GPU预填充时，无需留出过多显存 
+# max_num_seqs: 1 # 最多1并发，最大节省显存
+max_num_seqs: 4 # 最多4并发，常规节省显存
+max_num_batched_tokens: 1024  # 关闭GPU预填充时,节省显存，性能不变，但如果开启GPU预填充会导致性能下降
+max_num_batched_tokens: 65536 或更大 # 开启GPU预填充时，获得最佳性能，但如果关闭GPU预填充会导致性能下降 
+```
+### CPU节能
+```bash
+LK_POWER_SAVING=1 # 开启后推理时降低CPU温度，性能轻微降低
+```
+
+### FP8模型权重运行时格式
+```bash
+LVLLM_MOE_USE_WEIGHT=INT4 # 模型MoE专家权重使用INT4推理，其余部分依旧为FP8，开启几乎不影响精度， 速度排序：INT4 > TO_DTYPE > KEEP
+```
+
+
+
+
+

@@ -2231,7 +2231,7 @@ class FusedMoE(CustomOp):
                             if hasattr(self, scale_name):
                                 delattr(self, scale_name)
                         for quant_config_name in quant_config_names:
-                            if hasattr(self.moe_quant_config, quant_config_name):
+                            if hasattr(self, "moe_quant_config") and hasattr(self.moe_quant_config, quant_config_name):
                                 delattr(self.moe_quant_config, quant_config_name)
                     else: 
                         for param_name in param_names: 

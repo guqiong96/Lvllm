@@ -23,6 +23,7 @@ Lvllm uses the latest vLLM source code and has redesigned and implemented MOE mo
 - [Configuration File](#configuration-file)
 - [Installation Steps](#installation-steps)
 - [Update](#update)
+- [Optimization Tips](#optimization-tips)
 
 ## Version Changes
 
@@ -150,11 +151,12 @@ compilation_config.mode: "VLLM_COMPILE"               # Optimize model, recommen
 # reasoning-parser: glm45                             # GLM4.7 model configuration parameter
 # tool-call-parser: "kimi_k2"                        # Kimi k2.5 model configuration parameter
 # reasoning-parser: "kimi_k2"                        # Kimi k2.5 model configuration parameter
-# reasoning-parser: "step3p5"                         # Kimi k2.5 model configuration parameter                                         
-# tool-call-parser: "step3p5"                         # Kimi k2.5 model configuration parameter                                         
-# hf-overrides.num_nextn_predict_layers: 1            # Kimi k2.5 model configuration parameter
-# speculative_config.method: "step3p5_mtp"            # Kimi k2.5 model configuration parameter
-# speculative_config.num_speculative_tokens: 1        # Kimi k2.5 model configuration parameter
+# mm-encoder-tp-mode: "data"                         #  Kimi k2.5 encoder TP 8 mode
+# reasoning-parser: "step3p5"                         # Step-3.5-Flash model configuration parameter                                         
+# tool-call-parser: "step3p5"                         # Step-3.5-Flash model configuration parameter                                         
+# hf-overrides.num_nextn_predict_layers: 1            # Step-3.5-Flash model configuration parameter
+# speculative_config.method: "step3p5_mtp"            # Step-3.5-Flash model configuration parameter
+# speculative_config.num_speculative_tokens: 1        # Step-3.5-Flash model configuration parameter
 # disable-cascade-attn: true                          # Step-3.5-Flash model configuration parameter
 # tool-call-parser: "qwen3_coder"                     # Qwen3-Coder-Next model configuration parameter
 ```
@@ -244,4 +246,73 @@ git fetch && git reset --hard origin/main && git clean -fd # This command is sui
 pip uninstall lk_moe
 pip install lk_moe
 rm -rf ~/.cache/vllm
+```
+ 
+ 
+## Optimization Tips
+ 
+### MoE Resident in VRAM, Linear Increase in Decode and Prefill Speed
+```bash
+LVLLM_GPU_RESIDENT_MOE_LAYERS=0-5 # 0-5 MoE layers resident in VRAM
+#LVLLM_GPU_RESIDENT_MOE_LAYERS=0,1,8-9 # 0,1,8-9 MoE layers resident in VRAM
+#LVLLM_GPU_RESIDENT_MOE_LAYERS="" # Disable MoE resident in VRAM
+``` 
+ 
+### Enable GPU Prefill
+```bash
+LVLLM_GPU_RESIDENT_MOE_LAYERS=0-2 # 0-2 MoE layers resident in VRAM, to achieve optimal performance with GPU prefill enabled, include layer 0
+#LVLLM_GPU_RESIDENT_MOE_LAYERS=3-4 # Some models have non-zero starting layer numbers, such as Step-3.5-Flash model starting at 3
+LVLLM_GPU_PREFETCH_WINDOW=1 # Prefetch 1 layer, recommended value is 1-2, more is meaningless
+LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 # Start GPU prefill when input length reaches 4096, can be decreased or increased based on CPU prefill performance, starting prefill earlier or later
+max_num_batched_tokens: 65536 # Same as context size for optimal performance, can be appropriately reduced based on VRAM availability, exceeding context size is meaningless
+``` 
+ 
+### Disable GPU Prefill
+```bash
+LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=0 # Disable GPU prefill
+#LVLLM_GPU_PREFILL_MIN_BATCH_SIZE="" # Disable GPU prefill 
+max_num_batched_tokens: 1024 # 1024 to 8192, too large is meaningless (occupies too much VRAM and long startup time)
+``` 
+ 
+### Thread Binding to CPU Cores
+```bash
+LK_THREAD_BINDING=CPU_CORE # Bind to CPU cores (including hyper-threading logical cores), optimal performance
+#LK_THREAD_BINDING=NUMA_NODE # Bind to NUMA nodes, second choice to solve extreme performance issues on virtualization platforms
+``` 
+### BIOS NUMA Settings
+```bash
+AMD EPYC: Set NPS4 for optimal performance
+Intel XEON: Set SNC4 for optimal performance
+General: 2,4,8 nodes, maximum support for 32 nodes, more nodes are better, node count being a multiple of GPUs for optimal performance # Some virtualization platforms or Intel platforms should not set 5 or 10 nodes, set to 2 nodes to avoid performance issues
+```
+ 
+### Thread Count Settings
+```bash
+# Thread count <= (core count - x) / tensor parallelism size (TP size)  # x threads reserved for other tasks, at least 4 threads
+LK_THREADS=44                    # 96 cores, 2 GPUs, 44 threads per GPU, 88 threads total, 8 threads reserved for other tasks
+# Too many threads may cause performance issues        # Although the system automatically adjusts the number of threads, manual setting is recommended for testing
+```
+### Decode Performance
+```bash
+compilation_config.mode: "VLLM_COMPILE"                 # Supports 2080ti and above GPUs
+compilation_config.cudagraph_mode: "FULL_DECODE_ONLY"   # Enable CUDAGraph
+```
+ 
+### VRAM Settings
+```bash
+gpu-memory-utilization: 0.80 # 24G VRAM with GPU prefill enabled, leave sufficient temporary VRAM for calculations, otherwise long context prefill performance will drop significantly, startup time will be too long
+# gpu-memory-utilization: 0.92 # 24G VRAM with GPU prefill disabled, no need to leave too much VRAM
+# max_num_seqs: 1 # Maximum 1 concurrent, maximum VRAM savings
+max_num_seqs: 4 # Maximum 4 concurrent, regular VRAM savings
+max_num_batched_tokens: 1024  # Save VRAM when GPU prefill is disabled, performance remains unchanged, but if enable GPU prefill will cause performance drop
+max_num_batched_tokens: 65536 # or larger and less than context size, enable GPU prefill, obtain best performance, but if disable GPU prefill will cause performance drop
+```
+### CPU Power Saving
+```bash
+LK_POWER_SAVING=1 # enable low power mode while inference, reduce CPU temperature, slightly reduce performance 
+```
+
+### FP8 Model Weight Runtime Format
+```bash
+LVLLM_MOE_USE_WEIGHT=INT4 # Model MoE expert weights use INT4 inference, other parts remain FP8, enabling almost no impact on accuracy, speed order: INT4 > TO_DTYPE > KEEP
 ```
