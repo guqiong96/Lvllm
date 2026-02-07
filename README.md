@@ -238,16 +238,7 @@ pip install -r requirements/build.txt
 MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
 
 rm -rf ~/.cache/vllm
-```
-
-Simple update of Lvllm, when Lvllm's update does not involve upstream vllm updates, only need to execute the following commands:
-```bash
-git fetch && git reset --hard origin/main && git clean -fd # This command is suitable for regular users; those who want to keep their local modifications should know to handle them in advance
-pip uninstall lk_moe
-pip install lk_moe
-rm -rf ~/.cache/vllm
-```
- 
+```  
  
 ## Optimization Tips
  

@@ -246,15 +246,7 @@ MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TY
 
 rm -rf ~/.cache/vllm
 ```
-
-简单更新Lvllm，当Lvllm的更新没有涉及上游vllm的更新时，只需要执行以下命令：
-```bash
-git fetch && git reset --hard origin/main && git clean -fd # 此命令适合普通用户，如果保留本地修改内容的用户应知道提前做处理
-pip uninstall lk_moe
-pip install lk_moe
-rm -rf ~/.cache/vllm
-```
-
+ 
 ## 优化
 
 ### MoE常驻显存, 线性增加decode和prefill速度
