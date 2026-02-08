@@ -2989,7 +2989,7 @@ class FusedMoE(CustomOp):
                 batch_size = self.vllm_config.scheduler_config.max_num_seqs * (1 + self.vllm_config.speculative_config.num_speculative_tokens)
             else:
                 batch_size = self.vllm_config.scheduler_config.max_num_seqs
-            FusedMoE.cuda_graphs = [1, 2, 3, 4] + list(range(8, batch_size+1, 8)) 
+            FusedMoE.cuda_graphs = [1, 2, 4] + list(range(8, batch_size+1, 8)) 
              
             FusedMoE.input_tensor_cpu = {}  # device_id -> buffers
             FusedMoE.expert_ids_cpu = {}    # device_id -> buffers
