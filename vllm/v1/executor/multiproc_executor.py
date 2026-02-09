@@ -609,6 +609,14 @@ class WorkerProc:
             "shared_worker_lock": shared_worker_lock,
             "is_driver_worker": is_driver_worker,
         }
+        from vllm.envs import is_numa_interleave_enabled
+        if is_numa_interleave_enabled(): 
+            numactl_args = "--interleave=all"
+            old_executable = os.fsdecode(multiprocessing.spawn.get_executable())
+            executable = _create_numactl_executable(numactl_args)
+             
+            old_executable_saved = multiprocessing.spawn.get_executable()
+            multiprocessing.spawn.set_executable(executable)
         # Run EngineCore busy loop in background process.
         proc = context.Process(
             target=WorkerProc.worker_main,
@@ -618,6 +626,8 @@ class WorkerProc:
         )
 
         proc.start()
+        if is_numa_interleave_enabled():
+            multiprocessing.spawn.set_executable(old_executable_saved)
         writer.close()
         # Keep death_writer open in parent - when parent exits,
         # death_reader in child will get EOFError
@@ -916,3 +926,36 @@ def set_multiprocessing_worker_envs():
         )
         os.environ["OMP_NUM_THREADS"] = str(default_omp_num_threads)
         torch.set_num_threads(default_omp_num_threads)
+
+import os
+import random
+import time
+from pathlib import Path
+def _create_numactl_executable(numactl_args: str): 
+    old_executable = os.fsdecode(multiprocessing.spawn.get_executable())
+    script = f'''#!/bin/sh
+exec numactl {numactl_args} {old_executable} "$@"'''
+    path = Path(
+        f"/tmp/vllm_temp_file_{time.time()}_{random.randrange(0, 10000000)}.sh"
+    )
+    path.write_text(script)
+    path.chmod(0o777)
+    return str(path)
+
+from contextlib import contextmanager
+@contextmanager
+def _mp_set_executable(executable: str): 
+    old_executable = os.fsdecode(multiprocessing.spawn.get_executable())
+    multiprocessing.spawn.set_executable(executable)
+    try:
+        yield
+    finally:
+        multiprocessing.spawn.set_executable(old_executable)
+
+
+def set_multiprocessing_interleave(): 
+    numactl_args = "--interleave=all"
+    executable = _create_numactl_executable(numactl_args=numactl_args)
+    logger.info(f"Setting multiprocessing executable to {executable} "
+                f"with numactl args: {numactl_args}")
+    return executable
