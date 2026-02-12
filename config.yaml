@@ -1,38 +1,39 @@
-model: "/home/guqiong/Models/MiniMax-M2.1"
+model: "/home/guqiong/Models/GLM-5-FP8"
 host: "0.0.0.0"
 port: 8070
 tensor-parallel-size: 2
 #pipeline-parallel-size: 2 
-max-model-len: 55000 
-gpu-memory-utilization: 0.92
+max-model-len: 25000 
+gpu-memory-utilization: 0.80 
 trust-remote-code: true
 tokenizer-mode: "auto"
 swap-space: 0
-served-model-name: "MiniMax-M2.1"
+served-model-name: "GLM-5-FP8"
 compilation_config.cudagraph_mode: "FULL_DECODE_ONLY"
 enable_prefix_caching: true
 enable-chunked-prefill: true
-max_num_batched_tokens: 55000
+max_num_batched_tokens: 25000
 dtype: "bfloat16"
 max_num_seqs: 2
 compilation_config.mode: "VLLM_COMPILE"
 enable-auto-tool-choice: true
 # kv_cache_dtype: "fp8"  
 # speculative-config: '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
-tool-call-parser: "minimax_m2"
-reasoning-parser: "minimax_m2_append_think"
+# tool-call-parser: "minimax_m2"
+# reasoning-parser: "minimax_m2_append_think"
 # speculative-config.method: mtp
 # speculative-config.num_speculative_tokens: 1
-# tool-call-parser: glm47
-# reasoning-parser: glm45
+tool-call-parser: glm47
+reasoning-parser: glm45
 # tool-call-parser: "kimi_k2"
 # reasoning-parser: "kimi_k2" 
+# mm-encoder-tp-mode: "data"
 # disable-cascade-attn: true
 # reasoning-parser: "step3p5" 
 # tool-call-parser: "step3p5"  
 # hf-overrides.num_nextn_predict_layers: 1
 # speculative_config.method: "step3p5_mtp"
-# speculative_config.num_speculative_tokens: 3 
-# tool-call-parser: "qwen3_coder"
+# speculative_config.num_speculative_tokens: 1
+# tool-call-parser: "qwen3_coder"v
 
 

@@ -204,8 +204,8 @@ sudo dnf install numactl-devel        # Rocky Linux
 git clone https://github.com/guqiong96/Lvllm.git
 cd Lvllm
 
-# 安装PyTorch 2.9.1（可选）
-pip install torch==2.9.1 xformers
+# 安装PyTorch 2.10.0
+pip install torch==2.10.0
 
 # 使用现有PyTorch
 python use_existing_torch.py
@@ -234,9 +234,9 @@ MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release  CMAKE_ARGS="-DCMAKE_BUILD_T
 ```bash 
 git fetch && git reset --hard origin/main && git clean -fd # 此命令适合普通用户，如果保留本地修改内容的用户应知道提前做处理
 
-# 安装PyTorch 2.9.1 
-pip uninstall torchaudio triton torchvision torch
-pip install torchaudio triton torchvision torch==2.9.1
+# 安装PyTorch 2.10.0 
+pip uninstall torchaudio triton torchvision torch vllm
+pip install torch==2.10.0
 
 # Qwen3-VL GLM4.6V 需要安装 xformers
   
