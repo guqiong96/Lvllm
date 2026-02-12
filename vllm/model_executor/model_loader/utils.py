@@ -23,12 +23,14 @@ from vllm.model_executor.model_loader.reload import (
     set_torchao_reload_attrs,
 )
 from vllm.model_executor.models.interfaces import SupportsQuant
+from vllm.tracing import instrument
 from vllm.utils.platform_utils import is_pin_memory_available
 from vllm.model_executor.layers.fused_moe.layer import FusedMoE
 
 logger = init_logger(__name__)
 
 
+@instrument(span_name="Initialize model")
 def initialize_model(
     vllm_config: VllmConfig,
     *,

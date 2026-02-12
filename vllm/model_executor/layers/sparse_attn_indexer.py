@@ -20,7 +20,7 @@ from vllm.v1.worker.workspace import current_workspace_manager
 if current_platform.is_cuda_alike():
     from vllm import _custom_ops as ops
 elif current_platform.is_xpu():
-    from vllm._ipex_ops import ipex_ops as ops
+    from vllm._xpu_ops import xpu_ops as ops
 
 logger = init_logger(__name__)
 
@@ -108,6 +108,7 @@ def sparse_attn_indexer(
                 weights[chunk.token_start : chunk.token_end],
                 chunk.cu_seqlen_ks,
                 chunk.cu_seqlen_ke,
+                clean_logits=False,
             )
             num_rows = logits.shape[0]
 
@@ -157,6 +158,7 @@ def sparse_attn_indexer(
             decode_metadata.block_table,
             decode_metadata.schedule_metadata,
             max_model_len=max_model_len,
+            clean_logits=False,
         )
 
         num_rows = logits.shape[0]

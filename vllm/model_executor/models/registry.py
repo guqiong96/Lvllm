@@ -114,6 +114,7 @@ _TEXT_GENERATION_MODELS = {
     "Glm4ForCausalLM": ("glm4", "Glm4ForCausalLM"),
     "Glm4MoeForCausalLM": ("glm4_moe", "Glm4MoeForCausalLM"),
     "Glm4MoeLiteForCausalLM": ("glm4_moe_lite", "Glm4MoeLiteForCausalLM"),
+    "GlmMoeDsaForCausalLM": ("deepseek_v2", "GlmMoeDsaForCausalLM"),
     "GptOssForCausalLM": ("gpt_oss", "GptOssForCausalLM"),
     "GPT2LMHeadModel": ("gpt2", "GPT2LMHeadModel"),
     "GPTBigCodeForCausalLM": ("gpt_bigcode", "GPTBigCodeForCausalLM"),
@@ -237,6 +238,10 @@ _EMBEDDING_MODELS = {
     "RobertaModel": ("roberta", "RobertaEmbeddingModel"),
     "TeleChatForCausalLM": ("telechat2", "TeleChat2ForCausalLM"),
     "TeleChat2ForCausalLM": ("telechat2", "TeleChat2ForCausalLM"),
+    "VoyageQwen3BidirectionalEmbedModel": (
+        "voyage",
+        "VoyageQwen3BidirectionalEmbedModel",
+    ),
     "XLMRobertaModel": ("roberta", "RobertaEmbeddingModel"),
     "BgeM3EmbeddingModel": ("roberta", "BgeM3EmbeddingModel"),
     # [Multimodal]
