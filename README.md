@@ -57,6 +57,7 @@ Most of the original MOE models verified by vLLM
 | Qwen3-Next-80B-A3B-Instruct | ✅ Tested |
 | Qwen3-Coder-30B-A3B-Instruct | ✅ Tested |
 | Qwen3-VL-30B-A3B-Instruct | ✅ Tested |
+| MiniMax-M2.5 | ✅ Tested |
 | MiniMax-M2.1 | ✅ Tested |
 | GLM-4.7 | ✅ Tested |
 | GLM-4.7-Flash | ✅ Tested |
