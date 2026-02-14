@@ -848,7 +848,7 @@ class VllmConfig:
                 self.compilation_config.max_cudagraph_capture_size = 0
                 self.compilation_config.cudagraph_capture_sizes = []
             else:
-                self.compilation_config.cudagraph_num_of_warmups = 1
+                self.compilation_config.cudagraph_num_of_warmups = 2
 
             self._set_cudagraph_sizes()
         else:

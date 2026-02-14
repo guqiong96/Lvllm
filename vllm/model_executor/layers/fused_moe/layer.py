@@ -2607,15 +2607,15 @@ class FusedMoE(CustomOp):
          
         assert w2_weight.shape == (num_experts, hidden_size, intermediate_size)
         
-        dequant_device = w13_weight.device
+        dequant_device = torch.cuda.current_device()
         w13_fp32_list = []
         w2_fp32_list = [] 
          
         for expert_idx in range(num_experts): 
-            expert_w13_weight = w13_weight[expert_idx]
-            expert_w13_scale_inv = w13_weight_scale_inv[expert_idx]
-            expert_w2_weight = w2_weight[expert_idx]
-            expert_w2_scale_inv = w2_weight_scale_inv[expert_idx]
+            expert_w13_weight = w13_weight[expert_idx].to(device=dequant_device)
+            expert_w13_scale_inv = w13_weight_scale_inv[expert_idx].to(device=dequant_device)
+            expert_w2_weight = w2_weight[expert_idx].to(device=dequant_device)
+            expert_w2_scale_inv = w2_weight_scale_inv[expert_idx].to(device=dequant_device)
              
             w13_float = expert_w13_weight.to(dtype=torch.float32)
             w2_float = expert_w2_weight.to(dtype=torch.float32)
@@ -2707,15 +2707,15 @@ class FusedMoE(CustomOp):
         
         assert w2_weight_scale_inv.shape == (scale_num_experts, scale_hidden_size, scale_intermediate_size), f"Down weight scale shape {w2_weight_scale_inv.shape} must be (scale_num_experts, scale_hidden_size, scale_intermediate_size)"
         
-        dequant_device = w2_weight.device
+        dequant_device = torch.cuda.current_device()
         w13_buf = torch.zeros(intermediate_size, hidden_size, dtype=torch.float32, device=dequant_device, requires_grad=False) 
         w2_buf = torch.zeros(hidden_size, intermediate_size, dtype=torch.float32, device=dequant_device, requires_grad=False)
         
         for expert_idx in range(num_experts): 
-            expert_w13_weight = w13_weight[expert_idx].to(dequant_device)  # torch.Size([1024, 2048])
-            expert_w13_scale_inv = w13_weight_scale_inv[expert_idx].to(dequant_device)  # torch.Size([8, 16]) 
-            expert_w2_weight = w2_weight[expert_idx].to(dequant_device)   # torch.Size([2048, 512])
-            expert_w2_scale_inv = w2_weight_scale_inv[expert_idx].to(dequant_device) #  torch.Size([16, 4])  
+            expert_w13_weight = w13_weight[expert_idx].to(dequant_device).to(device=dequant_device)  # torch.Size([1024, 2048])
+            expert_w13_scale_inv = w13_weight_scale_inv[expert_idx].to(device=dequant_device)  # torch.Size([8, 16]) 
+            expert_w2_weight = w2_weight[expert_idx].to(device=dequant_device)   # torch.Size([2048, 512])
+            expert_w2_scale_inv = w2_weight_scale_inv[expert_idx].to(device=dequant_device) #  torch.Size([16, 4])  
                 
                 
             w13_float = expert_w13_weight.to(dtype=torch.float32)
@@ -2793,15 +2793,15 @@ class FusedMoE(CustomOp):
         assert w13_weight_scale.shape == (num_experts, total_intermediate_size, 1)
         assert w2_weight_scale.shape == (num_experts, hidden_size, 1)
         
-        dequant_device = w13_weight.device
+        dequant_device = torch.cuda.current_device()
         w13_fp32_list = []
         w2_fp32_list = [] 
         
         for expert_idx in range(num_experts): 
-            expert_w13_weight = w13_weight[expert_idx].to(dequant_device)  # [intermediate_size, hidden_size]
-            expert_w13_scale = w13_weight_scale[expert_idx].to(dequant_device)  # [total_intermediate_size, 1]
-            expert_w2_weight = w2_weight[expert_idx].to(dequant_device)  # [hidden_size, intermediate_size]
-            expert_w2_scale = w2_weight_scale[expert_idx].to(dequant_device)  # [hidden_size, 1]
+            expert_w13_weight = w13_weight[expert_idx].to(device=dequant_device)  # [intermediate_size, hidden_size]
+            expert_w13_scale = w13_weight_scale[expert_idx].to(device=dequant_device)  # [total_intermediate_size, 1]
+            expert_w2_weight = w2_weight[expert_idx].to(device=dequant_device)  # [hidden_size, intermediate_size]
+            expert_w2_scale = w2_weight_scale[expert_idx].to(device=dequant_device)  # [hidden_size, 1]
              
             w13_float = expert_w13_weight.to(dtype=torch.float32)
             w2_float = expert_w2_weight.to(dtype=torch.float32)
@@ -2888,16 +2888,16 @@ class FusedMoE(CustomOp):
         assert w2_weight_scale.shape == (scale_num_experts, hidden_size, 1), f"Down weight scale shape {w2_weight_scale.shape} must be (scale_num_experts, scale_hidden_size, 1)"
         
         
-        dequant_device = 'cpu'
+        dequant_device = torch.cuda.current_device()
         
         w13_buf = torch.zeros(intermediate_size, hidden_size, dtype=torch.float32, device=dequant_device, requires_grad=False) 
         w2_buf = torch.zeros(hidden_size, intermediate_size, dtype=torch.float32, device=dequant_device, requires_grad=False)
         
         for expert_idx in range(num_experts): 
-            expert_w13_weight = w13_weight[expert_idx].to(dequant_device)  # shape: [1408, 4096]
-            expert_w13_scale = w13_weight_scale[expert_idx].to(dequant_device)    # shape: [1408, 1]
-            expert_w2_weight = w2_weight[expert_idx].to(dequant_device)    # shape: [4096, 1408]
-            expert_w2_scale = w2_weight_scale[expert_idx].to(dequant_device)  # shape: [4096, 1]
+            expert_w13_weight = w13_weight[expert_idx].to(device=dequant_device)  # shape: [1408, 4096]
+            expert_w13_scale = w13_weight_scale[expert_idx].to(device=dequant_device)    # shape: [1408, 1]
+            expert_w2_weight = w2_weight[expert_idx].to(device=dequant_device)    # shape: [4096, 1408]
+            expert_w2_scale = w2_weight_scale[expert_idx].to(device=dequant_device)  # shape: [4096, 1]
             
             w13_float = expert_w13_weight.to(dtype=torch.float32)
             w2_float = expert_w2_weight.to(dtype=torch.float32) 
