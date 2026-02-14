@@ -199,8 +199,8 @@ sudo dnf install numactl-devel        # Rocky Linux
 git clone https://github.com/guqiong96/Lvllm.git
 cd Lvllm
 
-# Install PyTorch 2.10.0
-pip install torch==2.10.0
+# Install PyTorch 2.9.1
+pip install torch==2.9.1
 
 # Use existing PyTorch
 python use_existing_torch.py
@@ -228,9 +228,9 @@ If Lvllm is already installed and you need to update to the latest version, exec
 ```bash 
 git fetch && git reset --hard origin/main && git clean -fd # This command is suitable for regular users; those who want to keep their local modifications should know to handle them in advance
 
-# Install PyTorch 2.10.0
+# Install PyTorch 2.9.1
 pip uninstall torchaudio triton torchvision torch vllm
-pip install torch==2.10.0
+pip install torch==2.9.1
 
 # Qwen3-VL GLM4.6V requires xformers to be installed
 
