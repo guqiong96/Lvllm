@@ -97,11 +97,14 @@ vLLM已验证的大部分原版MOE模型
 ## 运行命令
  
 ```bash 
-LVLLM_MOE_NUMA_ENABLED=1 LK_THREAD_BINDING=CPU_CORE LK_THREADS=88 OMP_NUM_THREADS=88 vllm serve --config config.yaml # 未启用GPU预填充
+# 未启用GPU预填充
+LVLLM_MOE_NUMA_ENABLED=1 LK_THREAD_BINDING=CPU_CORE LK_THREADS=88 OMP_NUM_THREADS=88 LVLLM_MOE_USE_WEIGHT=INT4 vllm serve --config config.yaml
 ```
 
 ```bash 
-LVLLM_MOE_NUMA_ENABLED=1 LK_THREAD_BINDING=CPU_CORE LK_THREADS=88 OMP_NUM_THREADS=88 LVLLM_MOE_USE_WEIGHT=INT4 LVLLM_GPU_RESIDENT_MOE_LAYERS=0-1 LVLLM_GPU_PREFETCH_WINDOW=1 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 vllm serve --config config.yaml # 启用GPU预填充
+# 启用GPU预填充
+LVLLM_MOE_NUMA_ENABLED=1 LK_THREAD_BINDING=CPU_CORE LK_THREADS=88 OMP_NUM_THREADS=88 LVLLM_MOE_USE_WEIGHT=INT4 \
+LVLLM_GPU_RESIDENT_MOE_LAYERS=0-1 LVLLM_GPU_PREFETCH_WINDOW=1 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 vllm serve --config config.yaml
 ```
 ```bash 
 # 遇到性能问题时可尝试按NUMA节点绑定线程, 并减少线程数量
@@ -123,6 +126,7 @@ LVLLM_MOE_NUMA_ENABLED=1 LK_THREAD_BINDING=CPU_CORE LK_THREADS=88 OMP_NUM_THREAD
 | `LVLLM_GPU_PREFILL_MIN_BATCH_SIZE` | GPU预填充参数 | 无 | 使用GPU预填充的最小输入长度`4096`：输入长度达到该值后，启动GPU预填充 | 设置值不宜过小，设置为0则关闭GPU预填充功能 |
 | `LK_POWER_SAVING` | cpu节能 | 0 | `1`：启用cpu节能模式，`0`：禁用cpu节能模式 | 建议值：`0` |
 | `LVLLM_ENABLE_NUMA_INTERLEAVE` | 性能参数 | 0 | `0`：快速加载模型，`1`：慢速加载模型可避免OOM | 建议值：加载模型文件时，内存充裕使用`0`，内存紧张使用`1` |
+| `LVLLM_MOE_QUANT_ON_GPU` | 性能参数 | 0 | `0`：不启用GPU专家量化，`1`：启用GPU专家量化 | 显存充足可启用（仅加载时有效，推理时不会额外占用显存），加快模型加载速度 |
 
 
 ## 配置文件
@@ -130,7 +134,7 @@ LVLLM_MOE_NUMA_ENABLED=1 LK_THREAD_BINDING=CPU_CORE LK_THREADS=88 OMP_NUM_THREAD
 config.yaml示例, `建议值`在运行不同模型时无需修改
 
 ```bash  
-model: "/home/guqiong/Models/Models/MiniMax-M2.1"  #模型目录
+model: "/home/guqiong/Models/Models/MiniMax-M2.5"  #模型目录
 host: "0.0.0.0"                                       # 服务绑定IP地址
 port: 8070                                            # 服务绑定端口号
 tensor-parallel-size: 2                               # 张量并行大小， 小于等于GPU数量，   
@@ -140,7 +144,7 @@ gpu-memory-utilization: 0.92                          # 分配给lvllm的GPU显�
 trust-remote-code: true                               # 是否信任远程代码， 建议值
 tokenizer-mode: "auto"                                # 分词器模式， 建议值
 swap-space: 0                                         # 交换空间大小， 单位GB， 建议值
-served-model-name: "Models/MiniMax-M2.1"              # 服务模型名称
+served-model-name: "Models/MiniMax-M2.5"              # 服务模型名称
 compilation_config.cudagraph_mode: "FULL_DECODE_ONLY" # 启用CUDA图模式， 建议值
 enable_prefix_caching: true                           # 启用前缀缓存， 建议值
 enable-chunked-prefill: true                          # 启用分块预填充， 建议值  

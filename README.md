@@ -96,11 +96,14 @@ Note 1: Enabling GPU Prefill, Input Length 32K-64K
 ## Running Commands
 
 ```bash
-LVLLM_MOE_NUMA_ENABLED=1 LK_THREAD_BINDING=CPU_CORE LK_THREADS=88 OMP_NUM_THREADS=88 vllm serve --config config.yaml # GPU prefill not enabled
+# GPU prefill not enabled
+LVLLM_MOE_NUMA_ENABLED=1 LK_THREAD_BINDING=CPU_CORE LK_THREADS=88 OMP_NUM_THREADS=88 LVLLM_MOE_USE_WEIGHT=INT4 vllm serve --config config.yaml 
 ```
 
 ```bash
-LVLLM_MOE_NUMA_ENABLED=1 LK_THREAD_BINDING=CPU_CORE LK_THREADS=88 OMP_NUM_THREADS=88 LVLLM_MOE_USE_WEIGHT=INT4 LVLLM_GPU_RESIDENT_MOE_LAYERS=0-1 LVLLM_GPU_PREFETCH_WINDOW=1 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 vllm serve --config config.yaml # GPU prefill enabled
+#GPU prefill enabled
+LVLLM_MOE_NUMA_ENABLED=1 LK_THREAD_BINDING=CPU_CORE LK_THREADS=88 OMP_NUM_THREADS=88 LVLLM_MOE_USE_WEIGHT=INT4 \
+LVLLM_GPU_RESIDENT_MOE_LAYERS=0-1 LVLLM_GPU_PREFETCH_WINDOW=1 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 vllm serve --config config.yaml 
 ```
 ```bash
 # When encountering performance issues, you can try binding threads by NUMA node and reduce the number of threads
@@ -121,13 +124,14 @@ LVLLM_MOE_NUMA_ENABLED=1 LK_THREAD_BINDING=CPU_CORE LK_THREADS=88 OMP_NUM_THREAD
 | `LVLLM_GPU_PREFETCH_WINDOW` | GPU Prefill Parameter | None | Prefetch window size `1`: prefetch 1 layer of MOE experts | Generally, prefetching 1 to 2 layers is sufficient |
 | `LVLLM_GPU_PREFILL_MIN_BATCH_SIZE` | GPU Prefill Parameter | None | Minimum input length for using GPU prefill `4096`: when input length reaches this value, start GPU prefill | The value should not be too small, set to 0 to disable GPU prefill function |
 | `LVLLM_ENABLE_NUMA_INTERLEAVE` | Performance Parameter | 0 | `0`：load model quickly, `1`：load model slowly to avoid OOM | Suggested value: use `0` when memory is abundant, use `1` when memory is tight |
+| `LVLLM_MOE_QUANT_ON_GPU` | Performance Parameter | 0 | `0`：enable CPU expert quantization, `1`：enable GPU expert quantization | enable if GPU memory is abundant (only effective at loading time, inference will not occupy extra GPU memory)，accelerate model loading speed |
 
 ## Configuration File
 
 Example config.yaml, `Recommended values` do not need to be modified when running different models
 
 ```bash
-model: "/home/guqiong/Models/GLM-4.7-Flash-AWQ-4bit"  # Model directory
+model: "/home/guqiong/Models/MiniMax-M2.5"  # Model directory
 host: "0.0.0.0"                                       # Service binding IP address
 port: 8070                                            # Service binding port number
 tensor-parallel-size: 2                               # Tensor parallelism size, less than or equal to number of GPUs,
@@ -137,7 +141,7 @@ gpu-memory-utilization: 0.92                          # GPU VRAM allocation perc
 trust-remote-code: true                               # Whether to trust remote code, recommended value
 tokenizer-mode: "auto"                                # Tokenizer mode, recommended value
 swap-space: 0                                         # Swap space size, in GB, recommended value
-served-model-name: "GLM-4.7-Flash-AWQ-4bit"           # Service model name
+served-model-name: "MiniMax-M2.5"           # Service model name
 compilation_config.cudagraph_mode: "FULL_DECODE_ONLY" # Enable CUDA graph mode, recommended value
 enable_prefix_caching: true                           # Enable prefix caching, recommended value
 enable-chunked-prefill: true                          # Enable chunked prefill, recommended value

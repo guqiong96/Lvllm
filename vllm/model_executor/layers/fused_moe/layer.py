@@ -83,7 +83,7 @@ from vllm.utils.platform_utils import is_pin_memory_available
     
 import vllm
 from vllm.envs import MoeComputeStrategy
-from vllm.envs import is_lk_moe_feature_enabled, get_moe_compute_strategy, is_lk_moe_cpu_layer, is_lk_moe_gpu_resident_layer, is_lk_moe_gpu_prefill_layer, get_gpu_prefetch_window, get_gpu_prefill_min_batch_size, is_lk_moe_use_gpu_prefill
+from vllm.envs import is_lk_moe_feature_enabled, get_moe_compute_strategy, is_lk_moe_cpu_layer, is_lk_moe_gpu_resident_layer, is_lk_moe_gpu_prefill_layer, get_gpu_prefetch_window, get_gpu_prefill_min_batch_size, is_lk_moe_use_gpu_prefill, is_lk_moe_quant_on_gpu
 if is_lk_moe_feature_enabled():
     import  lk_moe
     GGML_TYPE_TO_TORCH_DTYPE = {
@@ -2607,7 +2607,10 @@ class FusedMoE(CustomOp):
          
         assert w2_weight.shape == (num_experts, hidden_size, intermediate_size)
         
-        dequant_device = torch.cuda.current_device()
+        if is_lk_moe_quant_on_gpu():
+            dequant_device = torch.cuda.current_device()
+        else:
+            dequant_device = torch.device("cpu")
         w13_fp32_list = []
         w2_fp32_list = [] 
          
@@ -2707,7 +2710,10 @@ class FusedMoE(CustomOp):
         
         assert w2_weight_scale_inv.shape == (scale_num_experts, scale_hidden_size, scale_intermediate_size), f"Down weight scale shape {w2_weight_scale_inv.shape} must be (scale_num_experts, scale_hidden_size, scale_intermediate_size)"
         
-        dequant_device = torch.cuda.current_device()
+        if is_lk_moe_quant_on_gpu():
+            dequant_device = torch.cuda.current_device()
+        else:
+            dequant_device = torch.device("cpu")
         w13_buf = torch.zeros(intermediate_size, hidden_size, dtype=torch.float32, device=dequant_device, requires_grad=False) 
         w2_buf = torch.zeros(hidden_size, intermediate_size, dtype=torch.float32, device=dequant_device, requires_grad=False)
         
@@ -2737,8 +2743,8 @@ class FusedMoE(CustomOp):
             del w13_float, w2_float, w13_scale_inv_expanded, w2_scale_inv_expanded
             del w13_buf, w2_buf  
                  
-        w13_tensor = torch.stack(w13_projs, dim=0).to('cpu')
-        w2_tensor = torch.stack(w2_projs, dim=0).to('cpu') 
+        w13_tensor = torch.stack(w13_projs, dim=0).cpu()
+        w2_tensor = torch.stack(w2_projs, dim=0).cpu() 
         
         w13_projs.clear()
         w2_projs.clear()
@@ -2793,7 +2799,10 @@ class FusedMoE(CustomOp):
         assert w13_weight_scale.shape == (num_experts, total_intermediate_size, 1)
         assert w2_weight_scale.shape == (num_experts, hidden_size, 1)
         
-        dequant_device = torch.cuda.current_device()
+        if is_lk_moe_quant_on_gpu():
+            dequant_device = torch.cuda.current_device()
+        else:
+            dequant_device = torch.device("cpu")
         w13_fp32_list = []
         w2_fp32_list = [] 
         
@@ -2888,7 +2897,10 @@ class FusedMoE(CustomOp):
         assert w2_weight_scale.shape == (scale_num_experts, hidden_size, 1), f"Down weight scale shape {w2_weight_scale.shape} must be (scale_num_experts, scale_hidden_size, 1)"
         
         
-        dequant_device = torch.cuda.current_device()
+        if is_lk_moe_quant_on_gpu():
+            dequant_device = torch.cuda.current_device()
+        else:
+            dequant_device = torch.device("cpu")
         
         w13_buf = torch.zeros(intermediate_size, hidden_size, dtype=torch.float32, device=dequant_device, requires_grad=False) 
         w2_buf = torch.zeros(hidden_size, intermediate_size, dtype=torch.float32, device=dequant_device, requires_grad=False)
@@ -2916,8 +2928,8 @@ class FusedMoE(CustomOp):
             del w13_float, w2_float, w13_scale_expanded, w2_scale_expanded
             del w13_buf, w2_buf  
             
-        w13_tensor = torch.stack(w13_projs, dim=0).to('cpu')
-        w2_tensor = torch.stack(w2_projs, dim=0).to('cpu') 
+        w13_tensor = torch.stack(w13_projs, dim=0).cpu()
+        w2_tensor = torch.stack(w2_projs, dim=0).cpu() 
         del w13_projs, w2_projs  
         
         w13_ptr = w13_tensor.contiguous().data_ptr()
@@ -3268,8 +3280,6 @@ def moe_cleanup(layer_name: str, hidden_states: torch.Tensor,
                 forward_context: ForwardContext): 
     if torch.cuda.is_current_stream_capturing():
         return
-    if get_gpu_prefill_min_batch_size() <= 0:
-        return
     if hidden_states.size(0) < get_gpu_prefill_min_batch_size():
         return
     
@@ -3294,7 +3304,7 @@ def moe_cleanup(layer_name: str, hidden_states: torch.Tensor,
             continue  
         layer_obj = forward_context.no_compile_layers.get(candidate_name)
         if layer_obj:
-            moe_clean_gpu_prefill(layer_obj, hidden_states)
+            moe_clean_gpu_prefill(layer_obj)
         del state[k]
         if hasattr(forward_context, '_prefetch_events'):  
             if layer_obj:
@@ -3304,12 +3314,12 @@ def moe_cleanup(layer_name: str, hidden_states: torch.Tensor,
         
 
 
-def moe_prefetch(layer, layer_name: str, hidden_states: torch.Tensor, 
+def moe_prefetch(layer_name: str, hidden_states: torch.Tensor, 
                  forward_context: ForwardContext, gpu_prefetch_window: int): 
     if torch.cuda.is_current_stream_capturing():
         return
     
-    if not layer.should_use_gpu_prefill(hidden_states):
+    if hidden_states.size(0) < get_gpu_prefill_min_batch_size():
         return
     
     if not hasattr(forward_context, '_prefetch_stream'):
@@ -3599,25 +3609,22 @@ def moe_prepare_gpu_prefill(layer, forward_context: ForwardContext, device: torc
                 prefetch_events[layer_id] = event
         
             
-def moe_clean_gpu_prefill(layer, hidden_states: torch.Tensor):  
-    if layer.should_use_gpu_prefill(hidden_states): 
-        with torch.no_grad():
-            from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsWNA16MarlinMoEMethod
-            from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsWNA16MoEMethod  
-            from vllm.model_executor.layers.quantization.fp8 import Fp8MoEMethod  
-            if isinstance(layer.quant_method, UnquantizedFusedMoEMethod):
-                moe_clean_gpu_prefill_regular(layer)
-            elif (isinstance(layer.quant_method, CompressedTensorsWNA16MarlinMoEMethod) or isinstance(layer.quant_method, CompressedTensorsWNA16MoEMethod)) :
-                moe_clean_gpu_prefill_wna16(layer)
-            elif isinstance(layer.quant_method, Fp8MoEMethod):
-                moe_clean_gpu_prefill_fp8(layer)
-            else:
-                raise ValueError(f"Could not supported gpu prefill MOE type: {type(layer.lk_moe)} , please set LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=0 to disable gpu prefill")
+def moe_clean_gpu_prefill(layer):   
+    with torch.no_grad():
+        from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsWNA16MarlinMoEMethod
+        from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsWNA16MoEMethod  
+        from vllm.model_executor.layers.quantization.fp8 import Fp8MoEMethod  
+        if isinstance(layer.quant_method, UnquantizedFusedMoEMethod):
+            moe_clean_gpu_prefill_regular(layer)
+        elif (isinstance(layer.quant_method, CompressedTensorsWNA16MarlinMoEMethod) or isinstance(layer.quant_method, CompressedTensorsWNA16MoEMethod)) :
+            moe_clean_gpu_prefill_wna16(layer)
+        elif isinstance(layer.quant_method, Fp8MoEMethod):
+            moe_clean_gpu_prefill_fp8(layer)
+        else:
+            raise ValueError(f"Could not supported gpu prefill MOE type: {type(layer.lk_moe)} , please set LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=0 to disable gpu prefill")
 
 def moe_wait_prefetch(layer, forward_context: ForwardContext):
     if torch.cuda.is_current_stream_capturing():
-        return 
-    if layer is None:
         return 
     if not hasattr(forward_context, '_prefetch_events'):
         return 
@@ -3636,7 +3643,7 @@ def moe_forward(
     assert self.shared_experts is None
     forward_context: ForwardContext = get_forward_context()
     layer_name = self.layer_name
-    moe_prefetch(self, layer_name, hidden_states, forward_context, get_gpu_prefetch_window())
+    moe_prefetch(layer_name, hidden_states, forward_context, get_gpu_prefetch_window())
     moe_wait_prefetch(self, forward_context)
     fused_output = self.forward_impl(hidden_states, router_logits) 
     moe_cleanup(layer_name, hidden_states, forward_context)
@@ -3670,7 +3677,7 @@ def moe_forward_shared(
     self = get_layer_from_name(layer_name)
     assert self.shared_experts is not None
     layer_name = self.layer_name
-    moe_prefetch(self, layer_name, hidden_states, forward_context, get_gpu_prefetch_window())
+    moe_prefetch(layer_name, hidden_states, forward_context, get_gpu_prefetch_window())
     moe_wait_prefetch(self, forward_context)
     # Set here because torch.compile skips forward_native() setup code
     # and calls this op directly. forward_impl() reads from this var.
