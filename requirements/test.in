@@ -26,11 +26,11 @@ tblib # for pickling test exceptions
 timm >=1.0.17 # required for internvl and gemma3n-mm test
 transformers_stream_generator # required for qwen-vl test
 matplotlib # required for qwen-vl test
-mistral_common[image,audio] >= 1.9.0 # required for voxtral test
+mistral_common[image,audio] >= 1.9.1 # required for voxtral test
 num2words # required for smolvlm test
 opencv-python-headless >= 4.13.0 # required for video test
 datamodel_code_generator # required for minicpm3 test
-lm-eval[api]>=0.4.9.2 # required for model evaluation test
+lm-eval[api]>=0.4.11 # required for model evaluation test
 mteb[bm25s]>=2, <3 # required for mteb test
 transformers==4.57.5
 tokenizers==0.22.0
@@ -51,6 +51,10 @@ runai-model-streamer[s3,gcs]==0.15.3
 fastsafetensors>=0.2.2 # 0.2.2 contains important fixes for multi-GPU mem usage
 pydantic>=2.12 # 2.11 leads to error on python 3.13
 decord==0.6.0
+imagehash # Required for Prithvi tests
+
 gpt-oss >= 0.0.7; python_version > '3.11'
 
 perceptron # required for isaac test
+
+datasets>=3.3.0,<=3.6.0

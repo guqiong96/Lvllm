@@ -19,16 +19,18 @@ Lvllm使用最新的vLLM源码，重新设计实现了MOE模型混合推理模�
 - [版本变更](#版本变更)
 - [支持的模型](#支持的模型)
 - [性能参考](#性能参考)
-- [运行命令](#运行命令)
-- [配置文件](#配置文件)
+- [如何运行Qwen3.5](#如何运行qwen35)
+- [如何运行MiniMax-M2.5](#如何运行minimax-m25)
+- [配置参数](#配置参数)
 - [安装步骤](#安装步骤) 
 - [更新](#更新)
 - [优化](#优化)
 
 ## 版本变更
  
-```bash  
-2026-02-02：lvllm-v1.7.0 -  支持EP并行，8卡运行minimax-m2.1模型需要设置--enable_expert_parallel
+```bash
+2026-02-26: lvllm-v1.8.1 - 修复已知问题，增加新模型支持
+2026-02-02：lvllm-v1.7.0 - 支持EP并行，8卡运行minimax-m2.1模型需要设置--enable_expert_parallel
 2026-01-26: lvllm-v1.6.1 - fp8 模型支持 FP8 + INT4 推理，支持GPU Prefill加速(内存占用很高!) 
 2026-01-25: lvllm-v1.6.0 - fp8 模型支持 GPU Prefill加速(内存占用很高!)
 2026-01-24: lvllm-v1.5.8 - AWQ 4-bit 对称量化模型支持 GPU Prefill加速
@@ -53,6 +55,7 @@ vLLM已验证的大部分原版MOE模型
  
 | 模型名称 | 状态 |
 |---------|------|
+| Qwen3.5-397B-A17B | ✅ 已测试通过 |
 | Qwen3-Coder-Next | ✅ 已测试通过 |
 | Qwen3-Next-80B-A3B-Instruct | ✅ 已测试通过 |
 | Qwen3-Coder-30B-A3B-Instruct | ✅ 已测试通过 |
@@ -94,17 +97,84 @@ vLLM已验证的大部分原版MOE模型
 
 注1：开启GPU预填充，输入长度32K-64K
 
-## 运行命令
- 
-```bash 
-# 未启用GPU预填充
-LVLLM_MOE_NUMA_ENABLED=1 LK_THREAD_BINDING=CPU_CORE LK_THREADS=88 OMP_NUM_THREADS=88 LVLLM_MOE_USE_WEIGHT=INT4 vllm serve --config config.yaml
+## 如何运行Qwen3.5
+```bash
+sudo sh -c 'echo 1 > /proc/sys/vm/drop_caches'
+free -h
+
+NCCL_SOCKET_IFNAME=lo \
+NCCL_IB_DISABLE=1 \
+GLOO_SOCKET_IFNAME=lo \
+NCCL_SOCKET_TIMEOUT=600000 \
+LVLLM_MOE_NUMA_ENABLED=1 \
+LK_THREAD_BINDING=CPU_CORE \
+LK_THREADS=44 \
+OMP_NUM_THREADS=44 \
+LVLLM_GPU_RESIDENT_MOE_LAYERS=0 \
+LVLLM_GPU_PREFETCH_WINDOW=1 \
+LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=2048 \
+LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
+LVLLM_MOE_QUANT_ON_GPU=1 \
+vllm serve \
+    --model /home/guqiong/Models/Qwen3.5-397B-A17B \
+    --host 0.0.0.0 \
+    --port 8070 \
+    --tensor-parallel-size 2 \
+    --max-model-len 18000 \
+    --gpu-memory-utilization 0.90 \
+    --trust-remote-code \
+    --tokenizer-mode auto \
+    --swap-space 0 \
+    --served-model-name "Qwen3.5-397B-A17B" \
+    --compilation_config.cudagraph_mode FULL_DECODE_ONLY \
+    --enable-prefix-caching \
+    --enable-chunked-prefill \
+    --max-num-batched-tokens 16384 \
+    --max-num-seqs 4 \
+    --compilation_config.mode VLLM_COMPILE \
+    --enable-auto-tool-choice \
+    --tool-call-parser qwen3_coder \
+    --reasoning-parser qwen3
 ```
 
-```bash 
-# 启用GPU预填充
-LVLLM_MOE_NUMA_ENABLED=1 LK_THREAD_BINDING=CPU_CORE LK_THREADS=88 OMP_NUM_THREADS=88 LVLLM_MOE_USE_WEIGHT=INT4 \
-LVLLM_GPU_RESIDENT_MOE_LAYERS=0-1 LVLLM_GPU_PREFETCH_WINDOW=1 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 vllm serve --config config.yaml
+
+## 如何运行MiniMax-M2.5
+
+```bash
+NCCL_SOCKET_IFNAME=lo \
+NCCL_IB_DISABLE=1 \
+GLOO_SOCKET_IFNAME=lo \
+NCCL_SOCKET_TIMEOUT=600000 \
+LVLLM_MOE_NUMA_ENABLED=1 \
+LK_THREAD_BINDING=CPU_CORE \
+LK_THREADS=44 \
+OMP_NUM_THREADS=44 \
+LVLLM_MOE_USE_WEIGHT=INT4 \
+LVLLM_GPU_RESIDENT_MOE_LAYERS=0-1 \
+LVLLM_GPU_PREFETCH_WINDOW=1 \
+LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 \
+LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
+LVLLM_MOE_QUANT_ON_GPU=1 \
+vllm serve \
+    --model /home/guqiong/Downloads/MiniMax-M2.5 \
+    --host 0.0.0.0 \
+    --port 8070 \
+    --tensor-parallel-size 2 \
+    --max-model-len 50000 \
+    --gpu-memory-utilization 0.80 \
+    --trust-remote-code \
+    --tokenizer-mode auto \
+    --swap-space 0 \
+    --served-model-name MiniMax-M2.5 \
+    --compilation_config.cudagraph_mode FULL_DECODE_ONLY \
+    --enable-prefix-caching \
+    --enable-chunked-prefill \
+    --max-num-batched-tokens 32768 \
+    --dtype bfloat16 \
+    --max-num-seqs 4 \
+    --compilation_config.mode VLLM_COMPILE \
+    --tool-call-parser minimax_m2 \
+    --reasoning-parser minimax_m2_append_think 
 ```
 ```bash 
 # 遇到性能问题时可尝试按NUMA节点绑定线程, 并减少线程数量
@@ -113,6 +183,8 @@ LVLLM_GPU_RESIDENT_MOE_LAYERS=0-1 LVLLM_GPU_PREFETCH_WINDOW=1 LVLLM_GPU_PREFILL_
 ```bash 
 --enable_expert_parallel # 启用EP并行, 8卡运行minimax-m2.1模型需设置
 ```
+
+## 配置参数
 
 | 环境变量 | 类型 | 默认值 | 说明 | 备注 |
 |--------|------|--------|------|------|
@@ -128,50 +200,35 @@ LVLLM_GPU_RESIDENT_MOE_LAYERS=0-1 LVLLM_GPU_PREFETCH_WINDOW=1 LVLLM_GPU_PREFILL_
 | `LVLLM_ENABLE_NUMA_INTERLEAVE` | 性能参数 | 0 | `0`：快速加载模型，`1`：慢速加载模型可避免OOM | 建议值：加载模型文件时，内存充裕使用`0`，内存紧张使用`1` |
 | `LVLLM_MOE_QUANT_ON_GPU` | 性能参数 | 0 | `0`：不启用GPU专家量化，`1`：启用GPU专家量化 | 显存充足可启用（仅加载时有效，推理时不会额外占用显存），加快模型加载速度 |
 
-
-## 配置文件
-
-config.yaml示例, `建议值`在运行不同模型时无需修改
-
-```bash  
-model: "/home/guqiong/Models/Models/MiniMax-M2.5"  #模型目录
-host: "0.0.0.0"                                       # 服务绑定IP地址
-port: 8070                                            # 服务绑定端口号
-tensor-parallel-size: 2                               # 张量并行大小， 小于等于GPU数量，   
-#pipeline-parallel-size: 2                            # 流水线并行大小， 小于等于GPU数量     
-max-model-len: 18000                                  # 最大上下文长度， 小于等于模型最大长度
-gpu-memory-utilization: 0.92                          # 分配给lvllm的GPU显存分配百分比， 小于等于1
-trust-remote-code: true                               # 是否信任远程代码， 建议值
-tokenizer-mode: "auto"                                # 分词器模式， 建议值
-swap-space: 0                                         # 交换空间大小， 单位GB， 建议值
-served-model-name: "Models/MiniMax-M2.5"              # 服务模型名称
-compilation_config.cudagraph_mode: "FULL_DECODE_ONLY" # 启用CUDA图模式， 建议值
-enable_prefix_caching: true                           # 启用前缀缓存， 建议值
-enable-chunked-prefill: true                          # 启用分块预填充， 建议值  
-max_num_batched_tokens: 18000                         # 最大批量填充令牌数， 关闭GPU预填充时建议值：1024，开启GPU预填充时建议值：同max-model-len
-dtype: "bfloat16"                                     # 模型中间计算数据类型， 建议值bfloat16或float16
-max_num_seqs: 4                                       # 最大并发请求序列， 建议值1到4
-compilation_config.mode: "VLLM_COMPILE"               # 优化模型， 建议值
-# enable-auto-tool-choice: true                       # 允许工具调用
-# kv_cache_dtype: "fp8"                               # KV Cache数据类型， 40系、50系GPU可开启 
-# speculative-config: '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'  # 推测解码， 建议值关闭
-# tool-call-parser: "minimax_m2"                      # MiniMax M2.1 模型配置参数
-# reasoning-parser: "minimax_m2_append_think"         # MiniMax M2.1 模型配置参数
-# tool-call-parser: glm47                             # GLM4.7 模型配置参数
-# reasoning-parser: glm45                             # GLM4.7 模型配置参数
-# tool-call-parser: "kimi_k2"                         # Kimi k2.5 模型配置参数
-# reasoning-parser: "kimi_k2"                         # Kimi k2.5 模型配置参数
-# mm-encoder-tp-mode: "data"                         #  encoder TP mode
-# reasoning-parser: "step3p5"                         # Step-3.5-Flash 模型配置参数                                              
-# tool-call-parser: "step3p5"                         # Step-3.5-Flash 模型配置参数                                              
-# hf-overrides.num_nextn_predict_layers: 1            # Step-3.5-Flash 模型配置参数, 建议不使用
-# speculative_config.method: "step3p5_mtp"            # Step-3.5-Flash 模型配置参数, 建议不使用
-# speculative_config.num_speculative_tokens: 1        # Step-3.5-Flash 模型配置参数, 建议不使用
-# disable-cascade-attn: true                          # Step-3.5-Flash 模型配置参数
-# tool-call-parser: "qwen3_coder"                     # Qwen3-Coder-Next 模型配置参数
-
-```
-
+ 
+| 参数 | 示例值 | 说明 |
+|-----------|-------|-------------|
+| `model` | `/home/guqiong/Models/Models/MiniMax-M2.5` | 模型目录路径 |
+| `host` | `0.0.0.0` | 服务绑定IP地址 |
+| `port` | `8070` | 服务绑定端口号 |
+| `tensor-parallel-size` | `2` | 张量并行大小，小于等于GPU数量 |
+| `pipeline-parallel-size` | `2` (commented) | 流水线并行大小，小于等于GPU数量 |
+| `max-model-len` | `18000` | 最大上下文长度，小于等于模型最大长度 |
+| `gpu-memory-utilization` | `0.92` | 分配给vLLM的GPU显存分配百分比，小于等于1 |
+| `trust-remote-code` | `true` | 是否信任远程代码，建议值 |
+| `tokenizer-mode` | `auto` | 分词器模式，建议值 |
+| `swap-space` | `0` | 交换空间大小，单位GB，建议值 |
+| `served-model-name` | `Models/MiniMax-M2.5` | 服务模型名称 |
+| `compilation_config.cudagraph_mode` | `FULL_DECODE_ONLY` | 启用CUDA图模式，建议值 |
+| `enable_prefix_caching` | `true` | 启用前缀缓存，建议值 |
+| `enable-chunked-prefill` | `true` | 启用分块预填充，建议值 |
+| `max_num_batched_tokens` | `18000` | 最大批量填充令牌数，关闭GPU预填充时建议值：1024，开启GPU预填充时建议值：同max-model-len |
+| `dtype` | `bfloat16` | 模型中间计算数据类型，建议值bfloat16或float16 |
+| `max_num_seqs` | `4` | 最大并发请求序列，建议值1到4 |
+| `compilation_config.mode` | `VLLM_COMPILE` | 优化模型，建议值 |
+ 
+ 
+| 参数 | 说明 |
+|-----------|-------------|
+| `kv_cache_dtype: "fp8"` | KV Cache数据类型，40系、50系GPU可开启 (commented) |
+| `speculative-config` | 推测解码配置，建议值关闭 (commented) |
+| `mm-encoder-tp-mode: "data"` | encoder TP模式 (commented) |
+ 
 
 ## 安装步骤
 
@@ -319,6 +376,16 @@ LK_POWER_SAVING=1 # 开启后推理时降低CPU温度，性能轻微降低
 ### FP8模型权重运行时格式
 ```bash
 LVLLM_MOE_USE_WEIGHT=INT4 # 模型MoE专家权重使用INT4推理，其余部分依旧为FP8，开启几乎不影响精度， 速度排序：INT4 > TO_DTYPE > KEEP
+```
+
+### 模型加载
+```bash
+LVLLM_ENABLE_NUMA_INTERLEAVE=1 # 慢速加载模型可避免OOM，建议值：加载模型文件时，内存充裕使用`0`，内存紧张使用`1`
+```
+
+### 模型加载专家量化
+```bash
+LVLLM_MOE_QUANT_ON_GPU=1 # 启用GPU专家量化，建议值：显存充足可启用（仅加载时有效，推理时不会额外占用显存），加快模型加载速度
 ```
 
 

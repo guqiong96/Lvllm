@@ -611,14 +611,6 @@ class WorkerProc:
             "shared_worker_lock": shared_worker_lock,
             "is_driver_worker": is_driver_worker,
         }
-        from vllm.envs import is_numa_interleave_enabled
-        if is_numa_interleave_enabled(): 
-            numactl_args = "--interleave=all"
-            old_executable = os.fsdecode(multiprocessing.spawn.get_executable())
-            executable = _create_numactl_executable(numactl_args)
-             
-            old_executable_saved = multiprocessing.spawn.get_executable()
-            multiprocessing.spawn.set_executable(executable)
         # Run EngineCore busy loop in background process.
         proc = context.Process(
             target=WorkerProc.worker_main,
@@ -626,10 +618,12 @@ class WorkerProc:
             name=f"VllmWorker-{rank}",
             daemon=True,
         )
-
+        from vllm.envs import is_numa_interleave_enabled
+        if is_numa_interleave_enabled(): 
+            numactl_args = "--interleave=all" 
+            executable = _create_numactl_executable(numactl_args) 
+            multiprocessing.spawn.set_executable(executable) 
         proc.start()
-        if is_numa_interleave_enabled():
-            multiprocessing.spawn.set_executable(old_executable_saved)
         writer.close()
         # Keep death_writer open in parent - when parent exits,
         # death_reader in child will get EOFError

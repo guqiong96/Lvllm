@@ -19,8 +19,9 @@ Lvllm uses the latest vLLM source code and has redesigned and implemented MOE mo
 - [Version Changes](#version-changes)
 - [Supported Models](#supported-models)
 - [Performance Reference](#performance-reference)
-- [Running Commands](#running-commands)
-- [Configuration File](#configuration-file)
+- [How to Run Qwen3.5](#how-to-run-qwen35)
+- [How to Run MiniMax-M2.5](#how-to-run-minimax-m25)
+- [Configuration Parameters](#configuration-parameters)
 - [Installation Steps](#installation-steps)
 - [Update](#update)
 - [Optimization Tips](#optimization-tips)
@@ -28,6 +29,7 @@ Lvllm uses the latest vLLM source code and has redesigned and implemented MOE mo
 ## Version Changes
 
 ```bash
+2026-02-26: lvllm-v1.8.1 - fix known issues, support new models
 2026-02-02：lvllm-v1.7.0 - support for EP parallelism, 8-card running minimax-m2.1 model requires setting --enable_expert_parallel
 2026-01-26: lvllm-v1.6.1 - fp8 model support for FP8 + INT4 inference, support for GPU Prefill acceleration (high memory usage!)
 2026-01-25: lvllm-v1.6.0 - fp8 model support for GPU Prefill acceleration (high memory usage!)
@@ -53,6 +55,7 @@ Most of the original MOE models verified by vLLM
 
 | Model Name | Status |
 |---------|------|
+| Qwen3.5-397B-A17B | ✅ Tested |
 | Qwen3-Coder-Next | ✅ Tested |
 | Qwen3-Next-80B-A3B-Instruct | ✅ Tested |
 | Qwen3-Coder-30B-A3B-Instruct | ✅ Tested |
@@ -93,24 +96,92 @@ Note 1: https://hf-mirror.com/cyankiwi provides AWQ 4bit symmetric quantized mod
 
 Note 1: Enabling GPU Prefill, Input Length 32K-64K
 
-## Running Commands
-
+## How to Run Qwen3.5
 ```bash
-# GPU prefill not enabled
-LVLLM_MOE_NUMA_ENABLED=1 LK_THREAD_BINDING=CPU_CORE LK_THREADS=88 OMP_NUM_THREADS=88 LVLLM_MOE_USE_WEIGHT=INT4 vllm serve --config config.yaml 
+sudo sh -c 'echo 1 > /proc/sys/vm/drop_caches'
+free -h
+
+NCCL_SOCKET_IFNAME=lo \
+NCCL_IB_DISABLE=1 \
+GLOO_SOCKET_IFNAME=lo \
+NCCL_SOCKET_TIMEOUT=600000 \
+LVLLM_MOE_NUMA_ENABLED=1 \
+LK_THREAD_BINDING=CPU_CORE \
+LK_THREADS=44 \
+OMP_NUM_THREADS=44 \
+LVLLM_GPU_RESIDENT_MOE_LAYERS=0 \
+LVLLM_GPU_PREFETCH_WINDOW=1 \
+LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=2048 \
+LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
+LVLLM_MOE_QUANT_ON_GPU=1 \
+vllm serve \
+    --model /home/guqiong/Models/Qwen3.5-397B-A17B \
+    --host 0.0.0.0 \
+    --port 8070 \
+    --tensor-parallel-size 2 \
+    --max-model-len 18000 \
+    --gpu-memory-utilization 0.90 \
+    --trust-remote-code \
+    --tokenizer-mode auto \
+    --swap-space 0 \
+    --served-model-name Qwen3.5-397B-A17B \
+    --compilation_config.cudagraph_mode FULL_DECODE_ONLY \
+    --enable-prefix-caching \
+    --enable-chunked-prefill \
+    --max-num-batched-tokens 16384 \
+    --max-num-seqs 4 \
+    --compilation_config.mode VLLM_COMPILE \
+    --enable-auto-tool-choice \
+    --tool-call-parser qwen3_coder \
+    --reasoning-parser qwen3 \
+    --language-model-only
 ```
 
+# How to Run MiniMax-M2.5
+
+ 
 ```bash
-#GPU prefill enabled
-LVLLM_MOE_NUMA_ENABLED=1 LK_THREAD_BINDING=CPU_CORE LK_THREADS=88 OMP_NUM_THREADS=88 LVLLM_MOE_USE_WEIGHT=INT4 \
-LVLLM_GPU_RESIDENT_MOE_LAYERS=0-1 LVLLM_GPU_PREFETCH_WINDOW=1 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 vllm serve --config config.yaml 
+NCCL_SOCKET_IFNAME=lo \
+NCCL_IB_DISABLE=1 \
+GLOO_SOCKET_IFNAME=lo \
+NCCL_SOCKET_TIMEOUT=600000 \
+LVLLM_MOE_NUMA_ENABLED=1 \
+LK_THREAD_BINDING=CPU_CORE \
+LK_THREADS=44 \
+OMP_NUM_THREADS=44 \
+LVLLM_MOE_USE_WEIGHT=INT4 \
+LVLLM_GPU_RESIDENT_MOE_LAYERS=0-1 \
+LVLLM_GPU_PREFETCH_WINDOW=1 \
+LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 \
+LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
+LVLLM_MOE_QUANT_ON_GPU=1 \
+vllm serve \
+    --model /home/guqiong/Downloads/MiniMax-M2.5 \
+    --host 0.0.0.0 \
+    --port 8070 \
+    --tensor-parallel-size 2 \
+    --max-model-len 50000 \
+    --gpu-memory-utilization 0.80 \
+    --trust-remote-code \
+    --tokenizer-mode auto \
+    --swap-space 0 \
+    --served-model-name MiniMax-M2.5 \
+    --compilation_config.cudagraph_mode FULL_DECODE_ONLY \
+    --enable-prefix-caching \
+    --enable-chunked-prefill \
+    --max-num-batched-tokens 32768 \
+    --dtype bfloat16 \
+    --max-num-seqs 4 \
+    --compilation_config.mode VLLM_COMPILE \
+    --tool-call-parser minimax_m2 \
+    --reasoning-parser minimax_m2_append_think 
 ```
-```bash
-# When encountering performance issues, you can try binding threads by NUMA node and reduce the number of threads
+```bash 
+# reduce performance issue when encountering performance problem, you can try binding by NUMA node and reduce thread count
 ```
 
 ```bash 
---enable_expert_parallel # EP parallelism enabled，run MiniMax-M2.1 model with 8 GPUs
+--enable_expert_parallel # enable expert parallelism, 8-card inference of minimax-m2.1 model requires setting
 ```
 
 | Environment Variable | Type | Default Value | Description | Notes |
@@ -126,46 +197,36 @@ LVLLM_GPU_RESIDENT_MOE_LAYERS=0-1 LVLLM_GPU_PREFETCH_WINDOW=1 LVLLM_GPU_PREFILL_
 | `LVLLM_ENABLE_NUMA_INTERLEAVE` | Performance Parameter | 0 | `0`：load model quickly, `1`：load model slowly to avoid OOM | Suggested value: use `0` when memory is abundant, use `1` when memory is tight |
 | `LVLLM_MOE_QUANT_ON_GPU` | Performance Parameter | 0 | `0`：enable CPU expert quantization, `1`：enable GPU expert quantization | enable if GPU memory is abundant (only effective at loading time, inference will not occupy extra GPU memory)，accelerate model loading speed |
 
-## Configuration File
+## Configuration Parameters
 
-Example config.yaml, `Recommended values` do not need to be modified when running different models
+| Parameter | Example Value | Description |
+|-----------|-------|-------------|
+| `model` | `/home/guqiong/Models/Models/MiniMax-M2.5` | Model directory path |
+| `host` | `0.0.0.0` | Service binding IP address |
+| `port` | `8070` | Service binding port number |
+| `tensor-parallel-size` | `2` | Tensor parallel size, less than or equal to the number of GPUs |
+| `pipeline-parallel-size` | `2` (commented) | Pipeline parallel size, less than or equal to the number of GPUs |
+| `max-model-len` | `18000` | Maximum context length, less than or equal to the model's maximum length |
+| `gpu-memory-utilization` | `0.92` | GPU memory utilization percentage allocated to vLLM, less than or equal to 1 |
+| `trust-remote-code` | `true` | Whether to trust remote code, recommended value: `true` |
+| `tokenizer-mode` | `auto` | Tokenizer mode, recommended value: `auto` |
+| `swap-space` | `0` | Swap space size in GB, recommended value: `0` |
+| `served-model-name` | `MiniMax-M2.5` | Served model name |
+| `compilation_config.cudagraph_mode` | `FULL_DECODE_ONLY` | Enable CUDA graph mode, recommended value |
+| `enable_prefix_caching` | `true` | Enable prefix caching, recommended value |
+| `enable-chunked-prefill` | `true` | Enable chunked prefill, recommended value |
+| `max_num_batched_tokens` | `18000` | Maximum number of batched tokens, recommended value: `1024` when GPU prefill is disabled, `max-model-len` when GPU prefill is enabled |
+| `dtype` | `bfloat16` | Model intermediate calculation data type, recommended value: `bfloat16` or `float16` |
+| `max_num_seqs` | `4` | Maximum concurrent request sequences, recommended value: `1` to `4` |
+| `compilation_config.mode` | `VLLM_COMPILE` | Optimize model, recommended value |
+ 
 
-```bash
-model: "/home/guqiong/Models/MiniMax-M2.5"  # Model directory
-host: "0.0.0.0"                                       # Service binding IP address
-port: 8070                                            # Service binding port number
-tensor-parallel-size: 2                               # Tensor parallelism size, less than or equal to number of GPUs,
-#pipeline-parallel-size: 2                            # Pipeline parallelism size, less than or equal to number of GPUs
-max-model-len: 18000                                  # Maximum context length, less than or equal to model maximum length
-gpu-memory-utilization: 0.92                          # GPU VRAM allocation percentage for lvllm, less than or equal to 1
-trust-remote-code: true                               # Whether to trust remote code, recommended value
-tokenizer-mode: "auto"                                # Tokenizer mode, recommended value
-swap-space: 0                                         # Swap space size, in GB, recommended value
-served-model-name: "MiniMax-M2.5"           # Service model name
-compilation_config.cudagraph_mode: "FULL_DECODE_ONLY" # Enable CUDA graph mode, recommended value
-enable_prefix_caching: true                           # Enable prefix caching, recommended value
-enable-chunked-prefill: true                          # Enable chunked prefill, recommended value
-max_num_batched_tokens: 18000                         # Maximum number of batched tokens, recommended value when GPU prefill is disabled: 1024, recommended value when GPU prefill is enabled: same as max-model-len
-dtype: "bfloat16"                                     # Model intermediate calculation data type, recommended value bfloat16 or float16
-max_num_seqs: 4                                       # Maximum concurrent request sequences, recommended value 1 to 4
-compilation_config.mode: "VLLM_COMPILE"               # Optimize model, recommended value
-# kv_cache_dtype: "fp8"                               # KV Cache data type, can be enabled for 40-series, 50-series GPUs
-# enable-auto-tool-choice: true                       # Enable auto tool choice
-# tool-call-parser: "minimax_m2"                      # MiniMax M2.1 model configuration parameter
-# reasoning-parser: "minimax_m2_append_think"         # MiniMax M2.1 model configuration parameter
-# tool-call-parser: glm47                             # GLM4.7 model configuration parameter
-# reasoning-parser: glm45                             # GLM4.7 model configuration parameter
-# tool-call-parser: "kimi_k2"                        # Kimi k2.5 model configuration parameter
-# reasoning-parser: "kimi_k2"                        # Kimi k2.5 model configuration parameter
-# mm-encoder-tp-mode: "data"                         #  Kimi k2.5 encoder TP 8 mode
-# reasoning-parser: "step3p5"                         # Step-3.5-Flash model configuration parameter                                         
-# tool-call-parser: "step3p5"                         # Step-3.5-Flash model configuration parameter                                         
-# hf-overrides.num_nextn_predict_layers: 1            # Step-3.5-Flash model configuration parameter
-# speculative_config.method: "step3p5_mtp"            # Step-3.5-Flash model configuration parameter
-# speculative_config.num_speculative_tokens: 1        # Step-3.5-Flash model configuration parameter
-# disable-cascade-attn: true                          # Step-3.5-Flash model configuration parameter
-# tool-call-parser: "qwen3_coder"                     # Qwen3-Coder-Next model configuration parameter
-```
+| Parameter | Description |
+|-----------|-------------|
+| `enable-auto-tool-choice` | Allow tool calls (commented) |
+| `kv_cache_dtype: "fp8"` | KV Cache data type, enabled for 40-series and 50-series GPUs (commented) |
+| `speculative-config` | Speculative decoding configuration, not recommended (commented) |
+| `mm-encoder-tp-mode: "data"` | encoder TP模式 (commented) |
 
 ## Installation Steps
 
@@ -312,4 +373,14 @@ LK_POWER_SAVING=1 # enable low power mode while inference, reduce CPU temperatur
 ### FP8 Model Weight Runtime Format
 ```bash
 LVLLM_MOE_USE_WEIGHT=INT4 # Model MoE expert weights use INT4 inference, other parts remain FP8, enabling almost no impact on accuracy, speed order: INT4 > TO_DTYPE > KEEP
+```
+
+### Model Loading with NUMA Interleaving
+```bash
+LVLLM_ENABLE_NUMA_INTERLEAVE=1 # Slow model loading can prevent OOM. Recommended values: use `0` when memory is sufficient during model file loading, use `1` when memory is limited.
+```
+
+### Model Loading with GPU Expert Quantization
+```bash
+LVLLM_MOE_QUANT_ON_GPU=1 # Enable GPU expert quantization, recommended values: enable when sufficient GPU memory is available (only effective during model loading, not during inference), speed up model loading
 ```
