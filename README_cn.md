@@ -134,7 +134,8 @@ vllm serve \
     --compilation_config.mode VLLM_COMPILE \
     --enable-auto-tool-choice \
     --tool-call-parser qwen3_coder \
-    --reasoning-parser qwen3
+    --reasoning-parser qwen3 \
+    --language-model-only
 ```
 
 
