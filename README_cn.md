@@ -29,7 +29,7 @@ Lvllm使用最新的vLLM源码，重新设计实现了MOE模型混合推理模�
 ## 版本变更
  
 ```bash
-2026-02-26: lvllm-v1.8.1 - 修复已知问题，增加新模型支持
+2026-02-18: lvllm-v1.8.1 - 修复已知问题，增加新模型支持
 2026-02-02：lvllm-v1.7.0 - 支持EP并行，8卡运行minimax-m2.1模型需要设置--enable_expert_parallel
 2026-01-26: lvllm-v1.6.1 - fp8 模型支持 FP8 + INT4 推理，支持GPU Prefill加速(内存占用很高!) 
 2026-01-25: lvllm-v1.6.0 - fp8 模型支持 GPU Prefill加速(内存占用很高!)
