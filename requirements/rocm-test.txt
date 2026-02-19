@@ -67,7 +67,8 @@ multiprocess==0.70.16
 # Required for v1/metrics/test_engine_logger_apis.py
 ray[cgraph,default]>=2.48.0
 
-# Plugins test
+torchgeo==0.7.0
+    # via terratorch
 # MTEB Benchmark Test
 mteb==2.1.2
 
@@ -94,3 +95,9 @@ transformers==4.57.3
 huggingface-hub==0.36.2
 # Pin Mistral Common
 mistral-common[image,audio]==1.9.1
+# Required for Prithvi tests
+terratorch==1.2.2
+# Required for Prithvi tests
+segmentation-models-pytorch==0.5.0
+# Required for Prithvi tests
+imagehash==4.3.2
