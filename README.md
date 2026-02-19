@@ -101,6 +101,7 @@ Note 1: Enabling GPU Prefill, Input Length 32K-64K
 sudo sh -c 'echo 1 > /proc/sys/vm/drop_caches'
 free -h
 
+PYTORCH_ALLOC_CONF=expandable_segments:True \
 NCCL_SOCKET_IFNAME=lo \
 NCCL_IB_DISABLE=1 \
 GLOO_SOCKET_IFNAME=lo \
@@ -114,14 +115,14 @@ LVLLM_GPU_RESIDENT_MOE_LAYERS=0 \
 LVLLM_GPU_PREFETCH_WINDOW=1 \
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=2048 \
 LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
-LVLLM_MOE_QUANT_ON_GPU=1 \
+LVLLM_MOE_QUANT_ON_GPU=0 \
 vllm serve \
     --model /home/guqiong/Models/Qwen3.5-397B-A17B-FP8 \
     --host 0.0.0.0 \
     --port 8070 \
     --tensor-parallel-size 2 \
-    --max-model-len 18000 \
-    --gpu-memory-utilization 0.90 \
+    --max-model-len 40000 \
+    --gpu-memory-utilization 0.80 \
     --trust-remote-code \
     --tokenizer-mode auto \
     --swap-space 0 \
