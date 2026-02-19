@@ -1551,7 +1551,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
         int(os.getenv("LVLLM_MOE_QUANT_ON_GPU", "0"))
     ),
     # Weight format for MOE.
-    "LVLLM_MOE_USE_WEIGHT": lambda: os.getenv("LVLLM_MOE_USE_WEIGHT", "TO_DTYPE"),
+    "LVLLM_MOE_USE_WEIGHT": lambda: os.getenv("LVLLM_MOE_USE_WEIGHT", "INT4"),
     "LVLLM_GPU_RESIDENT_MOE_LAYERS": lambda: os.environ.get("LVLLM_GPU_RESIDENT_MOE_LAYERS", None),
     # Whether to enable GPU expert computation.
     "LVLLM_GPU_PREFILL_MIN_BATCH_SIZE": lambda: int(
@@ -1855,7 +1855,7 @@ def get_moe_compute_strategy() -> MoeComputeStrategy:
     try:
         return MoeComputeStrategy(strategy.upper())
     except ValueError: 
-        print(f"Warning: Invalid LVLLM_MOE_USE_WEIGHT value '{strategy}', using 'TO_DTYPE'")
+        print(f"Warning: Invalid LVLLM_MOE_USE_WEIGHT value '{strategy}', using 'INT4'")
         return MoeComputeStrategy.TO_DTYPE   
 
 def get_gpu_prefetch_window() -> int:
