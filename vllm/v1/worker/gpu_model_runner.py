@@ -5111,6 +5111,15 @@ class GPUModelRunner(
         return self._dummy_pooler_run_task(hidden_states, max_task)
 
     def profile_run(self) -> None:
+        from vllm.envs import is_lk_moe_use_gpu_prefill, disable_lk_moe_gpu_prefill, enable_lk_moe_gpu_prefill, set_profile_run
+        set_profile_run(True)
+        logger.debug("Entering profile run mode")
+        orgigin_is_lk_moe_use_gpu_prefill = is_lk_moe_use_gpu_prefill()
+        origin_gpu_prefill_min_batch_size = 0
+        if orgigin_is_lk_moe_use_gpu_prefill:
+            origin_gpu_prefill_min_batch_size = disable_lk_moe_gpu_prefill()
+            logger.debug("Disabled GPU prefill for memory profiling")
+            
         # Profile with multimodal encoder & encoder cache.
         if self.supports_mm_inputs:
             mm_config = self.model_config.multimodal_config
@@ -5184,6 +5193,11 @@ class GPUModelRunner(
         del hidden_states, output
         self.encoder_cache.clear()
         gc.collect()
+        if orgigin_is_lk_moe_use_gpu_prefill:
+            enable_lk_moe_gpu_prefill(origin_gpu_prefill_min_batch_size)
+            logger.debug("Restored GPU prefill state after profiling")
+        set_profile_run(False) 
+        logger.debug("Exited profile run mode")
 
     @instrument(span_name="Capture model")
     def capture_model(self) -> int:

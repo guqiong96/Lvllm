@@ -174,6 +174,7 @@ vllm serve \
     --dtype bfloat16 \
     --max-num-seqs 4 \
     --compilation_config.mode VLLM_COMPILE \
+    --enable-auto-tool-choice \
     --tool-call-parser minimax_m2 \
     --reasoning-parser minimax_m2_append_think 
 ```

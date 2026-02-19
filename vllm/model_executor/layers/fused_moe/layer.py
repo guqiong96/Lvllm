@@ -58,7 +58,7 @@ logger = init_logger(__name__)
 import threading
 from vllm.utils.platform_utils import is_pin_memory_available
 from vllm.envs import MoeComputeStrategy
-from vllm.envs import is_lk_moe_feature_enabled, get_moe_compute_strategy, is_lk_moe_cpu_layer, is_lk_moe_gpu_resident_layer, is_lk_moe_gpu_prefill_layer, get_gpu_prefetch_window, get_gpu_prefill_min_batch_size, is_lk_moe_use_gpu_prefill, is_lk_moe_quant_on_gpu
+from vllm.envs import is_lk_moe_feature_enabled, get_moe_compute_strategy, is_lk_moe_cpu_layer, is_lk_moe_gpu_resident_layer, is_lk_moe_gpu_prefill_layer, get_gpu_prefetch_window, get_gpu_prefill_min_batch_size, is_lk_moe_use_gpu_prefill, is_lk_moe_quant_on_gpu, is_in_profile_run
 if is_lk_moe_feature_enabled():
     import  lk_moe
     GGML_TYPE_TO_TORCH_DTYPE = {
@@ -1599,10 +1599,22 @@ class FusedMoE(CustomOp):
         
         return result
     
-    def should_use_gpu_prefill(self, hidden_states: torch.Tensor) -> bool:  
+    def should_use_gpu_prefill(self, hidden_states: torch.Tensor) -> bool:
+        from vllm.forward_context import (
+            ForwardContext,
+            get_forward_context,
+            is_forward_context_available,
+        )
+        from vllm.config import CUDAGraphMode
+        forward_context = get_forward_context()
+        if (hasattr(forward_context, 'cudagraph_runtime_mode') and 
+            forward_context.cudagraph_runtime_mode != CUDAGraphMode.NONE):
+            return 
         return (not torch.cuda.is_current_stream_capturing() and 
                 self.is_gpu_prefill_layer and 
-                hidden_states.size(0) >= get_gpu_prefill_min_batch_size())   
+                hidden_states.size(0) >= get_gpu_prefill_min_batch_size() and
+                not is_in_profile_run())
+                
             
     def _get_ggml_type_from_quant_config(self,  quant_config, layer_idx, weight_type):  
         if layer_idx < len(quant_config.moe_weight_type_map):

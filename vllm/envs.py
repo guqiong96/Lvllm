@@ -1814,6 +1814,24 @@ def is_lk_moe_quant_on_gpu() -> bool:
 def is_lk_moe_use_gpu_prefill() -> bool:
     return environment_variables["LVLLM_GPU_PREFILL_MIN_BATCH_SIZE"]() > 0
 
+def disable_lk_moe_gpu_prefill() -> int:
+    origin_value = environment_variables["LVLLM_GPU_PREFILL_MIN_BATCH_SIZE"]()
+    environment_variables["LVLLM_GPU_PREFILL_MIN_BATCH_SIZE"] = lambda: 0
+    return origin_value
+
+def enable_lk_moe_gpu_prefill(value: int) -> int:
+    environment_variables["LVLLM_GPU_PREFILL_MIN_BATCH_SIZE"] = lambda: value
+    return value
+
+_is_in_profile_run = True
+
+def is_in_profile_run(): 
+    return _is_in_profile_run
+
+def set_profile_run(status: bool): 
+    global _is_in_profile_run
+    _is_in_profile_run = status
+    
 def get_gpu_prefill_min_batch_size() -> int:
     return environment_variables["LVLLM_GPU_PREFILL_MIN_BATCH_SIZE"]() 
 def get_moe_compute_strategy() -> MoeComputeStrategy: 
