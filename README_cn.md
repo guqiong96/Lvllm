@@ -110,13 +110,14 @@ LVLLM_MOE_NUMA_ENABLED=1 \
 LK_THREAD_BINDING=CPU_CORE \
 LK_THREADS=44 \
 OMP_NUM_THREADS=44 \
+LVLLM_MOE_USE_WEIGHT=INT4 \
 LVLLM_GPU_RESIDENT_MOE_LAYERS=0 \
 LVLLM_GPU_PREFETCH_WINDOW=1 \
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=2048 \
 LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
 LVLLM_MOE_QUANT_ON_GPU=1 \
 vllm serve \
-    --model /home/guqiong/Models/Qwen3.5-397B-A17B \
+    --model /home/guqiong/Models/Qwen3.5-397B-A17B-FP8 \
     --host 0.0.0.0 \
     --port 8070 \
     --tensor-parallel-size 2 \
@@ -125,7 +126,7 @@ vllm serve \
     --trust-remote-code \
     --tokenizer-mode auto \
     --swap-space 0 \
-    --served-model-name "Qwen3.5-397B-A17B" \
+    --served-model-name Qwen3.5-397B-A17B-FP8 \
     --compilation_config.cudagraph_mode FULL_DECODE_ONLY \
     --enable-prefix-caching \
     --enable-chunked-prefill \
