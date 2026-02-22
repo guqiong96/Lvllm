@@ -1727,7 +1727,9 @@ class FusedMoE(CustomOp):
         try:  
             with torch.no_grad():
                 if isinstance(self.quant_method, UnquantizedFusedMoEMethod): 
-                    del self.w13_weight, self.w2_weight
+                    if hasattr(self, "w13_weight") and hasattr(self, "w2_weight"):
+                        setattr(self, "w13_weight", torch.nn.Parameter(torch.empty(0,  device=torch.cuda.current_device()), requires_grad=False))
+                        setattr(self, "w2_weight", torch.nn.Parameter(torch.empty(0,  device=torch.cuda.current_device()), requires_grad=False))
                     
                 if isinstance(self.quant_method, Fp8MoEMethod):
                     param_names = [
@@ -1746,13 +1748,22 @@ class FusedMoE(CustomOp):
                     if self.is_cpu_layer:
                         for param_name in param_names: 
                             if hasattr(self, param_name):
-                                delattr(self, param_name)
+                                setattr(self, param_name, torch.nn.Parameter(
+                                    torch.empty(0, device=torch.cuda.current_device()), 
+                                    requires_grad=False
+                                ))
                         for scale_name in scale_names:
                             if hasattr(self, scale_name):
-                                delattr(self, scale_name)
+                                setattr(self, scale_name, torch.nn.Parameter(
+                                    torch.empty(0, device=torch.cuda.current_device()), 
+                                    requires_grad=False
+                                ))
                         for quant_config_name in quant_config_names:
                             if hasattr(self, "moe_quant_config") and hasattr(self.moe_quant_config, quant_config_name):
-                                delattr(self.moe_quant_config, quant_config_name)
+                                setattr(self.moe_quant_config, quant_config_name, torch.nn.Parameter(
+                                    torch.empty(0, device=torch.cuda.current_device()), 
+                                    requires_grad=False
+                                ))
                     else: 
                         for param_name in param_names: 
                             if hasattr(self, param_name):
@@ -1782,7 +1793,10 @@ class FusedMoE(CustomOp):
                              
                             for scale_name in scale_names:
                                 if hasattr(self, scale_name):
-                                    delattr(self, scale_name)
+                                    setattr(self, scale_name, torch.nn.Parameter(
+                                        torch.empty(0, device=torch.cuda.current_device()), 
+                                        requires_grad=False
+                                    ))
                         else: 
                             for scale_name in scale_names:
                                 if hasattr(self, scale_name):
@@ -1811,7 +1825,10 @@ class FusedMoE(CustomOp):
         
                     if self.is_cpu_layer: 
                         for param_name in param_names: 
-                            delattr(self, param_name) 
+                            setattr(self, param_name, torch.nn.Parameter(
+                                        torch.empty(0, device=torch.cuda.current_device()), 
+                                        requires_grad=False
+                                    )) 
                     else:
                         for param_name in param_names: 
                             weight = getattr(self, param_name) 

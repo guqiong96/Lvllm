@@ -98,10 +98,11 @@ Note 1: Enabling GPU Prefill, Input Length 32K-64K
 
 ## How to Run Qwen3.5
 ```bash
-sudo sh -c 'echo 1 > /proc/sys/vm/drop_caches'
+sync && echo 3 | sudo tee /proc/sys/vm/drop_caches
 free -h
 
 PYTORCH_ALLOC_CONF=expandable_segments:True \
+VLLM_TEST_FORCE_FP8_MARLIN=1 \
 NCCL_SOCKET_IFNAME=lo \
 NCCL_IB_DISABLE=1 \
 GLOO_SOCKET_IFNAME=lo \
@@ -143,6 +144,8 @@ vllm serve \
 
  
 ```bash
+PYTORCH_ALLOC_CONF=expandable_segments:True \
+VLLM_TEST_FORCE_FP8_MARLIN=1 \
 NCCL_SOCKET_IFNAME=lo \
 NCCL_IB_DISABLE=1 \
 GLOO_SOCKET_IFNAME=lo \
