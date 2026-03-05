@@ -1982,4 +1982,34 @@ def is_lk_moe_gpu_resident_layer(layer_name: str) -> bool:
                 continue
      
     return layer_id in disabled_layers
+
+import threading
+from contextlib import contextmanager
+
+class LkMoeSerialGuard:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._owner = None
+        self._depth = 0
+    
+    @contextmanager
+    def acquire(self):
+        thread_id = threading.get_ident()
+         
+        if self._owner == thread_id:
+            self._depth += 1
+            try:
+                yield
+            finally:
+                self._depth -= 1
+            return
+         
+        with self._lock:
+            self._owner = thread_id
+            self._depth = 1
+            try:
+                yield
+            finally:
+                self._owner = None
+                self._depth = 0
  

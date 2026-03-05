@@ -32,7 +32,8 @@ Lvllm uses the latest vLLM source code and has redesigned and implemented MOE mo
 ## Version Changes
 
 ```bash
-2026-02-25: lvllm-v1.8.7 - fix known issues, support new models
+2026-03-05: lvllm-v1.9.0 - Optimize GPU prefill and regular prefill to ensure output quality
+2026-03-01: lvllm-v1.8.10 - fix known issues, support new models
 2026-02-02：lvllm-v1.7.0 - support for EP parallelism, 8-card running minimax-m2.1 model requires setting --enable_expert_parallel
 2026-01-26: lvllm-v1.6.1 - fp8 model support for FP8 + INT4 inference, support for GPU Prefill acceleration (high memory usage!)
 2026-01-25: lvllm-v1.6.0 - fp8 model support for GPU Prefill acceleration (high memory usage!)
@@ -58,6 +59,7 @@ Most of the original MOE models verified by vLLM
 
 | Model Name | Status |
 |---------|------|
+| Qwen3.5-35B-A3B | ✅ Tested |
 | Qwen3.5-122B-A10B | ✅ Tested |
 | Qwen3.5-397B-A17B | ✅ Tested |
 | Qwen3-Coder-Next | ✅ Tested |

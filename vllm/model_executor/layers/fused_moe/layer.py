@@ -58,7 +58,7 @@ logger = init_logger(__name__)
 import threading
 from vllm.utils.platform_utils import is_pin_memory_available
 from vllm.envs import MoeComputeStrategy
-from vllm.envs import is_lk_moe_feature_enabled, get_moe_compute_strategy, is_lk_moe_cpu_layer, is_lk_moe_gpu_resident_layer, is_lk_moe_gpu_prefill_layer, get_gpu_prefetch_window, get_gpu_prefill_min_batch_size, is_lk_moe_use_gpu_prefill, is_lk_moe_quant_on_gpu, is_in_profile_run
+from vllm.envs import is_lk_moe_feature_enabled, get_moe_compute_strategy, is_lk_moe_cpu_layer, is_lk_moe_gpu_resident_layer, is_lk_moe_gpu_prefill_layer, get_gpu_prefetch_window, get_gpu_prefill_min_batch_size, is_lk_moe_use_gpu_prefill, is_lk_moe_quant_on_gpu, is_in_profile_run, LkMoeSerialGuard
 if is_lk_moe_feature_enabled():
     import  lk_moe
     GGML_TYPE_TO_TORCH_DTYPE = {
@@ -378,7 +378,9 @@ class FusedMoE(CustomOp):
         
         if vllm_config.model_config is not None:
             self.check_nan_in_output = (vllm_config.model_config.architecture == "MiniMaxM2ForCausalLM" or vllm_config.model_config.architecture == "Step3p5ForCausalLM")
-
+        else:
+            self.check_nan_in_output = False
+            
         # FIXME (varun): We should have a better way of inferring the activation
         # datatype. This works for now as the tensor datatype entering the MoE
         # operation is typically unquantized (i.e. float16/bfloat16).
@@ -425,6 +427,7 @@ class FusedMoE(CustomOp):
         self.is_gpu_resident_layer = is_lk_moe_gpu_resident_layer(self.layer_name) 
         self.is_gpu_prefill_layer = is_lk_moe_gpu_prefill_layer(self.layer_name)
         self.is_cpu_layer = is_lk_moe_cpu_layer(self.layer_name)
+        self._lk_moe_guard = LkMoeSerialGuard()
         if get_gpu_prefill_min_batch_size() > vllm_config.scheduler_config.max_num_batched_tokens:
             logger.error(
                 f"gpu_prefill_min_batch_size ({get_gpu_prefill_min_batch_size()}) "
@@ -2689,28 +2692,27 @@ class FusedMoE(CustomOp):
                     torch.nan_to_num(output_gpu[graph_index][:batch_size], nan=0.0, out=output_gpu[graph_index][:batch_size])
                 return output_gpu[graph_index][:batch_size]
             else:  
-                if not hasattr(self, '_normal_prefill_lock'):
-                    self._normal_prefill_lock = threading.Lock() 
+                prefill_stream = torch.cuda.Stream()
+                        
+                current_stream = torch.cuda.current_stream()
+                wait_event = torch.cuda.Event()
+                wait_event.record(current_stream)
                 
-                with self._normal_prefill_lock:
-                    if not hasattr(self, '_normal_prefill_stream'):
-                        self._normal_prefill_stream = torch.cuda.Stream() 
-                        
-                    current_stream = torch.cuda.current_stream()
-                    wait_event = torch.cuda.Event()
-                    wait_event.record(current_stream)
+                topk_ids.record_stream(prefill_stream)
+                topk_weights.record_stream(prefill_stream)
+                hidden_states.record_stream(prefill_stream)
+                
+                with torch.cuda.stream(prefill_stream):
+                    prefill_stream.wait_event(wait_event)
                     
-                    with torch.cuda.stream(self._normal_prefill_stream):
-                        self._normal_prefill_stream.wait_event(wait_event)
-                        
-                        expert_ids_cpu = topk_ids.to(dtype=torch.int32, device='cpu', memory_format=torch.contiguous_format, non_blocking=non_blocking)
-                        weights_cpu = topk_weights.to(dtype=torch.float32, device='cpu', memory_format=torch.contiguous_format, non_blocking=non_blocking)
-                        hidden_states_cpu = hidden_states.to(device='cpu', memory_format=torch.contiguous_format, non_blocking=non_blocking)
-                        output_cpu = torch.empty_like(hidden_states, device='cpu').contiguous()
-                        bsz_tensor = torch.tensor([hidden_states.size(0)], device='cpu', dtype=torch.int32).contiguous()
-                        
-                        self._normal_prefill_stream.synchronize()
-                        
+                    expert_ids_cpu = topk_ids.to(dtype=torch.int32, device='cpu', memory_format=torch.contiguous_format, non_blocking=non_blocking)
+                    weights_cpu = topk_weights.to(dtype=torch.float32, device='cpu', memory_format=torch.contiguous_format, non_blocking=non_blocking)
+                    hidden_states_cpu = hidden_states.to(device='cpu', memory_format=torch.contiguous_format, non_blocking=non_blocking)
+                    output_cpu = torch.empty_like(hidden_states, device='cpu').contiguous()
+                    bsz_tensor = torch.tensor([hidden_states.size(0)], device='cpu', dtype=torch.int32).contiguous()
+                     
+                    prefill_stream.synchronize()
+                    with self._lk_moe_guard.acquire():
                         self.lk_moe.forward(
                             hidden_states.size(0),                         # qlen
                             expert_ids_cpu.size(1),                    # k
@@ -2720,15 +2722,15 @@ class FusedMoE(CustomOp):
                             output_cpu.data_ptr(),                     # output 
                             bsz_tensor.data_ptr()                      # bsz_tensor
                         )     
-                        output_gpu = output_cpu.to(torch.cuda.current_device(), non_blocking=non_blocking)
-                        if self.check_nan_in_output:
-                            torch.nan_to_num(output_gpu, nan=0.0, out=output_gpu)
-                        complete_event = torch.cuda.Event()
-                        complete_event.record(self._normal_prefill_stream)
-                    
-                    current_stream.wait_event(complete_event)
-        
-                    return output_gpu
+                    output_gpu = output_cpu.to(torch.cuda.current_device(), non_blocking=non_blocking)
+                    if self.check_nan_in_output:
+                        torch.nan_to_num(output_gpu, nan=0.0, out=output_gpu)
+                    complete_event = torch.cuda.Event()
+                    complete_event.record(prefill_stream)
+                
+                current_stream.wait_event(complete_event)
+    
+                return output_gpu
        
         except Exception as e:
             logger.error(f"lk_moe forward failed with error: {e}, falling back to default path") 

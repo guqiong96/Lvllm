@@ -1423,11 +1423,14 @@ class CompressedTensorsWNA16MarlinMoEMethod(CompressedTensorsMoEMethod):
         layer.marlin_state = GPTQMarlinState.REPACK
 
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None: 
-        if isinstance(layer, FusedMoE) and layer.is_cpu_layer: 
-            return
             
         num_experts = layer.w13_weight_g_idx.shape[0]
         device = layer.w13_weight_g_idx.device
+        
+        if isinstance(layer, FusedMoE) and layer.is_cpu_layer:
+            layer.workspace = marlin_make_workspace_new(device, 4) 
+            return
+        
         if self.kernel_backend == "Flashinfer":
             dict_weights_mxint4 = prepare_static_weights_for_trtllm_mxint4_moe(
                 layer.w13_weight_packed,
