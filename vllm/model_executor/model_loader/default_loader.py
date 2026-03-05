@@ -14,7 +14,6 @@ from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 from vllm.config import ModelConfig
 from vllm.config.load import LoadConfig
 from vllm.logger import init_logger
-from vllm.model_executor.layers.quantization.kv_cache import BaseKVCacheMethod
 from vllm.model_executor.layers.quantization.torchao import torchao_version_at_least
 from vllm.model_executor.model_loader.base_loader import BaseModelLoader
 from vllm.model_executor.model_loader.weight_utils import (
@@ -299,13 +298,6 @@ class DefaultModelLoader(BaseModelLoader):
         # We only enable strict check for non-quantized models
         # that have loaded weights tracking currently.
         if model_config.quantization is None and loaded_weights is not None:
-            for name, module in model.named_modules():
-                quant_method = getattr(module, "quant_method", None)
-                if isinstance(quant_method, BaseKVCacheMethod):
-                    for param_name, _ in module.named_parameters():
-                        full_name = f"{name}.{param_name}" if name else param_name
-                        loaded_weights.add(full_name)
-            
             weights_not_loaded = weights_to_load - loaded_weights
             if weights_not_loaded:
                 raise ValueError(

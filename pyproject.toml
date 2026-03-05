@@ -116,7 +116,6 @@ markers = [
 ]
 
 [tool.ty.src]
-root = "./vllm"
 respect-ignore-files = true
 
 [tool.ty.environment]
@@ -310,3 +309,4 @@ windo = "windo"
 [tool.typos.type.vimscript.extend-words]
 
 [tool.uv]
+no-build-isolation-package = ["torch"]

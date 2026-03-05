@@ -7,3 +7,7 @@ numba == 0.61.2 # Required for N-gram speculative decoding
 ray[cgraph]>=2.48.0
 # FlashInfer should be updated together with the Dockerfile
 flashinfer-python==0.6.4
+
+# QuACK and Cutlass DSL for FA4 (cute-DSL implementation)
+nvidia-cutlass-dsl>=4.4.0.dev1
+quack-kernels>=0.2.7
