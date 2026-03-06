@@ -457,7 +457,8 @@ MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release  CMAKE_ARGS="-DCMAKE_BUILD_T
 If Lvllm is already installed and you need to update to the latest version, execute the following commands:
 
 ```bash 
-git fetch && git reset --hard origin/main && git clean -fd # This command is suitable for regular users; those who want to keep their local modifications should know to handle them in advance
+# This command is suitable for regular users; those who want to keep their local modifications should know to handle them in advance
+git fetch && git reset --hard origin/main && git clean -fd 
 
 # Install PyTorch 2.9.1
 pip uninstall torchaudio triton torchvision torch vllm
@@ -478,76 +479,102 @@ rm -rf ~/.cache/flashinfer
  
 ### MoE Resident in VRAM, Linear Increase in Decode and Prefill Speed
 ```bash
-LVLLM_GPU_RESIDENT_MOE_LAYERS=0-5 # 0-5 MoE layers resident in VRAM
-#LVLLM_GPU_RESIDENT_MOE_LAYERS=0,1,8-9 # 0,1,8-9 MoE layers resident in VRAM
-#LVLLM_GPU_RESIDENT_MOE_LAYERS="" # Disable MoE resident in VRAM
+# 0-5 MoE layers resident in VRAM
+# 0,1,8-9 means 0,1,8-9 MoE layers resident in VRAM
+# Some models have non-zero starting layer numbers, such as Step-3.5-Flash model starting at 3
+LVLLM_GPU_RESIDENT_MOE_LAYERS=0-5 
 ``` 
  
 ### Enable GPU Prefill
 ```bash
-LVLLM_GPU_RESIDENT_MOE_LAYERS=0-2 # 0-2 MoE layers resident in VRAM, to achieve optimal performance with GPU prefill enabled, include layer 0
-#LVLLM_GPU_RESIDENT_MOE_LAYERS=3-4 # Some models have non-zero starting layer numbers, such as Step-3.5-Flash model starting at 3
-LVLLM_GPU_PREFETCH_WINDOW=1 # Prefetch 1 layer, recommended value is 1-2, more is meaningless
-LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 # Start GPU prefill when input length reaches 4096, can be decreased or increased based on CPU prefill performance, starting prefill earlier or later
-max_num_batched_tokens: 65536 # Same as context size for optimal performance, can be appropriately reduced based on VRAM availability, exceeding context size is meaningless
+# to achieve optimal performance with GPU prefill enabled, include layer 0
+LVLLM_GPU_RESIDENT_MOE_LAYERS=0  
+# Prefetch 1 layer, recommended value is 1, more is meaningless
+LVLLM_GPU_PREFETCH_WINDOW=1 
+# Start GPU prefill when input length reaches 4096, can be decreased or increased based on CPU prefill performance, starting prefill earlier or later
+LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 
+# Same as context size for optimal performance, can be appropriately reduced based on VRAM availability, exceeding context size is meaningless
+--max-num-batched-tokens 65536 # 
 ``` 
  
 ### Disable GPU Prefill
 ```bash
-LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=0 # Disable GPU prefill
-#LVLLM_GPU_PREFILL_MIN_BATCH_SIZE="" # Disable GPU prefill 
-max_num_batched_tokens: 1024 # 1024 to 8192, too large is meaningless (occupies too much VRAM and long startup time)
+# Disable GPU prefill
+LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=0
+LVLLM_GPU_PREFILL_MIN_BATCH_SIZE="" 
+# 1024 to 8192, too large is meaningless (occupies too much VRAM and long startup time)
+--max-num-batched-tokens 4096
 ``` 
  
 ### Thread Binding to CPU Cores
 ```bash
-LK_THREAD_BINDING=CPU_CORE # Bind to CPU cores (including hyper-threading logical cores), optimal performance
-#LK_THREAD_BINDING=NUMA_NODE # Bind to NUMA nodes, second choice to solve extreme performance issues on virtualization platforms
+# Bind to CPU cores (including hyper-threading logical cores), optimal performance
+LK_THREAD_BINDING=CPU_CORE 
+# Bind to NUMA nodes, second choice to solve extreme performance issues on virtualization platforms
+LK_THREAD_BINDING=NUMA_NODE 
 ``` 
 ### BIOS NUMA Settings
 ```bash
 AMD EPYC: Set NPS4 for optimal performance
 Intel XEON: Set SNC4 for optimal performance
-General: 2,4,8 nodes, maximum support for 32 nodes, more nodes are better, node count being a multiple of GPUs for optimal performance # Some virtualization platforms or Intel platforms should not set 5 or 10 nodes, set to 2 nodes to avoid performance issues
+# Some virtualization platforms or Intel platforms should not set 5 or 10 nodes, set to 2 nodes to avoid performance issues
+General: 2,4,8 nodes, maximum support for 32 nodes, more nodes are better, node count being a multiple of GPUs for optimal performance 
 ```
  
 ### Thread Count Settings
 ```bash
 # Thread count <= (core count - x) / tensor parallelism size (TP size)  # x threads reserved for other tasks, at least 4 threads
-LK_THREADS=44                    # 96 cores, 2 GPUs, 44 threads per GPU, 88 threads total, 8 threads reserved for other tasks
-# Too many threads may cause performance issues        # Although the system automatically adjusts the number of threads, manual setting is recommended for testing
+# 96 cores, 2 GPUs, 44 threads per GPU, 88 threads total, 8 threads reserved for other tasks 
+LK_THREADS=44                   
+# if the total number of threads exceeds the physical core count, it may cause performance issues   
+# although the system will automatically adjust the number of threads, it is recommended to manually set it for testing     
+
 ```
 ### Decode Performance
 ```bash
-compilation_config.mode: "VLLM_COMPILE"                 # Supports 2080ti and above GPUs
-compilation_config.cudagraph_mode: "FULL_DECODE_ONLY"   # Enable CUDAGraph
+ # Supports 2080ti and above GPUs
+--compilation_config.mode VLLM_COMPILE 
+ # Enable CUDAGraph               
+--compilation_config.cudagraph_mode FULL_DECODE_ONLY  
 ```
  
 ### VRAM Settings
 ```bash
-gpu-memory-utilization: 0.80 # 24G VRAM with GPU prefill enabled, leave sufficient temporary VRAM for calculations, otherwise long context prefill performance will drop significantly, startup time will be too long
-# gpu-memory-utilization: 0.92 # 24G VRAM with GPU prefill disabled, no need to leave too much VRAM
-# max_num_seqs: 1 # Maximum 1 concurrent, maximum VRAM savings
-max_num_seqs: 4 # Maximum 4 concurrent, regular VRAM savings
-max_num_batched_tokens: 1024  # Save VRAM when GPU prefill is disabled, performance remains unchanged, but if enable GPU prefill will cause performance drop
-max_num_batched_tokens: 65536 # or larger and less than context size, enable GPU prefill, obtain best performance, but if disable GPU prefill will cause performance drop
+# 24G VRAM with GPU prefill enabled, leave sufficient temporary VRAM for calculations, otherwise long context prefill performance will drop significantly, startup time will be too long
+--gpu-memory-utilization 0.85  
+# Maximum 4 concurrent, regular VRAM savings
+--max-num-seqs 4 
+# Save VRAM when GPU prefill is disabled, performance remains unchanged, but if enable GPU prefill will cause performance drop
+--max-num-batched-tokens 4096
+# or larger and less than context size, enable GPU prefill, obtain best performance, but if disable GPU prefill will cause performance drop
+--max-num-batched-tokens 65536 
 ```
 ### CPU Power Saving
 ```bash
-LK_POWER_SAVING=1 # enable low power mode while inference, reduce CPU temperature, slightly reduce performance 
+# enable low power mode while inference, reduce CPU temperature, slightly reduce performance 
+LK_POWER_SAVING=1 
 ```
 
 ### FP8 Model Weight Runtime Format
 ```bash
-LVLLM_MOE_USE_WEIGHT=INT4 # Model MoE expert weights use INT4 inference, other parts remain FP8, enabling almost no impact on accuracy, speed order: INT4 > TO_DTYPE > KEEP
+ # Model MoE expert weights use INT4 inference, other parts remain FP8, enabling almost no impact on accuracy, speed order: INT4 > TO_DTYPE > KEEP
+LVLLM_MOE_USE_WEIGHT=INT4
 ```
 
 ### Model Loading with NUMA Interleaving
 ```bash
-LVLLM_ENABLE_NUMA_INTERLEAVE=1 # Slow model loading can prevent OOM. Recommended values: use `0` when memory is sufficient during model file loading, use `1` when memory is limited.
+# Slow model loading can prevent OOM. Recommended values: use `0` when memory is sufficient during model file loading, use `1` when memory is limited.
+LVLLM_ENABLE_NUMA_INTERLEAVE=1 
 ```
 
 ### Model Loading with GPU Expert Quantization
 ```bash
-LVLLM_MOE_QUANT_ON_GPU=1 # Enable GPU expert quantization, recommended values: enable when sufficient GPU memory is available (only effective during model loading, not during inference), speed up model loading
+# Enable GPU expert quantization, recommended values: enable when sufficient GPU memory is available (only effective during model loading, not during inference), speed up model loading
+LVLLM_MOE_QUANT_ON_GPU=1 
+```
+
+### CPU Prefill Optimization
+```bash
+# It is allowed to increase the CPU prefill speed by increasing the max_num_batched_tokens parameter, for example --max-num-batched-tokens 4096. If GPU prefill is enabled, the smaller value between LVLLM_GPU_PREFILL_MIN_BATCH_SIZE and max_num_batched_tokens will be used.
+--max-num-batched-tokens 4096
 ```

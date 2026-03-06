@@ -434,6 +434,7 @@ class FusedMoE(CustomOp):
                 f"must be less than or equal to max_num_batched_tokens "
                 f"({vllm_config.scheduler_config.max_num_batched_tokens})"
             )
+        self.max_num_group_batch_size = self.get_max_num_group_batch_size()
              
 
         self.enable_eplb = enable_eplb
@@ -1595,6 +1596,16 @@ class FusedMoE(CustomOp):
 
         return s
     
+    def get_max_num_group_batch_size(self) -> int:
+        max_num_batched_tokens = self.vllm_config.scheduler_config.max_num_batched_tokens
+        
+        if is_lk_moe_use_gpu_prefill():
+            group_batch_size = min(max_num_batched_tokens, get_gpu_prefill_min_batch_size()) + 128
+        else:
+            group_batch_size = min(4096, max_num_batched_tokens) + 128
+         
+        return group_batch_size
+    
     def global_to_local_expert_ids(self, topk_ids): 
         expert_map = self._expert_map.to(topk_ids.device)
         max_idx = len(self._expert_map) - 1
@@ -1660,7 +1671,8 @@ class FusedMoE(CustomOp):
             from vllm.model_executor.layers.quantization.awq_marlin import AWQMarlinMoEMethod
             from vllm.model_executor.layers.quantization.fp8 import Fp8MoEMethod
             from vllm.model_executor.layers.quantization.gguf import GGUFMoEMethod
-            from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsW8A8Fp8MoEMethod 
+            from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsW8A8Fp8MoEMethod
+            from vllm.model_executor.layers.quantization.modelopt import ModelOptNvFp4FusedMoE
             find_weight = False  
             with torch.no_grad():
                 if (isinstance(self.quant_method, CompressedTensorsWNA16MarlinMoEMethod) or isinstance(self.quant_method, CompressedTensorsWNA16MoEMethod)) \
@@ -1866,7 +1878,8 @@ class FusedMoE(CustomOp):
         return self.tp_size, self.tp_rank    
                    
     def _process_gguf_weights(self):  
- 
+        raise ValueError("GGUF Weights are not supported for lk moe ...")  
+    
         from vllm.model_executor.models.utils import extract_layer_index
         layer_idx = extract_layer_index(self.layer_name)
         gate_ggml_type = self._get_ggml_type_from_quant_config(self.quant_config, layer_idx, 'gate')
@@ -1904,7 +1917,7 @@ class FusedMoE(CustomOp):
             self.intermediate_size_per_partition,             # intermediate_size
             32,                            # stride
             10,                            # group_min_len
-            1024,                          # group_max_len
+            self.max_num_group_batch_size,                          # group_max_len
             hidden_ggml_type,           
             w13_ggml_type,                # gate_type  
             w2_ggml_type,                # down_type   
@@ -2023,7 +2036,7 @@ class FusedMoE(CustomOp):
             self.intermediate_size_per_partition,             # intermediate_size
             32,                            # stride
             10,                            # group_min_len
-            1024,                         # group_max_len
+            self.max_num_group_batch_size,                         # group_max_len
             hidden_ggml_type,              # hidden_type 
             2,
             2,
@@ -2057,7 +2070,7 @@ class FusedMoE(CustomOp):
         w2_scales = self.w2_scales
         w13_qzeros = self.w13_qzeros
         w2_qzeros = self.w2_qzeros
-        ValueError("AWQ Weights are not supported for lk moe ...") 
+        raise ValueError("AWQ Weights are not supported for lk moe ...") 
          
  
     def _process_fp8_weights(self, block_quant: bool):   
@@ -2106,7 +2119,7 @@ class FusedMoE(CustomOp):
             self.intermediate_size_per_partition,             # intermediate_size
             32,                            # stride
             10,                            # group_min_len
-            1024,                          # group_max_len
+            self.max_num_group_batch_size,                          # group_max_len
             hidden_ggml_type,              # hidden_type 
             8,
             8,
@@ -2200,7 +2213,7 @@ class FusedMoE(CustomOp):
             self.intermediate_size_per_partition,  # intermediate_size
             32,                                # stride
             10,                                # group_min_len
-            1024,   # group_max_len
+            self.max_num_group_batch_size,   # group_max_len
             hidden_ggml_type,                  # hidden_type 
             0,                                 # w13_weight_data_type: 0 for fp32
             0,                                # w2_weight_data_type: 0 for fp32
@@ -2300,7 +2313,7 @@ class FusedMoE(CustomOp):
             self.intermediate_size_per_partition,             # intermediate_size
             32,                            # stride
             10,                            # group_min_len
-            1024,                          # group_max_len 
+            self.max_num_group_batch_size,                          # group_max_len 
             hidden_ggml_type,                # hidden_type 
             w13_ggml_type,                  # w13_type  
             w2_ggml_type,                # w2_type   
@@ -2391,7 +2404,7 @@ class FusedMoE(CustomOp):
             self.intermediate_size_per_partition,  # intermediate_size
             32,                                # stride
             10,                                # group_min_len
-            1024,   # group_max_len
+            self.max_num_group_batch_size,   # group_max_len
             hidden_ggml_type,                  # hidden_type 
             0,                                 # w13_weight_data_type: 0 for fp32
             0,                                # w2_weight_data_type: 0 for fp32
@@ -2482,7 +2495,7 @@ class FusedMoE(CustomOp):
             self.intermediate_size_per_partition,             # intermediate_size
             32,                            # stride
             10,                            # group_min_len
-            1024,                          # group_max_len 
+            self.max_num_group_batch_size,                          # group_max_len 
             hidden_ggml_type,                # hidden_type  
             w13_ggml_type,                  # w13_type  
             w2_ggml_type,                # w2_type   
@@ -2525,7 +2538,7 @@ class FusedMoE(CustomOp):
             self.intermediate_size_per_partition,             # intermediate_size
             32,                            # stride
             10,                            # group_min_len
-            1024,                          # group_max_len
+            self.max_num_group_batch_size,                          # group_max_len
             hidden_ggml_type,            
             w13_ggml_type,                # gate_type  
             w2_ggml_type,                # down_type  
@@ -2540,16 +2553,22 @@ class FusedMoE(CustomOp):
     def forward_lk(self, hidden_states: torch.Tensor, topk_weights: torch.Tensor, topk_ids: torch.Tensor) -> torch.Tensor:
         return self._process_valid_inputs(hidden_states, topk_weights, topk_ids)
   
+    def _get_max_batch_size(self) -> int:
+        if self.vllm_config.speculative_config is not None and self.vllm_config.speculative_config.num_speculative_tokens > 0:
+            batch_size = self.vllm_config.scheduler_config.max_num_seqs * (
+                1 + self.vllm_config.speculative_config.num_speculative_tokens
+            ) * 2
+        else:
+            batch_size = self.vllm_config.scheduler_config.max_num_seqs * 2
+
+        batch_size = min(batch_size, 512)
+        
+        return batch_size
+        
     def _initialize_cuda_graph_buffers(self): 
         if not hasattr(FusedMoE, 'cuda_graphs'):
-            if self.vllm_config.speculative_config is not None and self.vllm_config.speculative_config.num_speculative_tokens > 0:
-                batch_size = self.vllm_config.scheduler_config.max_num_seqs * (
-                    1 + self.vllm_config.speculative_config.num_speculative_tokens
-                ) * 2
-            else:
-                batch_size = self.vllm_config.scheduler_config.max_num_seqs * 2
- 
-            batch_size = min(batch_size, 512)
+            
+            batch_size = self._get_max_batch_size()
  
             FusedMoE.cuda_graphs = [1, 2, 4] + list(range(8, batch_size + 1, 8)) 
              

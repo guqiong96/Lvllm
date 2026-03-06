@@ -249,7 +249,8 @@ vllm serve \
 ```
 
 ```bash 
---enable_expert_parallel # 启用EP并行, 8卡运行minimax-m2.1、minimax-m2.5模型需设置
+# 启用EP并行, 8卡运行minimax-m2.1、minimax-m2.5模型需设置
+--enable_expert_parallel 
 ```
 
 ## 如何运行Kimi-K2.5
@@ -459,7 +460,8 @@ MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release  CMAKE_ARGS="-DCMAKE_BUILD_T
 如果已安装Lvllm，需要更新到最新版本，请执行以下命令：
 
 ```bash 
-git fetch && git reset --hard origin/main && git clean -fd # 此命令适合普通用户，如果保留本地修改内容的用户应知道提前做处理
+# 此命令适合普通用户，如果保留本地修改内容的用户应知道提前做处理
+git fetch && git reset --hard origin/main && git clean -fd 
 
 # 安装PyTorch 2.9.1 
 pip uninstall torchaudio triton torchvision torch vllm
@@ -480,78 +482,103 @@ rm -rf ~/.cache/flashinfer
 
 ### MoE常驻显存, 线性增加decode和prefill速度
 ```bash
-LVLLM_GPU_RESIDENT_MOE_LAYERS=0-5 # 0-5层MoE层常驻显存
-#LVLLM_GPU_RESIDENT_MOE_LAYERS=0,1,8-9 # 0,1,8-9层MoE层常驻显存
-#LVLLM_GPU_RESIDENT_MOE_LAYERS="" # 关闭MoE常驻显存
+# 0-5层MoE层常驻显存
+# 格式 0,1,8-9 表示 0,1,8-9层MoE层常驻显存
+# 少数模型起始层号不为0，例如Step-3.5-Flash模型起始为3 
+LVLLM_GPU_RESIDENT_MOE_LAYERS=0-5 
 ``` 
 
 ### 开启GPU预填充
 ```bash
-LVLLM_GPU_RESIDENT_MOE_LAYERS=0-2 # 0-2层MoE常驻显存, 开启GPU预填充包含0层方可发挥最佳性能
-#LVLLM_GPU_RESIDENT_MOE_LAYERS=3-4 # 少数模型起始层号不为0，例如Step-3.5-Flash模型起始为3 
-LVLLM_GPU_PREFETCH_WINDOW=1 # 预取1层, 建议值为1-2, 多了无意义
-LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 #  输入长度达到4096启动GPU prefill，根据cpu prefill性能可减小或加大， 提前或推后启动prefill
-max_num_batched_tokens: 65536 # 与上下文大小相同获得最佳性能，可根据显存情况适当调小，超过上下文大小无意义
+# 开启GPU预填充包含0层方可发挥最佳性能
+LVLLM_GPU_RESIDENT_MOE_LAYERS=0 
+# 预取1层, 建议值为1, 多了无意义
+LVLLM_GPU_PREFETCH_WINDOW=1
+# 输入长度达到4096启动GPU prefill，根据cpu prefill性能可减小或加大， 提前或推后启动prefill
+LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 
+# 与上下文大小相同获得最佳性能，可根据显存情况适当调小，超过上下文大小无意义
+--max-num-batched-tokens 65536 
 ``` 
 
 ### 关闭GPU预填充
 ```bash
-LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=0 #  关闭GPU预填充
-#LVLLM_GPU_PREFILL_MIN_BATCH_SIZE="" # 关闭GPU预填充 
-max_num_batched_tokens: 1024 # 1024至8192，太大无意义（占用显存及启动时间过长）
+#  关闭GPU预填充
+LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=0 
+LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=""
+# 1024至8192，太大无意义（占用显存及启动时间过长）
+--max-num-batched-tokens 4096 
 ``` 
 
 ### 线程绑定到CPU核心
 ```bash
-LK_THREAD_BINDING=CPU_CORE # 绑定到CPU核心（包括超线程逻辑核心）, 最佳性能
-#LK_THREAD_BINDING=NUMA_NODE # 绑定到NUMA节点, 次优选择，解决部署在虚拟化平台的极端性能问题
+# 绑定到CPU核心（包括超线程逻辑核心）, 最佳性能
+LK_THREAD_BINDING=CPU_CORE 
+# 绑定到NUMA节点, 次优选择，解决部署在虚拟化平台的极端性能问题，以及多实例运行
+LK_THREAD_BINDING=NUMA_NODE 
 ``` 
 ### BIOS NUMA 设置
 ```bash
 AMD EPYC：设置NPS4获得最佳性能
 Intel XEON：设置SNC4获得最佳性能
-通常：2,4,8个节点，最多支持32节点，节点越多越好，节点数为GPU倍数获得最佳性能 # 部分虚拟化平台或Intel平台不要设置5、10节点，设置2节点避免性能问题
+# 部分虚拟化平台或Intel平台不要设置5、10节点，设置2节点避免性能问题
+通常：2,4,8个节点，最多支持32节点，节点越多越好，节点数为GPU倍数获得最佳性能 
 ```
 
 ### 线程数设置
 ```bash
-线程数 <= （核心数 - x）/ 张量并行数（TP size）  # x 留给其它任务的线程，至少4线程
-LK_THREADS=44                    # 96核心，2个GPU， 每个GPU 44线程， 88线程, 剩余8线程留给其它任务
-线程数太大可能会引发性能问题        # 虽然系统会自动条件线程数，但建议手动设置进行测试
+# 线程数 <= （核心数 - x）/ 张量并行数（TP size） x 留给其它任务的线程，至少4线程
+# 96核心，2个GPU， 每个GPU 44线程， 88线程, 剩余8线程留给其它任务
+LK_THREADS=44                    
+# 总的线程数超过物理核心数量可能会引发性能问题   
+# 虽然系统会自动条件线程数，但建议手动设置进行测试     
 ```
-### decode性能
+### 输出性能
 ```bash
-compilation_config.mode: "VLLM_COMPILE"                 # 支持2080ti及以上GPU
-compilation_config.cudagraph_mode: "FULL_DECODE_ONLY"   # 开启CUDAGraph
+# 支持2080ti及以上GPU
+--compilation_config.mode VLLM_COMPILE  
+ # 开启CUDAGraph               
+--compilation_config.cudagraph_mode FULL_DECODE_ONLY  
 ```
 
 ### 显存设置
 ```bash
-gpu-memory-utilization: 0.80 # 24G显存开启GPU预填充时，留出足够临时显存用于计算，否则会导致长上下文预填充性能大幅下降，启动时间过长
-# gpu-memory-utilization: 0.92 # 24G显存关闭GPU预填充时，无需留出过多显存 
-# max_num_seqs: 1 # 最多1并发，最大节省显存
-max_num_seqs: 4 # 最多4并发，常规节省显存
-max_num_batched_tokens: 1024  # 关闭GPU预填充时,节省显存，性能不变，但如果开启GPU预填充会导致性能下降
-max_num_batched_tokens: 65536 或更大 # 开启GPU预填充时，获得最佳性能，但如果关闭GPU预填充会导致性能下降 
+# 24G显存开启GPU预填充时，留出足够临时显存用于计算，否则会导致长上下文预填充性能大幅下降，启动时间过长
+--gpu-memory-utilization 0.85
+# 最多4并发，常规节省显存
+--max-num-seqs 4
+# 关闭GPU预填充时,节省显存，性能不变，但如果开启GPU预填充会导致性能下降
+--max-num-batched-tokens 4096  
+# 开启GPU预填充时，32768~65536，GPU预填充加速情况、显存大小调节，超过上下文大小无意义
+--max-num-batched-tokens 65536 （小于等于上下文大小）
 ```
 ### CPU节能
 ```bash
-LK_POWER_SAVING=1 # 开启后推理时降低CPU温度，性能轻微降低
+# 开启后推理时降低CPU温度，性能轻微降低
+LK_POWER_SAVING=1 
 ```
 
 ### FP8模型权重运行时格式
 ```bash
-LVLLM_MOE_USE_WEIGHT=INT4 # 模型MoE专家权重使用INT4推理，其余部分依旧为FP8，开启几乎不影响精度， 速度排序：INT4 > TO_DTYPE > KEEP
+# 模型MoE专家权重使用INT4推理，其余部分依旧为FP8，开启几乎不影响精度， 速度排序：INT4 > TO_DTYPE > KEEP
+LVLLM_MOE_USE_WEIGHT=INT4 
 ```
 
 ### 模型加载
 ```bash
-LVLLM_ENABLE_NUMA_INTERLEAVE=1 # 慢速加载模型可避免OOM，建议值：加载模型文件时，内存充裕使用`0`，内存紧张使用`1`
+# 慢速加载模型可避免OOM，建议值：加载模型文件时，内存充裕使用`0`，内存紧张使用`1`
+LVLLM_ENABLE_NUMA_INTERLEAVE=1 
 ```
 
 ### 模型加载专家量化
 ```bash
-LVLLM_MOE_QUANT_ON_GPU=1 # 启用GPU专家量化，建议值：显存充足可启用（仅加载时有效，推理时不会额外占用显存），加快模型加载速度
+# 启用GPU专家量化，建议值：显存充足可启用（仅加载时有效，推理时不会额外占用显存），加快模型加载速度
+LVLLM_MOE_QUANT_ON_GPU=1 
+```
+
+### CPU预填充优化
+```bash
+# 允许通过加大max_num_batched_tokens参数来提高cpu prefill速度，例如--max-num-batched-tokens 4096，如果开启了gpu prefill则取LVLLM_GPU_PREFILL_MIN_BATCH_SIZE、max_num_batched_tokens两者最小值
+--max-num-batched-tokens 4096
 ```
 
 
