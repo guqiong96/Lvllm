@@ -32,7 +32,7 @@ Note 1: x86 CPUs with AVX2 or above instruction sets and Nvidia GPUs are support
 ## Version Changes
 
 ```bash
-2026-03-11: lvllm-v1.9.2 - FP8、AWQ4bit MoE Models enable GPU Prefill acceleration without additional memory occupation[Note：max_num_batched_tokens temporarily limited not exceeding 32000], FP8 MoE Model cancel TO_DTYPE runtime type conversion, KEEP model temporarily not support GPU Prefill
+2026-03-11: lvllm-v1.9.2 - FP8、AWQ4bit MoE Models enable GPU Prefill acceleration without additional memory occupation, FP8 MoE Model cancel TO_DTYPE runtime type conversion, KEEP model temporarily not support GPU Prefill
 2026-03-05: lvllm-v1.9.0 - Optimize GPU prefill and regular prefill to ensure output quality
 2026-03-01: lvllm-v1.8.10 - fix known issues, support new models
 2026-02-02：lvllm-v1.7.0 - support for EP parallelism, 8-card running minimax-m2.1 model requires setting --enable_expert_parallel
@@ -138,7 +138,6 @@ vllm serve \
     --gpu-memory-utilization 0.80 \
     --trust-remote-code \
     --tokenizer-mode auto \
-    --swap-space 0 \
     --served-model-name Qwen3.5-122B-A10B \
     --compilation_config.cudagraph_mode FULL_DECODE_ONLY \
     --enable-prefix-caching \
@@ -187,7 +186,6 @@ vllm serve \
     --gpu-memory-utilization 0.80 \
     --trust-remote-code \
     --tokenizer-mode auto \
-    --swap-space 0 \
     --served-model-name Qwen3.5-397B-A17B-FP8 \
     --compilation_config.cudagraph_mode FULL_DECODE_ONLY \
     --enable-prefix-caching \
@@ -235,7 +233,6 @@ vllm serve \
     --gpu-memory-utilization 0.80 \
     --trust-remote-code \
     --tokenizer-mode auto \
-    --swap-space 0 \
     --served-model-name MiniMax-M2.5 \
     --compilation_config.cudagraph_mode FULL_DECODE_ONLY \
     --enable-prefix-caching \
@@ -277,7 +274,7 @@ LK_THREAD_BINDING=CPU_CORE \
 LK_THREADS=44 \
 OMP_NUM_THREADS=44 \
 LVLLM_MOE_USE_WEIGHT=INT4 \
-LVLLM_GPU_RESIDENT_MOE_LAYERS="" \
+LVLLM_GPU_RESIDENT_MOE_LAYERS=0-1 \
 LVLLM_GPU_PREFETCH_WINDOW=1 \
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=2048 \
 LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
@@ -291,7 +288,6 @@ vllm serve \
     --gpu-memory-utilization 0.80 \
     --trust-remote-code \
     --tokenizer-mode auto \
-    --swap-space 0 \
     --served-model-name Kimi-K2.5 \
     --compilation_config.cudagraph_mode FULL_AND_PIECEWISE \
     --enable-prefix-caching \
@@ -342,7 +338,6 @@ vllm serve \
     --gpu-memory-utilization 0.80 \
     --trust-remote-code \
     --tokenizer-mode auto \
-    --swap-space 0 \
     --served-model-name GLM-4.7-FP8 \
     --compilation_config.cudagraph_mode FULL_DECODE_ONLY \
     --enable-prefix-caching \
@@ -385,7 +380,6 @@ vllm serve \
 | `gpu-memory-utilization` | `0.92` | GPU memory utilization percentage allocated to vLLM, less than or equal to 1 |
 | `trust-remote-code` | `true` | Whether to trust remote code, recommended value: `true` |
 | `tokenizer-mode` | `auto` | Tokenizer mode, recommended value: `auto` |
-| `swap-space` | `0` | Swap space size in GB, recommended value: `0` |
 | `served-model-name` | `MiniMax-M2.5` | Served model name |
 | `compilation_config.cudagraph_mode` | `FULL_DECODE_ONLY` | Enable CUDA graph mode, recommended value |
 | `enable_prefix_caching` | `true` | Enable prefix caching, recommended value |
@@ -405,16 +399,16 @@ vllm serve \
 
 ## Installation Steps
 
-### 1. Install CUDA 12.9
+### 1. Install CUDA 13.2
 
 ```bash
 # Uninstall old version CUDA and NVIDIA drivers
 sudo /usr/local/cuda/bin/cuda-uninstaller
 sudo nvidia-uninstall
 
-# Download and install CUDA 12.9
-wget https://developer.download.nvidia.com/compute/cuda/12.9.1/local_installers/cuda_12.9.1_575.57.08_linux.run
-sudo sh cuda_12.9.1_575.57.08_linux.run
+# Download and install CUDA 13.2
+wget https://developer.download.nvidia.com/compute/cuda/13.2.0/local_installers/cuda_13.2.0_595.45.04_linux.run
+sudo sh cuda_13.2.0_595.45.04_linux.run
 ```
 
 ### 2. Create Python Environment
@@ -439,11 +433,8 @@ sudo dnf install numactl-devel        # Rocky Linux
 git clone https://github.com/guqiong96/Lvllm.git
 cd Lvllm
 
-# Install PyTorch 2.9.1
-pip install torchaudio triton torchvision torch==2.9.1
-
-# Use existing PyTorch
-python use_existing_torch.py
+# Install PyTorch 2.10.0
+pip install torchaudio triton torchvision torch==2.10.0
 
 # Install build dependencies
 pip install -r requirements/build.txt
@@ -452,7 +443,7 @@ pip install -r requirements/build.txt
 ### 4. Install Lvllm
 
 ```bash
-MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release  CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
+MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
 ```
 
 **Parameter Explanation:**
@@ -469,14 +460,13 @@ If Lvllm is already installed and you need to update to the latest version, exec
 # This command is suitable for regular users; those who want to keep their local modifications should know to handle them in advance
 git fetch && git reset --hard origin/main && git clean -fd 
 
-# Install PyTorch 2.9.1
+# Install PyTorch 2.10.0
 pip uninstall torchaudio triton torchvision torch vllm
-pip install torchaudio triton torchvision torch==2.9.1
+pip install torchaudio triton torchvision torch==2.10.0
 
 # Qwen3-VL GLM4.6V requires xformers to be installed
 
 # Compile and install
-python use_existing_torch.py
 pip install -r requirements/build.txt
 MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
 
@@ -502,7 +492,7 @@ LVLLM_GPU_RESIDENT_MOE_LAYERS=0
 LVLLM_GPU_PREFETCH_WINDOW=1 
 # Start GPU prefill when input length reaches 4096, can be decreased or increased based on CPU prefill performance, starting prefill earlier or later
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 
-# Current version limit 32000, exceeding context size is meaningless
+# exceeding context size is meaningless
 --max-num-batched-tokens 32000 
 ``` 
  
@@ -556,7 +546,6 @@ LK_THREADS=44
 # Save VRAM when GPU prefill is disabled, performance remains unchanged, but if enable GPU prefill will cause performance drop
 --max-num-batched-tokens 4096
 # or larger and less than context size, enable GPU prefill, obtain best performance, but if disable GPU prefill will cause performance drop
-# current version limit 32000
 --max-num-batched-tokens 32000 
 ```
 ### CPU Power Saving

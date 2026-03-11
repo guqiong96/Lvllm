@@ -7,7 +7,6 @@ max-model-len: 8500
 gpu-memory-utilization: 0.95 
 trust-remote-code: true
 tokenizer-mode: "auto"
-swap-space: 0
 served-model-name: "Kimi-K2.5"
 compilation_config.cudagraph_mode: "FULL_AND_PIECEWISE"
 enable_prefix_caching: true

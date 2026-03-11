@@ -1069,7 +1069,7 @@ def moe_prepare_gpu_prefill_regular(layer, forward_context: ForwardContext, devi
     pin_memory = is_pin_memory_available()
     cpu_tensors = []
     
-    w13_weight_cpu = torch.zeros(
+    w13_weight_cpu = torch.empty(
             (layer.local_num_experts, layer.intermediate_size_per_partition * 2, layer.hidden_size),
             dtype=layer.moe_config.in_dtype, 
             device="cpu",
@@ -1100,7 +1100,7 @@ def moe_prepare_gpu_prefill_regular(layer, forward_context: ForwardContext, devi
     layer.w13_weight = torch.nn.Parameter(w13_gpu, requires_grad=False)
 
     # [local_num_experts, hidden_size, intermediate_size_per_partition]
-    w2_weight_cpu = torch.zeros(
+    w2_weight_cpu = torch.empty(
         (layer.local_num_experts, layer.hidden_size, layer.intermediate_size_per_partition),
         dtype=layer.moe_config.in_dtype,  
         device="cpu",
