@@ -860,7 +860,7 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
 
     def process_weights_after_loading(self, layer: FusedMoE) -> None:
         # Allow for accessing weights and scales in standard way.
-        if isinstance(layer, FusedMoE) and layer.is_cpu_layer:
+        if isinstance(layer, FusedMoE) and not layer.is_gpu_resident_layer:
             return
         w13 = layer.w13_weight
         w2 = layer.w2_weight
@@ -1427,7 +1427,7 @@ class CompressedTensorsWNA16MarlinMoEMethod(CompressedTensorsMoEMethod):
         num_experts = layer.w13_weight_g_idx.shape[0]
         device = layer.w13_weight_g_idx.device
         
-        if isinstance(layer, FusedMoE) and layer.is_cpu_layer:
+        if isinstance(layer, FusedMoE) and not layer.is_gpu_resident_layer:
             layer.workspace = marlin_make_workspace_new(device, 4) 
             return
         
@@ -1568,7 +1568,7 @@ class CompressedTensorsWNA16MarlinMoEMethod(CompressedTensorsMoEMethod):
     def get_fused_moe_quant_config(
         self, layer: torch.nn.Module
     ) -> FusedMoEQuantConfig | None:
-        if isinstance(layer, FusedMoE) and layer.is_cpu_layer:
+        if isinstance(layer, FusedMoE) and not layer.is_gpu_resident_layer:
             return None
         if self.num_bits != 4:
             return None

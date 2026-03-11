@@ -1628,10 +1628,10 @@ class FusedMoE(CustomOp):
         forward_context = get_forward_context()
         if (hasattr(forward_context, 'cudagraph_runtime_mode') and 
             forward_context.cudagraph_runtime_mode != CUDAGraphMode.NONE):
-            return 
-        return (not torch.cuda.is_current_stream_capturing() and 
-                self.is_gpu_prefill_layer and 
-                hidden_states.size(0) >= get_gpu_prefill_min_batch_size())
+            return False
+        if torch.cuda.is_current_stream_capturing():
+            return False
+        return self.is_gpu_prefill_layer and hidden_states.size(0) >= get_gpu_prefill_min_batch_size()
                 
             
     def _get_ggml_type_from_quant_config(self,  quant_config, layer_idx, weight_type):  
@@ -1693,8 +1693,6 @@ class FusedMoE(CustomOp):
                     strategy = get_moe_compute_strategy()
                     if strategy == MoeComputeStrategy.KEEP:
                         self._process_fp8_weights(self.quant_method.block_quant)
-                    elif strategy == MoeComputeStrategy.TO_DTYPE:
-                        self._process_block_weights()
                     else:
                         self._process_block_weights_quant(strategy)
                     find_weight = True
@@ -1703,8 +1701,6 @@ class FusedMoE(CustomOp):
                     strategy = get_moe_compute_strategy()
                     if strategy == MoeComputeStrategy.KEEP:
                         self._process_fp8_weights(False)
-                    elif strategy == MoeComputeStrategy.TO_DTYPE:
-                        self._process_channel_weights() 
                     else:
                         self._process_channel_weights_quant(strategy)
                     find_weight = True
@@ -1722,20 +1718,7 @@ class FusedMoE(CustomOp):
         except Exception as e:
             logger.error(f"Failed to initialize lk_moe: {e}") 
             self.lk_moe = None
-            self.lk_moe_config = None
-    
-    def distribute_weight_tensor(self, param_name: str, weight: torch.Tensor):  
-        with torch.no_grad():
-            origin_dtype = weight.dtype
-            origin_shape = weight.shape
-            setattr(self, param_name + "_origin_dtype", origin_dtype)
-            setattr(self, param_name + "_origin_shape", origin_shape) 
-            
-            shape_array = torch.tensor(origin_shape, dtype=torch.int64).contiguous()
-            
-            self.lk_moe.distributeWeight(param_name, weight.contiguous().data_ptr(), shape_array.data_ptr(), weight[0].nbytes)
-            
-            del shape_array 
+            self.lk_moe_config = None 
             
     def clean_weights_after_loading(self):
         from vllm.model_executor.layers.quantization.fp8 import Fp8MoEMethod
@@ -1765,71 +1748,26 @@ class FusedMoE(CustomOp):
                         "w2_scale",
                     ]
 
-                    if self.is_cpu_layer:
-                        for param_name in param_names: 
-                            if hasattr(self, param_name):
-                                setattr(self, param_name, torch.nn.Parameter(
-                                    torch.empty(0, device=torch.cuda.current_device()), 
-                                    requires_grad=False
-                                ))
-                        for scale_name in scale_names:
-                            if hasattr(self, scale_name):
-                                setattr(self, scale_name, torch.nn.Parameter(
-                                    torch.empty(0, device=torch.cuda.current_device()), 
-                                    requires_grad=False
-                                ))
-                        for quant_config_name in quant_config_names:
-                            if hasattr(self, "moe_quant_config") and hasattr(self.moe_quant_config, quant_config_name):
-                                setattr(self.moe_quant_config, quant_config_name, torch.nn.Parameter(
-                                    torch.empty(0, device=torch.cuda.current_device()), 
-                                    requires_grad=False
-                                ))
-                    else: 
-                        for param_name in param_names: 
-                            if hasattr(self, param_name):
-                                weight = getattr(self, param_name) 
-                                self.distribute_weight_tensor(param_name, weight) 
-                                setattr(self, param_name, torch.nn.Parameter(
-                                    torch.empty(0, device=torch.cuda.current_device()), 
-                                    requires_grad=False
-                                ))
-                         
-                        has_quant_config = (
-                            hasattr(self, "moe_quant_config") and 
-                            hasattr(self.moe_quant_config, quant_config_names[0]) and
-                            hasattr(self.moe_quant_config, quant_config_names[1])
-                        )
-                        
-                        if has_quant_config: 
-                            for scale_name in quant_config_names:
-                                if hasattr(self.moe_quant_config, scale_name):
-                                    weight = getattr(self.moe_quant_config, scale_name) 
-                                    self.distribute_weight_tensor(scale_name, weight)
-                                    setattr(self.moe_quant_config, scale_name, 
-                                        torch.nn.Parameter(
-                                            torch.empty(0, device=torch.cuda.current_device()), 
-                                            requires_grad=False
-                                        ))
-                             
-                            for scale_name in scale_names:
-                                if hasattr(self, scale_name):
-                                    setattr(self, scale_name, torch.nn.Parameter(
-                                        torch.empty(0, device=torch.cuda.current_device()), 
-                                        requires_grad=False
-                                    ))
-                        else: 
-                            for scale_name in scale_names:
-                                if hasattr(self, scale_name):
-                                    weight = getattr(self, scale_name) 
-                                    self.distribute_weight_tensor(scale_name, weight) 
-                                    setattr(self, scale_name, 
-                                        torch.nn.Parameter(
-                                            torch.empty(0, device=torch.cuda.current_device()), 
-                                            requires_grad=False
-                                        ))
+                    for param_name in param_names: 
+                        if hasattr(self, param_name):
+                            setattr(self, param_name, torch.nn.Parameter(
+                                torch.empty(0, device=torch.cuda.current_device()), 
+                                requires_grad=False
+                            ))
+                    for scale_name in scale_names:
+                        if hasattr(self, scale_name):
+                            setattr(self, scale_name, torch.nn.Parameter(
+                                torch.empty(0, device=torch.cuda.current_device()), 
+                                requires_grad=False
+                            ))
+                    for quant_config_name in quant_config_names:
+                        if hasattr(self, "moe_quant_config") and hasattr(self.moe_quant_config, quant_config_name):
+                            setattr(self.moe_quant_config, quant_config_name, torch.nn.Parameter(
+                                torch.empty(0, device=torch.cuda.current_device()), 
+                                requires_grad=False
+                            ))
                                 
-                if (isinstance(self.quant_method, CompressedTensorsWNA16MarlinMoEMethod) or isinstance(self.quant_method, CompressedTensorsWNA16MoEMethod)) \
-                    and hasattr(self.quant_method, 'strategy'):
+                if (isinstance(self.quant_method, CompressedTensorsWNA16MarlinMoEMethod) or isinstance(self.quant_method, CompressedTensorsWNA16MoEMethod)):
                     param_names = [
                         "w13_weight_packed",
                         "w2_weight_packed", 
@@ -1842,18 +1780,13 @@ class FusedMoE(CustomOp):
                         "w13_weight_shape",
                         "w2_weight_shape", 
                     ] 
-        
-                    if self.is_cpu_layer: 
-                        for param_name in param_names: 
-                            setattr(self, param_name, torch.nn.Parameter(
-                                        torch.empty(0, device=torch.cuda.current_device()), 
-                                        requires_grad=False
-                                    )) 
-                    else:
-                        for param_name in param_names: 
-                            weight = getattr(self, param_name) 
-                            self.distribute_weight_tensor(param_name, weight) 
-                            setattr(self, param_name, torch.nn.Parameter(torch.empty(0,  device=torch.cuda.current_device()), requires_grad=False))
+         
+                    for param_name in param_names: 
+                        setattr(self, param_name, torch.nn.Parameter(
+                                    torch.empty(0, device=torch.cuda.current_device()), 
+                                    requires_grad=False
+                                )) 
+                    
                 
             import gc
             gc.collect()
@@ -2140,7 +2073,7 @@ class FusedMoE(CustomOp):
    
     def _process_block_weights_quant(self, moe_compute_strategy: MoeComputeStrategy):  
         
-        if moe_compute_strategy not in {MoeComputeStrategy.INT4, MoeComputeStrategy.INT8}:
+        if moe_compute_strategy not in {MoeComputeStrategy.INT4}:
             print(f"Warning: moe_compute_strategy {moe_compute_strategy} is not supported for lk moe , use INT4 instead ...")
             moe_compute_strategy = MoeComputeStrategy.INT4
         
@@ -2189,7 +2122,7 @@ class FusedMoE(CustomOp):
         w13_fp32_tensor = torch.stack(w13_fp32_list, dim=0).cpu()
         w2_fp32_tensor = torch.stack(w2_fp32_list, dim=0).cpu() 
          
-        w13_fp32_list.clear()  # Python 3.3+
+        w13_fp32_list.clear()   
         w2_fp32_list.clear()
         del w13_fp32_list, w2_fp32_list
          
@@ -2330,7 +2263,7 @@ class FusedMoE(CustomOp):
          
     def _process_channel_weights_quant(self, moe_compute_strategy: MoeComputeStrategy):  
     
-        if moe_compute_strategy not in {MoeComputeStrategy.INT4, MoeComputeStrategy.INT8}:
+        if moe_compute_strategy not in {MoeComputeStrategy.INT4}:
             print(f"Warning: moe_compute_strategy {moe_compute_strategy} is not supported for lk moe , use INT4 instead ...")
             moe_compute_strategy = MoeComputeStrategy.INT4
         
@@ -2727,7 +2660,7 @@ class FusedMoE(CustomOp):
                     expert_ids_cpu = topk_ids.to(dtype=torch.int32, device='cpu', memory_format=torch.contiguous_format, non_blocking=non_blocking)
                     weights_cpu = topk_weights.to(dtype=torch.float32, device='cpu', memory_format=torch.contiguous_format, non_blocking=non_blocking)
                     hidden_states_cpu = hidden_states.to(device='cpu', memory_format=torch.contiguous_format, non_blocking=non_blocking)
-                    output_cpu = torch.empty_like(hidden_states, device='cpu').contiguous()
+                    output_cpu = torch.empty_like(hidden_states, device='cpu', memory_format=torch.contiguous_format)
                     bsz_tensor = torch.tensor([hidden_states.size(0)], device='cpu', dtype=torch.int32).contiguous()
                      
                     prefill_stream.synchronize()

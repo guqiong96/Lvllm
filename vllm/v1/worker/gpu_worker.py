@@ -517,9 +517,10 @@ class Worker(WorkerBase):
         # cuda graph capture.
         kernel_warmup(self)
         
-        self.model_runner._dummy_run(
-            num_tokens=1
-        )
+        if self.vllm_config.compilation_config.cudagraph_mode == CUDAGraphMode.FULL:
+            self.model_runner._dummy_run(
+                num_tokens=1
+            )
  
         cuda_graph_memory_bytes = 0
         if not self.model_config.enforce_eager:

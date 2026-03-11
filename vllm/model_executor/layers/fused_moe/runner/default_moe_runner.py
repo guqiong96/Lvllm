@@ -41,7 +41,6 @@ from vllm.v1.worker.ubatching import dbo_current_ubatch_id
 
 logger = init_logger(__name__)
 from vllm.utils.platform_utils import is_pin_memory_available
-
 from vllm.envs import is_lk_moe_gpu_resident_layer, get_gpu_prefetch_window, get_gpu_prefill_min_batch_size, is_lk_moe_use_gpu_prefill, is_lk_moe_quant_on_gpu
 def get_layer_from_name(layer_name: str) -> torch.nn.Module:
     forward_context: ForwardContext = get_forward_context()
@@ -530,11 +529,29 @@ class DefaultMoERunner(MoERunner):
                         local_topk_ids
                     )
                 else:
-                    final_hidden_states = self.quant_method.apply_monolithic(
-                        layer=layer,
-                        x=staged_hidden_states,
-                        router_logits=staged_router_logits,
-                    )
+                    if self.is_gpu_prefill_layer:
+                        from vllm.model_executor.layers.quantization.gguf import fused_moe_gguf
+                        topk_weights, topk_ids = self.router.select_experts(
+                            hidden_states=staged_hidden_states,
+                            router_logits=staged_router_logits,
+                        )
+                        local_topk_ids = layer.global_to_local_expert_ids(topk_ids) if layer.use_ep else topk_ids
+                        final_hidden_states = fused_moe_gguf(
+                            staged_hidden_states,
+                            layer.w13_weight.data,
+                            layer.w2_weight.data,
+                            topk_weights,
+                            local_topk_ids,
+                            2,
+                            2,
+                            layer.activation.value,
+                        )
+                    else:
+                        final_hidden_states = self.quant_method.apply_monolithic(
+                            layer=layer,
+                            x=staged_hidden_states,
+                            router_logits=staged_router_logits,
+                        )
             else:
                 topk_weights, topk_ids = self.router.select_experts(
                     hidden_states=staged_hidden_states,
@@ -547,12 +564,26 @@ class DefaultMoERunner(MoERunner):
                         local_topk_ids
                     )
                 else:
-                    final_hidden_states = self.quant_method.apply(
-                        layer=layer,
-                        x=staged_hidden_states,
-                        topk_weights=topk_weights,
-                        topk_ids=topk_ids,
-                        shared_experts_input=shared_input,
+                    if self.is_gpu_prefill_layer:
+                        from vllm.model_executor.layers.quantization.gguf import fused_moe_gguf
+                        local_topk_ids = layer.global_to_local_expert_ids(topk_ids) if layer.use_ep else topk_ids
+                        final_hidden_states = fused_moe_gguf(
+                            staged_hidden_states,
+                            layer.w13_weight.data,
+                            layer.w2_weight.data,
+                            topk_weights,
+                            local_topk_ids,
+                            2,
+                            2,
+                            layer.activation.value,
+                        )
+                    else:
+                        final_hidden_states = self.quant_method.apply(
+                            layer=layer,
+                            x=staged_hidden_states,
+                            topk_weights=topk_weights,
+                            topk_ids=topk_ids,
+                            shared_experts_input=shared_input,
                     )
 
             if has_separate_shared_experts:
@@ -718,11 +749,29 @@ class DefaultMoERunner(MoERunner):
                         local_topk_ids  
                     )
                 else:
-                    final_hidden_states = self.quant_method.apply_monolithic(
-                        layer=layer,
-                        x=hidden_states,
-                        router_logits=router_logits,
-                    )
+                    if layer.is_gpu_prefill_layer:
+                        from vllm.model_executor.layers.quantization.gguf import fused_moe_gguf
+                        topk_weights, topk_ids = self.router.select_experts(
+                            hidden_states=hidden_states,
+                            router_logits=router_logits,
+                        )
+                        local_topk_ids = layer.global_to_local_expert_ids(topk_ids) if layer.use_ep else topk_ids
+                        final_hidden_states = fused_moe_gguf(
+                            hidden_states,
+                            layer.w13_weight.data,
+                            layer.w2_weight.data,
+                            topk_weights,
+                            local_topk_ids,
+                            2,
+                            2,
+                            layer.activation.value,
+                        )
+                    else:
+                        final_hidden_states = self.quant_method.apply_monolithic(
+                            layer=layer,
+                            x=hidden_states,
+                            router_logits=router_logits,
+                        )
             else:
                 topk_weights, topk_ids = self.router.select_experts(
                     hidden_states=hidden_states,
@@ -736,13 +785,27 @@ class DefaultMoERunner(MoERunner):
                         local_topk_ids  
                     )
                 else:    
-                    final_hidden_states = self.quant_method.apply(
-                        layer=layer,
-                        x=hidden_states,  # The type signture of this is wrong due to the hack.
-                        topk_weights=topk_weights,
-                        topk_ids=topk_ids,
-                        shared_experts_input=shared_input,
-                    )
+                    if layer.is_gpu_prefill_layer:
+                        from vllm.model_executor.layers.quantization.gguf import fused_moe_gguf
+                        local_topk_ids = layer.global_to_local_expert_ids(topk_ids) if layer.use_ep else topk_ids
+                        final_hidden_states = fused_moe_gguf(
+                            hidden_states,
+                            layer.w13_weight.data,
+                            layer.w2_weight.data,
+                            topk_weights,
+                            local_topk_ids,
+                            2,
+                            2,
+                            layer.activation.value,
+                        )
+                    else: 
+                        final_hidden_states = self.quant_method.apply(
+                            layer=layer,
+                            x=hidden_states,
+                            topk_weights=topk_weights,
+                            topk_ids=topk_ids,
+                            shared_experts_input=shared_input,
+                        )
 
             if has_separate_shared_experts:
                 assert self.shared_experts is not None
@@ -909,28 +972,32 @@ def moe_prefetch(layer, layer_name: str, hidden_states: torch.Tensor,
             state[idx] = 1   
             
 def collect_weight_from_moe(layer, param_name: str) -> torch.Tensor:
-    pin_memory = is_pin_memory_available()
-    shape_name = param_name + "_origin_shape"
-    dtype_name = param_name + "_origin_dtype"
-    if hasattr(layer, shape_name) and hasattr(layer, dtype_name):
-        origin_shape = getattr(layer, shape_name)
-        origin_dtype = getattr(layer, dtype_name) 
-        shape_array = torch.tensor(origin_shape, dtype=torch.int64)
-        weight_cpu = torch.empty(
-            origin_shape,
-            dtype=origin_dtype, 
-            device="cpu",
-            requires_grad=False, 
-            pin_memory=pin_memory, 
-        ).contiguous() 
-        layer.lk_moe.collectWeight(
-                param_name,
-                weight_cpu.data_ptr(),
-                shape_array.data_ptr(), 
-                weight_cpu[0].nbytes,
-            )
-        del shape_array
-        return weight_cpu
+    pin_memory = is_pin_memory_available() 
+    
+    if param_name == "w13_weight":
+        E = layer.local_num_experts
+        N = layer.intermediate_size_per_partition * 2
+        K =  layer.hidden_size
+        shape = (E, N, K * 18 // 32)
+    elif param_name == "w2_weight":
+        E = layer.local_num_experts
+        N = layer.hidden_size
+        K = layer.intermediate_size_per_partition
+        shape = (E, N, K * 18 // 32)
+    weight_cpu = torch.empty(
+        shape,
+        dtype=torch.uint8, 
+        device="cpu",
+        requires_grad=False, 
+        pin_memory=pin_memory,
+        memory_format=torch.contiguous_format,
+    )  
+
+    layer.lk_moe.collectWeight(
+            param_name,
+            weight_cpu.data_ptr()
+        ) 
+    return weight_cpu
         
             
 def moe_prepare_gpu_prefill_fp8(layer, forward_context: ForwardContext, device: torch.device): 
@@ -938,17 +1005,7 @@ def moe_prepare_gpu_prefill_fp8(layer, forward_context: ForwardContext, device: 
         "w13_weight",
         "w2_weight", 
     ]
-    
-    scale_names = [
-        "w13_weight_scale_inv" if layer.quant_method.block_quant else "w13_weight_scale",
-        "w2_weight_scale_inv" if layer.quant_method.block_quant else "w2_weight_scale",  
-    ]
-    
-    quant_config_names = [
-        "w1_scale",
-        "w2_scale",
-    ] 
-    
+     
     cpu_tensors = []
     
     for param_name in param_names:
@@ -960,33 +1017,7 @@ def moe_prepare_gpu_prefill_fp8(layer, forward_context: ForwardContext, device: 
             gpu_weight, 
             requires_grad=False
         ))
-     
-    use_quant_config = (
-        hasattr(layer, "moe_quant_config") and 
-        hasattr(layer.moe_quant_config, quant_config_names[0]) and
-        hasattr(layer.moe_quant_config, quant_config_names[1])
-    )
-    
-    if use_quant_config: 
-        for scale_name in quant_config_names: 
-            weight_cpu = collect_weight_from_moe(layer, scale_name)
-            cpu_tensors.append(weight_cpu)
-            gpu_weight = weight_cpu.to(device, non_blocking=True)
-            gpu_weight.record_stream(forward_context._prefetch_stream)
-            setattr(layer.moe_quant_config, scale_name, torch.nn.Parameter(
-                gpu_weight, 
-                requires_grad=False
-            ))
-    else: 
-        for scale_name in scale_names:
-            weight_cpu = collect_weight_from_moe(layer, scale_name)
-            cpu_tensors.append(weight_cpu)
-            gpu_weight = weight_cpu.to(device, non_blocking=True)
-            gpu_weight.record_stream(forward_context._prefetch_stream)
-            setattr(layer, scale_name, torch.nn.Parameter(
-                gpu_weight, 
-                requires_grad=False
-            ))
+      
     layer._prefetch_cpu_tensors = cpu_tensors
 
 def moe_clean_gpu_prefill_fp8(layer):    
@@ -994,16 +1025,7 @@ def moe_clean_gpu_prefill_fp8(layer):
         "w13_weight",
         "w2_weight",  
     ]
-    
-    scale_names = [
-        "w13_weight_scale_inv" if layer.quant_method.block_quant else "w13_weight_scale",
-        "w2_weight_scale_inv" if layer.quant_method.block_quant else "w2_weight_scale",  
-    ]
-    
-    quant_config_names = [
-        "w1_scale",
-        "w2_scale",
-    ]
+     
      
     for param_name in param_names:
         if hasattr(layer, param_name):
@@ -1011,41 +1033,15 @@ def moe_clean_gpu_prefill_fp8(layer):
                 torch.empty(0, device=torch.cuda.current_device()), 
                 requires_grad=False
             ))
-     
-    use_quant_config = (
-        hasattr(layer, "moe_quant_config") and 
-        hasattr(layer.moe_quant_config, quant_config_names[0]) and
-        hasattr(layer.moe_quant_config, quant_config_names[1])
-    )
-    
-    if use_quant_config: 
-        for scale_name in quant_config_names:
-            if hasattr(layer.moe_quant_config, scale_name):
-                setattr(layer.moe_quant_config, scale_name, torch.nn.Parameter(
-                    torch.empty(0, device=torch.cuda.current_device()), 
-                    requires_grad=False
-                ))
-    else: 
-        for scale_name in scale_names:
-            if hasattr(layer, scale_name):
-                setattr(layer, scale_name, torch.nn.Parameter(
-                    torch.empty(0, device=torch.cuda.current_device()), 
-                    requires_grad=False
-                ))
+      
     if hasattr(layer, '_prefetch_cpu_tensors'):
         del layer._prefetch_cpu_tensors
 
 def moe_prepare_gpu_prefill_wna16(layer, forward_context: ForwardContext, device: torch.device):  
     
     param_names = [
-        "w13_weight_packed",
-        "w2_weight_packed", 
-        "w13_weight_scale",
-        "w2_weight_scale",
-        "w13_g_idx_sort_indices",
-        "w2_g_idx_sort_indices",
-        "w13_weight_shape",
-        "w2_weight_shape", 
+        "w13_weight",
+        "w2_weight", 
     ] 
     cpu_tensors = []
     for param_name in param_names:
@@ -1059,14 +1055,8 @@ def moe_prepare_gpu_prefill_wna16(layer, forward_context: ForwardContext, device
         
 def moe_clean_gpu_prefill_wna16(layer):    
     param_names = [
-        "w13_weight_packed",
-        "w2_weight_packed", 
-        "w13_weight_scale",
-        "w2_weight_scale",
-        "w13_g_idx_sort_indices",
-        "w2_g_idx_sort_indices",
-        "w13_weight_shape",
-        "w2_weight_shape", 
+        "w13_weight",
+        "w2_weight",
     ]
     for param_name in param_names:
         if hasattr(layer, param_name):
@@ -1080,12 +1070,13 @@ def moe_prepare_gpu_prefill_regular(layer, forward_context: ForwardContext, devi
     cpu_tensors = []
     
     w13_weight_cpu = torch.zeros(
-            (layer.global_num_experts, layer.intermediate_size_per_partition * 2, layer.hidden_size),
+            (layer.local_num_experts, layer.intermediate_size_per_partition * 2, layer.hidden_size),
             dtype=layer.moe_config.in_dtype, 
             device="cpu",
             requires_grad=False, 
             pin_memory=pin_memory, 
-        ).contiguous() 
+            memory_format=torch.contiguous_format,
+        )
     cpu_tensors.append(w13_weight_cpu)  
             
     layer.lk_moe.collect_weights(
@@ -1108,15 +1099,15 @@ def moe_prepare_gpu_prefill_regular(layer, forward_context: ForwardContext, devi
     w13_gpu.record_stream(forward_context._prefetch_stream) 
     layer.w13_weight = torch.nn.Parameter(w13_gpu, requires_grad=False)
 
-    # [global_num_experts, hidden_size, intermediate_size_per_partition]
+    # [local_num_experts, hidden_size, intermediate_size_per_partition]
     w2_weight_cpu = torch.zeros(
-        (layer.global_num_experts, layer.hidden_size, layer.intermediate_size_per_partition),
+        (layer.local_num_experts, layer.hidden_size, layer.intermediate_size_per_partition),
         dtype=layer.moe_config.in_dtype,  
         device="cpu",
         requires_grad=False, 
         pin_memory=pin_memory, 
-    ).contiguous() 
-    cpu_tensors.append(w2_weight_cpu)
+        memory_format=torch.contiguous_format,
+    )
     
     layer.lk_moe.collect_weights(
         True,  
@@ -1147,7 +1138,7 @@ def moe_prepare_gpu_prefill(layer, forward_context: ForwardContext, device: torc
     
     if layer.is_gpu_prefill_layer: 
         with torch.no_grad():
-            # [global_num_experts, intermediate_size_per_partition * 2, hidden_size]
+            # [local_num_experts, intermediate_size_per_partition * 2, hidden_size]
             prefetch_stream = forward_context._prefetch_stream
             prefetch_events = forward_context._prefetch_events
         
@@ -1214,4 +1205,4 @@ def moe_wait_prefetch(layer, hidden_states: torch.Tensor, forward_context: Forwa
     if hasattr(layer, 'w2_weight_packed'):
         layer.w2_weight_packed.record_stream(current_stream)
     if hasattr(layer, '_prefetch_cpu_tensors'):
-            del layer._prefetch_cpu_tensors
+        del layer._prefetch_cpu_tensors

@@ -220,7 +220,7 @@ if TYPE_CHECKING:
     LVLLM_MOE_NUMA_ENABLED: bool = False
     LVLLM_ENABLE_NUMA_INTERLEAVE: bool = False
     LVLLM_MOE_QUANT_ON_GPU: bool = False
-    LVLLM_MOE_USE_WEIGHT: Literal["KEEP", "TO_DTYPE", "INT4"] = "INT4"
+    LVLLM_MOE_USE_WEIGHT: Literal["KEEP", "INT4"] = "INT4"
     LVLLM_GPU_RESIDENT_MOE_LAYERS: str | None = None
     LVLLM_GPU_PREFILL_MIN_BATCH_SIZE: int = 0
     LVLLM_GPU_PREFETCH_WINDOW: int = 1
@@ -1854,10 +1854,8 @@ def compile_factors() -> dict[str, object]:
     return factors
  
 from enum import Enum
-class MoeComputeStrategy(str, Enum): 
-        TO_DTYPE = "TO_DTYPE"      
-        KEEP = "KEEP"              
-        INT8 = "INT8"             
+class MoeComputeStrategy(str, Enum):
+        KEEP = "KEEP"             
         INT4 = "INT4" 
         
 def is_lk_moe_feature_enabled() -> bool:
@@ -1896,14 +1894,26 @@ def set_profile_run(status: bool):
     
 def get_gpu_prefill_min_batch_size() -> int:
     return environment_variables["LVLLM_GPU_PREFILL_MIN_BATCH_SIZE"]() 
+
+
 def get_moe_compute_strategy() -> MoeComputeStrategy: 
     strategy = environment_variables["LVLLM_MOE_USE_WEIGHT"]()
     
     try:
-        return MoeComputeStrategy(strategy.upper())
+        strategy_upper = strategy.upper() 
+        if strategy_upper == "TO_DTYPE":
+            print("Warning: TO_DTYPE is no longer supported for FP8 models, falling back to INT4")
+            return MoeComputeStrategy.INT4 
+        elif strategy_upper == "KEEP":
+            print("Warning: KEEP strategy is currently not supported for FP8 models, falling back to INT4")
+            return MoeComputeStrategy.INT4
+        elif strategy_upper == "": 
+            return MoeComputeStrategy.INT4
+        return MoeComputeStrategy(strategy_upper)
     except ValueError: 
         print(f"Warning: Invalid LVLLM_MOE_USE_WEIGHT value '{strategy}', using 'INT4'")
-        return MoeComputeStrategy.TO_DTYPE   
+        return MoeComputeStrategy.INT4
+      
 
 def get_gpu_prefetch_window() -> int:
     return environment_variables["LVLLM_GPU_PREFETCH_WINDOW"]()

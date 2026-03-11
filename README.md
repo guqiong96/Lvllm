@@ -8,12 +8,12 @@ LvLLM is a special extension of vLLM that fully utilizes CPU and GPU computing r
 - **VRAM + Memory Load Balancing**: Total model footprint = VRAM + memory, accommodating 1+1=2 models, with 100% VRAM utilization <sup>Note 1</sup>
 - **GPU Prefill Optimization**: GPU prefill runs in parallel with CPU-GPU hybrid decoding, achieving nearly 100% GPU utilization
 - **NUMA Thread Optimization**: Cross-node communication reduced to as low as 3%, L3 cache hit rate over 50%, GPU load can reach 33% to 50% during decoding
-
-Note 1: Enabling GPU prefill for models other than BF16 and F16 original models will additionally occupy memory [!not VRAM]
-
+ 
 ## Relationship with vLLM
 
-Lvllm uses the latest vLLM source code and has redesigned and implemented MOE model hybrid inference modules, maintaining 100% full compatibility with vLLM.
+Lvllm uses the latest vLLM source code and has redesigned and implemented MOE model hybrid inference modules, maintaining 100% full compatibility with vLLM<sup>Note 1</sup>.
+
+Note 1: x86 CPUs with AVX2 or above instruction sets and Nvidia GPUs are supported.
 
 ## Usage Instructions [[中文说明]](./README_cn.md)
 - [Version Changes](#version-changes)
@@ -32,6 +32,7 @@ Lvllm uses the latest vLLM source code and has redesigned and implemented MOE mo
 ## Version Changes
 
 ```bash
+2026-03-11: lvllm-v1.9.2 - FP8、AWQ4bit MoE Models enable GPU Prefill acceleration without additional memory occupation[Note：max_num_batched_tokens temporarily limited not exceeding 32000], FP8 MoE Model cancel TO_DTYPE runtime type conversion, KEEP model temporarily not support GPU Prefill
 2026-03-05: lvllm-v1.9.0 - Optimize GPU prefill and regular prefill to ensure output quality
 2026-03-01: lvllm-v1.8.10 - fix known issues, support new models
 2026-02-02：lvllm-v1.7.0 - support for EP parallelism, 8-card running minimax-m2.1 model requires setting --enable_expert_parallel
@@ -43,7 +44,7 @@ Lvllm uses the latest vLLM source code and has redesigned and implemented MOE mo
 2026-01-04: v1.4.0 Optimized decode speed
 2025-12-28: Optimized inference speed: bfloat16, awq4bit; optimized NUMA data access for multi-GPU; enabled NUMA nodes for multi-GPU for best performance; removed GGUF model support
 2025-12-16 v1.2.0 Synchronized upstream vllm code to latest, optimized lk_moe to reduce memory usage
-2025-12-14 v1.1.2 Added AWQ-4bit quantized model (symmetric quantization avx2 version) inference support - verified with cpatonn/Qwen3-Coder-30B-A3B-Instruct-AWQ-4bit and cpatonn/
+2025-12-14 v1.1.2 Added AWQ-4bit symmetric quantized model inference support
 2025-12-9: Added LVLLM_MOE_USE_WEIGHT environment variable, supporting MOE modules to use two modes for fp8 model inference:
 2025-11-1: Supports tensor parallelism, pipeline multi-card inference https://b23.tv/xzHieMs
 2025-10-30: Supports Qwen3 series model GGUF hybrid inference (excluding Qwen3-Coder-30B-A3B-Instruct GGUF) [Check new parameters in config.yaml]
@@ -87,7 +88,7 @@ Unlisted original MOE models from Qwen3 series, GLM series, and MiniMax series a
 |---------|------------|
 | bfloat16 | bfloat16/float16| 
 | float16 | bfloat16/float16| 
-| fp8 model | fp8, fp8+bfloat16, fp8+int4 | 
+| fp8 model | fp8, fp8+int4 | 
 | awq 4bit symmetric quantized model <sup>Note 1</sup> | int4 |
 
 Note 1: https://hf-mirror.com/cyankiwi provides AWQ 4bit symmetric quantized models
@@ -117,6 +118,7 @@ NCCL_SOCKET_IFNAME=lo \
 NCCL_IB_DISABLE=1 \
 GLOO_SOCKET_IFNAME=lo \
 NCCL_SOCKET_TIMEOUT=600000 \
+VLLM_SKIP_P2P_CHECK=1 \
 LVLLM_MOE_NUMA_ENABLED=1 \
 LK_THREAD_BINDING=CPU_CORE \
 LK_THREADS=44 \
@@ -126,7 +128,7 @@ LVLLM_GPU_RESIDENT_MOE_LAYERS=0 \
 LVLLM_GPU_PREFETCH_WINDOW=1 \
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=2048 \
 LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
-LVLLM_MOE_QUANT_ON_GPU=0 \
+LVLLM_MOE_QUANT_ON_GPU=1 \
 vllm serve \
     --model /home/guqiong/Models/Qwen3.5-122B-A10B \
     --host 0.0.0.0 \
@@ -165,6 +167,7 @@ NCCL_SOCKET_IFNAME=lo \
 NCCL_IB_DISABLE=1 \
 GLOO_SOCKET_IFNAME=lo \
 NCCL_SOCKET_TIMEOUT=600000 \
+VLLM_SKIP_P2P_CHECK=1 \
 LVLLM_MOE_NUMA_ENABLED=1 \
 LK_THREAD_BINDING=CPU_CORE \
 LK_THREADS=44 \
@@ -174,7 +177,7 @@ LVLLM_GPU_RESIDENT_MOE_LAYERS=0 \
 LVLLM_GPU_PREFETCH_WINDOW=1 \
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=2048 \
 LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
-LVLLM_MOE_QUANT_ON_GPU=0 \
+LVLLM_MOE_QUANT_ON_GPU=1 \
 vllm serve \
     --model /home/guqiong/Models/Qwen3.5-397B-A17B-FP8 \
     --host 0.0.0.0 \
@@ -212,6 +215,7 @@ NCCL_SOCKET_IFNAME=lo \
 NCCL_IB_DISABLE=1 \
 GLOO_SOCKET_IFNAME=lo \
 NCCL_SOCKET_TIMEOUT=600000 \
+VLLM_SKIP_P2P_CHECK=1 \
 LVLLM_MOE_NUMA_ENABLED=1 \
 LK_THREAD_BINDING=CPU_CORE \
 LK_THREADS=44 \
@@ -236,7 +240,7 @@ vllm serve \
     --compilation_config.cudagraph_mode FULL_DECODE_ONLY \
     --enable-prefix-caching \
     --enable-chunked-prefill \
-    --max-num-batched-tokens 32768 \
+    --max-num-batched-tokens 32000 \
     --dtype bfloat16 \
     --max-num-seqs 4 \
     --compilation_config.mode VLLM_COMPILE \
@@ -267,11 +271,15 @@ NCCL_SOCKET_IFNAME=lo \
 NCCL_IB_DISABLE=1 \
 GLOO_SOCKET_IFNAME=lo \
 NCCL_SOCKET_TIMEOUT=600000 \
+VLLM_SKIP_P2P_CHECK=1 \
 LVLLM_MOE_NUMA_ENABLED=1 \
 LK_THREAD_BINDING=CPU_CORE \
 LK_THREADS=44 \
 OMP_NUM_THREADS=44 \
 LVLLM_MOE_USE_WEIGHT=INT4 \
+LVLLM_GPU_RESIDENT_MOE_LAYERS="" \
+LVLLM_GPU_PREFETCH_WINDOW=1 \
+LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=2048 \
 LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
 LVLLM_MOE_QUANT_ON_GPU=1 \
 vllm serve \
@@ -279,7 +287,7 @@ vllm serve \
     --host 0.0.0.0 \
     --port 8070 \
     --tensor-parallel-size 2 \
-    --max-model-len 16384 \
+    --max-model-len 33000 \
     --gpu-memory-utilization 0.80 \
     --trust-remote-code \
     --tokenizer-mode auto \
@@ -288,7 +296,7 @@ vllm serve \
     --compilation_config.cudagraph_mode FULL_AND_PIECEWISE \
     --enable-prefix-caching \
     --enable-chunked-prefill \
-    --max-num-batched-tokens 2048 \
+    --max-num-batched-tokens 32000 \
     --dtype bfloat16 \
     --max-num-seqs 4 \
     --compilation_config.mode VLLM_COMPILE \
@@ -314,6 +322,7 @@ NCCL_SOCKET_IFNAME=lo \
 NCCL_IB_DISABLE=1 \
 GLOO_SOCKET_IFNAME=lo \
 NCCL_SOCKET_TIMEOUT=600000 \
+VLLM_SKIP_P2P_CHECK=1 \
 LVLLM_MOE_NUMA_ENABLED=1 \
 LK_THREAD_BINDING=CPU_CORE \
 LK_THREADS=44 \
@@ -338,7 +347,7 @@ vllm serve \
     --compilation_config.cudagraph_mode FULL_DECODE_ONLY \
     --enable-prefix-caching \
     --enable-chunked-prefill \
-    --max-num-batched-tokens 32768 \
+    --max-num-batched-tokens 32000 \
     --dtype bfloat16 \
     --max-num-seqs 4 \
     --compilation_config.mode VLLM_COMPILE \
@@ -356,7 +365,7 @@ vllm serve \
 | `LK_THREAD_BINDING` | Performance Parameter | `CPU_CORE` | Thread binding policy: `CPU_CORE` - bind by CPU core, `NUMA_NODE` - bind by NUMA node | Default is binding by CPU core, when encountering performance issues, you can try binding by NUMA node |
 | `LK_THREADS` | Performance Parameter | Auto-calculated | Number of threads: physical cores - 4 | For multi-GPU multi-process, (physical cores - 4) divided by number of processes |
 | `OMP_NUM_THREADS` | Performance Parameter | System logical core count | OpenMP thread count: set to same as `LK_THREADS` | |
-| `LVLLM_MOE_USE_WEIGHT` | Performance Parameter | `TO_DTYPE` | Runtime expert weight format `TO_DTYPE`: same as dtype in config.yaml, bfloat16/float16, `KEEP`: same as model, `INT4`: int4 |
+| `LVLLM_MOE_USE_WEIGHT` | Performance Parameter | `INT4` |  FP8 model runtime expert weight format `KEEP`: same as model, `INT4`: int4 |
 | `LVLLM_GPU_RESIDENT_MOE_LAYERS` | GPU Prefill Parameter | None | MOE expert layers resident on GPU `0`: layer 0, `0-1`: layers 0 to 1, `0,9`: layers 0 and 9 | After reserving sufficient KV Cache VRAM, allocating multiple layers can increase performance and reduce corresponding memory usage, including layer 0 to achieve acceleration effect |
 | `LVLLM_GPU_PREFETCH_WINDOW` | GPU Prefill Parameter | None | Prefetch window size `1`: prefetch 1 layer of MOE experts | Generally, prefetching 1 to 2 layers is sufficient |
 | `LVLLM_GPU_PREFILL_MIN_BATCH_SIZE` | GPU Prefill Parameter | None | Minimum input length for using GPU prefill `4096`: when input length reaches this value, start GPU prefill | The value should not be too small, set to 0 to disable GPU prefill function |
@@ -493,8 +502,8 @@ LVLLM_GPU_RESIDENT_MOE_LAYERS=0
 LVLLM_GPU_PREFETCH_WINDOW=1 
 # Start GPU prefill when input length reaches 4096, can be decreased or increased based on CPU prefill performance, starting prefill earlier or later
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 
-# Same as context size for optimal performance, can be appropriately reduced based on VRAM availability, exceeding context size is meaningless
---max-num-batched-tokens 65536 # 
+# Current version limit 32000, exceeding context size is meaningless
+--max-num-batched-tokens 32000 
 ``` 
  
 ### Disable GPU Prefill
@@ -547,7 +556,8 @@ LK_THREADS=44
 # Save VRAM when GPU prefill is disabled, performance remains unchanged, but if enable GPU prefill will cause performance drop
 --max-num-batched-tokens 4096
 # or larger and less than context size, enable GPU prefill, obtain best performance, but if disable GPU prefill will cause performance drop
---max-num-batched-tokens 65536 
+# current version limit 32000
+--max-num-batched-tokens 32000 
 ```
 ### CPU Power Saving
 ```bash

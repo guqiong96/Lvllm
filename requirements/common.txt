@@ -57,5 +57,5 @@ opentelemetry-sdk >= 1.27.0
 opentelemetry-api >= 1.27.0
 opentelemetry-exporter-otlp >= 1.27.0
 opentelemetry-semantic-conventions-ai >= 0.4.1
-lk_moe==1.7.6
+lk_moe==1.8.0
 kaldi-native-fbank >= 1.18.7

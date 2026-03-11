@@ -239,7 +239,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
 
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
         from vllm.model_executor.layers.fused_moe.layer import FusedMoE
-        if isinstance(layer, FusedMoE) and  layer.is_cpu_layer:
+        if isinstance(layer, FusedMoE) and  not layer.is_gpu_resident_layer:
             return None
         super().process_weights_after_loading(layer)
 
