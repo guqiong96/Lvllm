@@ -529,8 +529,9 @@ class DefaultMoERunner(MoERunner):
                         local_topk_ids
                     )
                 else:
-                    if self.is_gpu_prefill_layer:
-                        from vllm.model_executor.layers.quantization.gguf import fused_moe_gguf
+                    from vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method import UnquantizedFusedMoEMethod
+                    from vllm.model_executor.layers.quantization.gguf import fused_moe_gguf
+                    if layer.is_gpu_prefill_layer and not isinstance(self.quant_method, UnquantizedFusedMoEMethod):
                         topk_weights, topk_ids = self.router.select_experts(
                             hidden_states=staged_hidden_states,
                             router_logits=staged_router_logits,
@@ -564,8 +565,9 @@ class DefaultMoERunner(MoERunner):
                         local_topk_ids
                     )
                 else:
-                    if self.is_gpu_prefill_layer:
-                        from vllm.model_executor.layers.quantization.gguf import fused_moe_gguf
+                    from vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method import UnquantizedFusedMoEMethod
+                    from vllm.model_executor.layers.quantization.gguf import fused_moe_gguf
+                    if layer.is_gpu_prefill_layer and not isinstance(self.quant_method, UnquantizedFusedMoEMethod):
                         local_topk_ids = layer.global_to_local_expert_ids(topk_ids) if layer.use_ep else topk_ids
                         final_hidden_states = fused_moe_gguf(
                             staged_hidden_states,
@@ -749,8 +751,9 @@ class DefaultMoERunner(MoERunner):
                         local_topk_ids  
                     )
                 else:
-                    if layer.is_gpu_prefill_layer:
-                        from vllm.model_executor.layers.quantization.gguf import fused_moe_gguf
+                    from vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method import UnquantizedFusedMoEMethod
+                    from vllm.model_executor.layers.quantization.gguf import fused_moe_gguf
+                    if layer.is_gpu_prefill_layer and not isinstance(self.quant_method, UnquantizedFusedMoEMethod):
                         topk_weights, topk_ids = self.router.select_experts(
                             hidden_states=hidden_states,
                             router_logits=router_logits,
@@ -785,8 +788,9 @@ class DefaultMoERunner(MoERunner):
                         local_topk_ids  
                     )
                 else:    
-                    if layer.is_gpu_prefill_layer:
-                        from vllm.model_executor.layers.quantization.gguf import fused_moe_gguf
+                    from vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method import UnquantizedFusedMoEMethod
+                    from vllm.model_executor.layers.quantization.gguf import fused_moe_gguf
+                    if layer.is_gpu_prefill_layer and not isinstance(self.quant_method, UnquantizedFusedMoEMethod):
                         local_topk_ids = layer.global_to_local_expert_ids(topk_ids) if layer.use_ep else topk_ids
                         final_hidden_states = fused_moe_gguf(
                             hidden_states,
@@ -1077,7 +1081,7 @@ def moe_prepare_gpu_prefill_regular(layer, forward_context: ForwardContext, devi
             pin_memory=pin_memory, 
             memory_format=torch.contiguous_format,
         )
-    cpu_tensors.append(w13_weight_cpu)  
+    
             
     layer.lk_moe.collect_weights(
         True,  
@@ -1095,9 +1099,10 @@ def moe_prepare_gpu_prefill_regular(layer, forward_context: ForwardContext, devi
         1  # 1   up
     )
     
+    cpu_tensors.append(w13_weight_cpu)  
     w13_gpu = w13_weight_cpu.to(device, non_blocking=True)
     w13_gpu.record_stream(forward_context._prefetch_stream) 
-    layer.w13_weight = torch.nn.Parameter(w13_gpu, requires_grad=False)
+    setattr(layer, "w13_weight", torch.nn.Parameter(w13_gpu, requires_grad=False))
 
     # [local_num_experts, hidden_size, intermediate_size_per_partition]
     w2_weight_cpu = torch.empty(
@@ -1118,7 +1123,7 @@ def moe_prepare_gpu_prefill_regular(layer, forward_context: ForwardContext, devi
     )
     w2_gpu = w2_weight_cpu.to(device, non_blocking=True)
     w2_gpu.record_stream(forward_context._prefetch_stream)
-    layer.w2_weight = torch.nn.Parameter(w2_gpu, requires_grad=False)
+    setattr(layer, "w2_weight", torch.nn.Parameter(w2_gpu, requires_grad=False))
     
     layer._prefetch_cpu_tensors = cpu_tensors
 

@@ -2029,4 +2029,45 @@ class LkMoeSerialGuard:
             finally:
                 self._owner = None
                 self._depth = 0
+                
+import torch
+
+def check_tensor_stats(tensor, name, threshold=1e6):
+    
+    if torch.cuda.is_current_stream_capturing():
+        return 
+    with torch.no_grad(): 
+        info = {
+            'name': name,
+            'dtype': str(tensor.dtype),
+            'shape': tensor.shape,
+            'device': tensor.device,
+        }
+         
+        if tensor.is_floating_point():
+            try:
+                info.update({
+                    'mean': float(tensor.mean()),
+                    'std': float(tensor.std()),
+                    'min': float(tensor.min()),
+                    'max': float(tensor.max()),
+                    'has_nan': bool(tensor.isnan().any()),
+                    'has_inf': bool(tensor.isinf().any()),
+                })
+            except Exception as e:
+                info['error'] = f"Failed to compute stats: {e}"
+         
+        elif tensor.dtype in [torch.int8, torch.int16, torch.int32, torch.int64,
+                              torch.uint8, torch.bool]:
+            info.update({
+                'min': int(tensor.min()),
+                'max': int(tensor.max()),
+            })
+         
+        if tensor.is_floating_point() and 'max' in info:
+            if abs(info['max']) > threshold:
+                info['warning'] = f"Extreme value: {info['max']:.2e}"
+        
+        
+        return info
  
