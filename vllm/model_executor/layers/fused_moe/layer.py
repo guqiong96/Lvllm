@@ -1814,10 +1814,10 @@ class FusedMoE(CustomOp):
             else:
                 raise ValueError(f"Unsupported dtype {dtype}")
     
-    def _get_processes_info(self) -> tuple[int, int]: 
+    def _get_processes_info(self) -> tuple[int, int, int]: 
         if self.use_ep:
-            return self.ep_size, self.ep_rank  
-        return self.tp_size, self.tp_rank    
+            return self.ep_size, self.ep_rank, torch.cuda.current_device()
+        return self.tp_size, self.tp_rank, torch.cuda.current_device()
                    
     def _process_gguf_weights(self):  
         raise ValueError("GGUF Weights are not supported for lk moe ...")  
@@ -1848,11 +1848,12 @@ class FusedMoE(CustomOp):
         
         w2_ptr = self.w2_qweight.contiguous().data_ptr()
         
-        num_processes, process_id = self._get_processes_info()
+        num_processes, process_id, gpu_id = self._get_processes_info()
         
         self.lk_moe_config = lk_moe.MOEConfig(
             num_processes,                # num_processes
             process_id,                   # process_id
+            gpu_id,                       # gpu_id
             num_experts,        # expert_num
             self.top_k,                    # routed_expert_num
             self.hidden_size,              # hidden_size
@@ -1967,11 +1968,12 @@ class FusedMoE(CustomOp):
             w13_weight_scale_ptr = w13_scale.contiguous().data_ptr()
             w2_weight_scale_ptr = w2_scale.contiguous().data_ptr()
         
-        num_processes, process_id = self._get_processes_info()
+        num_processes, process_id, gpu_id = self._get_processes_info()
         
         self.lk_moe_config = lk_moe.MOE_WNA16RepackConfig(
             num_processes,                # num_processes
             process_id,                   # process_id
+            gpu_id,                       # gpu_id
             self.local_num_experts,        # expert_num
             self.top_k,                    # routed_expert_num
             self.hidden_size,                   # hidden_size
@@ -2050,11 +2052,12 @@ class FusedMoE(CustomOp):
         w13_weight_scale_ptr = w13_weight_scale.contiguous().data_ptr()
         w2_weight_scale_ptr = w2_weight_scale.contiguous().data_ptr()
         
-        num_processes, process_id = self._get_processes_info()
+        num_processes, process_id, gpu_id = self._get_processes_info()
         
         self.lk_moe_config = lk_moe.MOE_FP8Config(
             num_processes,                # num_processes
             process_id,                   # process_id
+            gpu_id,                       # gpu_id
             self.local_num_experts,        # expert_num
             self.top_k,                    # routed_expert_num
             self.hidden_size,                   # hidden_size
@@ -2144,11 +2147,12 @@ class FusedMoE(CustomOp):
         group_size = getattr(self.quant_method, 'group_size', 32)
         num_bits = 4 if moe_compute_strategy == MoeComputeStrategy.INT4 else 8
          
-        num_processes, process_id = self._get_processes_info()
+        num_processes, process_id, gpu_id = self._get_processes_info()
          
         self.lk_moe_config = lk_moe.MOE_QuantConfig(
             num_processes,                     # num_processes
-            process_id,                        # process_id
+            process_id,                       # process_id
+            gpu_id,                           # gpu_id
             self.local_num_experts,            # expert_num
             self.top_k,                        # routed_expert_num
             self.hidden_size,                  # hidden_size
@@ -2244,11 +2248,12 @@ class FusedMoE(CustomOp):
         w13_ptr = w13_tensor.contiguous().data_ptr()
         w2_ptr = w2_tensor.contiguous().data_ptr()
      
-        num_processes, process_id = self._get_processes_info()
+        num_processes, process_id, gpu_id = self._get_processes_info()
         
         self.lk_moe_config = lk_moe.MOEConfig(
             num_processes,                # num_processes
             process_id,                   # process_id
+            gpu_id,                       # gpu_id
             self.local_num_experts,        # expert_num
             self.top_k,                    # routed_expert_num
             self.hidden_size,              # hidden_size
@@ -2335,11 +2340,12 @@ class FusedMoE(CustomOp):
          
         num_bits = 4 if moe_compute_strategy == MoeComputeStrategy.INT4 else 8
          
-        num_processes, process_id = self._get_processes_info()
+        num_processes, process_id, gpu_id = self._get_processes_info()
          
         self.lk_moe_config = lk_moe.MOE_QuantConfig(
             num_processes,                     # num_processes
-            process_id,                        # process_id
+            process_id,                       # process_id
+            gpu_id,                           # gpu_id
             self.local_num_experts,            # expert_num
             self.top_k,                        # routed_expert_num
             self.hidden_size,                  # hidden_size
@@ -2426,11 +2432,12 @@ class FusedMoE(CustomOp):
         w13_ptr = w13_tensor.contiguous().data_ptr()
         w2_ptr = w2_tensor.contiguous().data_ptr()       
           
-        num_processes, process_id = self._get_processes_info()
+        num_processes, process_id, gpu_id = self._get_processes_info()
         
         self.lk_moe_config = lk_moe.MOEConfig(
             num_processes,                # num_processes
             process_id,                   # process_id
+            gpu_id,                       # gpu_id
             self.local_num_experts,        # expert_num
             self.top_k,                    # routed_expert_num
             self.hidden_size,              # hidden_size
@@ -2469,11 +2476,12 @@ class FusedMoE(CustomOp):
         w13_ptr = self.w13_weight.contiguous().data_ptr()
         w2_ptr = self.w2_weight.contiguous().data_ptr()
         
-        num_processes, process_id = self._get_processes_info()
+        num_processes, process_id, gpu_id = self._get_processes_info()
         
         self.lk_moe_config = lk_moe.MOEConfig(
             num_processes,                # num_processes
             process_id,                   # process_id
+            gpu_id,                       # gpu_id
             num_experts,        # expert_num
             self.top_k,                    # routed_expert_num
             self.hidden_size,              # hidden_size
