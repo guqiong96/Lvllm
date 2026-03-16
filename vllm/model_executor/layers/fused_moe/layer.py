@@ -2730,7 +2730,6 @@ class WeightBufManager:
             gpu_weights[param_name] = torch.zeros_like(
                 weight_cpu, 
                 device=device,
-                memory_format=torch.contiguous_format
             ).contiguous()
         return gpu_weights
 
@@ -2782,7 +2781,6 @@ class WeightBufManager:
                 device="cpu",
                 requires_grad=False,
                 pin_memory=pin_memory,
-                memory_format=torch.contiguous_format,
             ).contiguous()
          
             
@@ -2798,7 +2796,6 @@ class WeightBufManager:
                 device="cpu",
                 requires_grad=False,
                 pin_memory=pin_memory,
-                memory_format=torch.contiguous_format,
             ).contiguous() 
             
             cpu_weights['w2_weight'] = w2_weight_cpu
