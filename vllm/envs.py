@@ -1589,7 +1589,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
     ),
     # Prefetch window size for GPU expert computation.
     "LVLLM_GPU_PREFETCH_WINDOW": lambda: int(
-        os.getenv("LVLLM_GPU_PREFETCH_WINDOW", "3")
+        os.getenv("LVLLM_GPU_PREFETCH_WINDOW", "1")
     ),
     # Disables parallel execution of shared_experts via separate cuda stream
     "VLLM_DISABLE_SHARED_EXPERTS_STREAM": lambda: bool(
