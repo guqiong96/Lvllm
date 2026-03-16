@@ -112,7 +112,7 @@ free -h
 pip uninstall transformers flashinfer-cubin -y
 pip install transformers==4.57.6 flashinfer-cubin==0.6.4
 
-PYTORCH_ALLOC_CONF=expandable_segments:True \
+VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 VLLM_TEST_FORCE_FP8_MARLIN=1 \
 NCCL_SOCKET_IFNAME=lo \
 NCCL_IB_DISABLE=1 \
@@ -135,7 +135,7 @@ vllm serve \
     --port 8070 \
     --tensor-parallel-size 2 \
     --max-model-len 40000 \
-    --gpu-memory-utilization 0.80 \
+    --gpu-memory-utilization 0.9046 \
     --trust-remote-code \
     --tokenizer-mode auto \
     --served-model-name Qwen3.5-122B-A10B \
@@ -160,7 +160,7 @@ free -h
 pip uninstall transformers -y
 pip install transformers==4.57.6
 
-PYTORCH_ALLOC_CONF=expandable_segments:True \
+VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 VLLM_TEST_FORCE_FP8_MARLIN=1 \
 NCCL_SOCKET_IFNAME=lo \
 NCCL_IB_DISABLE=1 \
@@ -183,7 +183,7 @@ vllm serve \
     --port 8070 \
     --tensor-parallel-size 2 \
     --max-model-len 40000 \
-    --gpu-memory-utilization 0.80 \
+    --gpu-memory-utilization 0.9046 \
     --trust-remote-code \
     --tokenizer-mode auto \
     --served-model-name Qwen3.5-397B-A17B-FP8 \
@@ -207,7 +207,7 @@ vllm serve \
 pip uninstall transformers -y
 pip install transformers==4.57.6
 
-PYTORCH_ALLOC_CONF=expandable_segments:True \
+VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 VLLM_TEST_FORCE_FP8_MARLIN=1 \
 NCCL_SOCKET_IFNAME=lo \
 NCCL_IB_DISABLE=1 \
@@ -230,7 +230,7 @@ vllm serve \
     --port 8070 \
     --tensor-parallel-size 2 \
     --max-model-len 50000 \
-    --gpu-memory-utilization 0.80 \
+    --gpu-memory-utilization 0.9046 \
     --trust-remote-code \
     --tokenizer-mode auto \
     --served-model-name MiniMax-M2.5 \
@@ -263,7 +263,7 @@ free -h
 pip uninstall transformers -y
 pip install transformers==4.57.6
 
-PYTORCH_ALLOC_CONF=expandable_segments:True \
+VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 VLLM_TEST_FORCE_FP8_MARLIN=1 \
 NCCL_SOCKET_IFNAME=lo \
 NCCL_IB_DISABLE=1 \
@@ -286,7 +286,7 @@ vllm serve \
     --port 8070 \
     --tensor-parallel-size 2 \
     --max-model-len 33000 \
-    --gpu-memory-utilization 0.95 \
+    --gpu-memory-utilization 0.9046 \
     --trust-remote-code \
     --tokenizer-mode auto \
     --served-model-name Kimi-K2.5 \
@@ -313,7 +313,7 @@ free -h
 pip uninstall transformers -y
 pip install transformers==4.57.6
 
-PYTORCH_ALLOC_CONF=expandable_segments:True \
+VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 VLLM_TEST_FORCE_FP8_MARLIN=1 \
 NCCL_SOCKET_IFNAME=lo \
 NCCL_IB_DISABLE=1 \
@@ -336,7 +336,7 @@ vllm serve \
     --port 8070 \
     --tensor-parallel-size 2 \
     --max-model-len 40000 \
-    --gpu-memory-utilization 0.80 \
+    --gpu-memory-utilization 0.9046 \
     --trust-remote-code \
     --tokenizer-mode auto \
     --served-model-name GLM-4.7-FP8 \
@@ -542,7 +542,7 @@ LK_THREADS=44
 ### 显存设置
 ```bash
 # 24G显存开启GPU预填充时，留出足够临时显存用于计算，否则会导致长上下文预填充性能大幅下降，启动时间过长
---gpu-memory-utilization 0.85
+--gpu-memory-utilization 0.9046
 # 最多4并发，常规节省显存
 --max-num-seqs 4
 # 关闭GPU预填充时,节省显存，性能不变，但如果开启GPU预填充会导致性能下降

@@ -2683,7 +2683,7 @@ class FusedMoE(CustomOp):
                         expert_ids_cpu = topk_ids.to(dtype=torch.int32, device='cpu', memory_format=torch.contiguous_format, non_blocking=non_blocking)
                         weights_cpu = topk_weights.to(dtype=torch.float32, device='cpu', memory_format=torch.contiguous_format, non_blocking=non_blocking)
                         hidden_states_cpu = hidden_states.to(device='cpu', memory_format=torch.contiguous_format, non_blocking=non_blocking)
-                        output_cpu = torch.empty_like(hidden_states, device='cpu', memory_format=torch.contiguous_format)
+                        output_cpu = torch.zeros_like(hidden_states, device='cpu').contiguous()
                         bsz_tensor = torch.tensor([hidden_states.size(0)], device='cpu', dtype=torch.int32).contiguous()
                         
                         prefill_stream.synchronize()
@@ -2727,11 +2727,11 @@ class WeightBufManager:
     def _create_gpu_weights(self, cpu_weights: Dict[str, torch.Tensor], device: torch.cuda.device) -> Dict[str, torch.Tensor]:
         gpu_weights = {}
         for param_name, weight_cpu in cpu_weights.items():
-            gpu_weights[param_name] = torch.empty_like(
+            gpu_weights[param_name] = torch.zeros_like(
                 weight_cpu, 
                 device=device,
                 memory_format=torch.contiguous_format
-            )
+            ).contiguous()
         return gpu_weights
 
     def _create_cpu_weights(self, layer) -> Dict[str, torch.Tensor]: 
@@ -2760,14 +2760,13 @@ class WeightBufManager:
                     K = layer.intermediate_size_per_partition
                     shape = (E, N, K * 18 // 32)
                 
-                weight_cpu = torch.empty(
+                weight_cpu = torch.zeros(
                     shape,
                     dtype=torch.uint8,
                     device="cpu",
                     requires_grad=False,
-                    pin_memory=pin_memory,
-                    memory_format=torch.contiguous_format,
-                )
+                    pin_memory=pin_memory
+                ).contiguous()
                 
           
                 cpu_weights[param_name] = weight_cpu
@@ -2777,14 +2776,14 @@ class WeightBufManager:
             w13_shape = (layer.local_num_experts, 
                         layer.intermediate_size_per_partition * 2, 
                         layer.hidden_size)
-            w13_weight_cpu = torch.empty(
+            w13_weight_cpu = torch.zeros(
                 w13_shape,
                 dtype=layer.moe_config.in_dtype,
                 device="cpu",
                 requires_grad=False,
                 pin_memory=pin_memory,
                 memory_format=torch.contiguous_format,
-            )
+            ).contiguous()
          
             
             cpu_weights['w13_weight'] = w13_weight_cpu
@@ -2793,14 +2792,14 @@ class WeightBufManager:
             w2_shape = (layer.local_num_experts,
                        layer.hidden_size,
                        layer.intermediate_size_per_partition)
-            w2_weight_cpu = torch.empty(
+            w2_weight_cpu = torch.zeros(
                 w2_shape,
                 dtype=layer.moe_config.in_dtype,
                 device="cpu",
                 requires_grad=False,
                 pin_memory=pin_memory,
                 memory_format=torch.contiguous_format,
-            ) 
+            ).contiguous() 
             
             cpu_weights['w2_weight'] = w2_weight_cpu
             logger.debug(f"Created w2_weight with shape {w2_shape} for regular layer")
