@@ -148,8 +148,14 @@ vllm serve \
     --enable-auto-tool-choice \
     --tool-call-parser qwen3_coder \
     --reasoning-parser qwen3 \
+    --default-chat-template-kwargs '{"enable_thinking": false}' \
     --language-model-only
 ```
+
+For plain chat clients, keep `--language-model-only` and disable thinking by
+default as shown above. Otherwise Qwen3.5 may return internal reasoning text in
+`message.reasoning`, and clients that render it directly can show garbled
+content instead of the final answer.
 
 
 ## How to Run Qwen3.5-397B-A17B
@@ -196,8 +202,14 @@ vllm serve \
     --enable-auto-tool-choice \
     --tool-call-parser qwen3_coder \
     --reasoning-parser qwen3 \
+    --default-chat-template-kwargs '{"enable_thinking": false}' \
     --language-model-only
 ```
+
+For plain chat clients, keep `--language-model-only` and disable thinking by
+default as shown above. Otherwise Qwen3.5 may return internal reasoning text in
+`message.reasoning`, and clients that render it directly can show garbled
+content instead of the final answer.
 
 # How to Run MiniMax-M2.5
 

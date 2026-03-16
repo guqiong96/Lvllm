@@ -148,8 +148,13 @@ vllm serve \
     --enable-auto-tool-choice \
     --tool-call-parser qwen3_coder \
     --reasoning-parser qwen3 \
+    --default-chat-template-kwargs '{"enable_thinking": false}' \
     --language-model-only
 ```
+
+普通 chat 客户端建议保留 `--language-model-only`，并按上面的方式默认关闭
+thinking。否则 Qwen3.5 可能把内部思维过程放到 `message.reasoning` 里，前端
+如果直接渲染这部分内容，就会看到乱码或异常输出，而不是最终答案。
 
 
 ## 如何运行Qwen3.5-397B-A17B
@@ -196,8 +201,13 @@ vllm serve \
     --enable-auto-tool-choice \
     --tool-call-parser qwen3_coder \
     --reasoning-parser qwen3 \
+    --default-chat-template-kwargs '{"enable_thinking": false}' \
     --language-model-only
 ```
+
+普通 chat 客户端建议保留 `--language-model-only`，并按上面的方式默认关闭
+thinking。否则 Qwen3.5 可能把内部思维过程放到 `message.reasoning` 里，前端
+如果直接渲染这部分内容，就会看到乱码或异常输出，而不是最终答案。
 
 
 ## 如何运行MiniMax-M2.5
