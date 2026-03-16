@@ -1,13 +1,13 @@
-model: "/home/guqiong/Models/Qwen3.5-35B-A3B"
+model: "/home/guqiong/Models/Qwen3.5-122B-A10B-FP8"
 host: "0.0.0.0"
 port: 8070
 tensor-parallel-size: 2
 #pipeline-parallel-size: 2 
-max-model-len: 136000
-gpu-memory-utilization: 0.95 
+max-model-len: 160000
+gpu-memory-utilization: 0.90 
 trust-remote-code: true
 tokenizer-mode: "auto"
-served-model-name: "Qwen3.5-35B-A3B"
+served-model-name: "Qwen3.5-122B-A10B-FP8"
 compilation_config.cudagraph_mode: "FULL_DECODE_ONLY"
 enable_prefix_caching: true
 enable-chunked-prefill: true

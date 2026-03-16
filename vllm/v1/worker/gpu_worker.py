@@ -599,12 +599,7 @@ class Worker(WorkerBase):
         # Warmup and tune the kernels used during model execution before
         # cuda graph capture.
         kernel_warmup(self)
-        
-        if self.vllm_config.compilation_config.cudagraph_mode == CUDAGraphMode.FULL:
-            self.model_runner._dummy_run(
-                num_tokens=1
-            )
- 
+
         cuda_graph_memory_bytes = 0
         if not self.model_config.enforce_eager:
             cuda_graph_memory_bytes = self.model_runner.capture_model()
