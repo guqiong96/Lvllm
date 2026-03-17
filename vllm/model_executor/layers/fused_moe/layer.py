@@ -207,10 +207,11 @@ def determine_expert_placement_strategy(
         if (
             moe_parallel_config.use_all2all_kernels
             and not moe_parallel_config.use_deepep_ll_kernels
+            and not moe_parallel_config.use_nixl_ep_kernels
         ):
             logger.warning(
                 "Round-robin expert placement currently only supports "
-                "the DeepEP low-latency backend, but '%s' was configured. "
+                "the DeepEP low-latency or NIXL EP backend, but '%s' was configured. "
                 "Falling back to linear expert placement.",
                 moe_parallel_config.all2all_backend,
             )
@@ -793,10 +794,10 @@ class FusedMoE(CustomOp):
         self,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None:
         # Currently routing_tables only needed for round-robin expert placement
-        # with DeepEP-ll all2all backend.
-        if (
-            self.expert_placement_strategy != "round_robin"
-            or not self.moe_parallel_config.use_deepep_ll_kernels
+        # with DeepEP-ll or NIXL EP all2all backends.
+        if self.expert_placement_strategy != "round_robin" or (
+            not self.moe_parallel_config.use_deepep_ll_kernels
+            and not self.moe_parallel_config.use_nixl_ep_kernels
         ):
             return None
 
@@ -1675,6 +1676,10 @@ class FusedMoE(CustomOp):
             ("CPU" if not self.is_gpu_resident_layer else "GPU") + "]")
             return
         try:  
+            if is_lk_moe_use_gpu_prefill() and not hasattr(FusedMoE, '_weight_buf_manager'): 
+                FusedMoE._weight_buf_manager = WeightBufManager()
+                FusedMoE._weight_buf_manager.initialize_weights_buf_once(self, torch.cuda.current_device()) 
+          
             from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsWNA16MarlinMoEMethod
             from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsWNA16MoEMethod 
             from vllm.model_executor.layers.quantization.awq_marlin import AWQMarlinMoEMethod
@@ -2678,7 +2683,7 @@ class FusedMoE(CustomOp):
                         expert_ids_cpu = topk_ids.to(dtype=torch.int32, device='cpu', memory_format=torch.contiguous_format, non_blocking=non_blocking)
                         weights_cpu = topk_weights.to(dtype=torch.float32, device='cpu', memory_format=torch.contiguous_format, non_blocking=non_blocking)
                         hidden_states_cpu = hidden_states.to(device='cpu', memory_format=torch.contiguous_format, non_blocking=non_blocking)
-                        output_cpu = torch.empty_like(hidden_states, device='cpu', memory_format=torch.contiguous_format)
+                        output_cpu = torch.zeros_like(hidden_states, device='cpu').contiguous()
                         bsz_tensor = torch.tensor([hidden_states.size(0)], device='cpu', dtype=torch.int32).contiguous()
                         
                         prefill_stream.synchronize()
@@ -2704,6 +2709,106 @@ class FusedMoE(CustomOp):
         except Exception as e:
             logger.error(f"lk_moe forward failed with error: {e}, falling back to default path") 
             raise RuntimeError("lk_moe forward failed, fallback to default MoE implementation")
+
+
+from typing import Dict, Optional, List
+  
+
+class WeightBufManager:
+    def __init__(self): 
+        self.cpu_weight_buf: Dict[str, torch.Tensor] = {}   
+        self.gpu_weight_buf: Dict[str, torch.Tensor] = {}  
+        self.ref_count: int = 0 
+    
+    def initialize_weights_buf_once(self, layer, device: torch.cuda.device):  
+        self.cpu_weight_buf = self._create_cpu_weights(layer)
+        self.gpu_weight_buf = self._create_gpu_weights(self.cpu_weight_buf, device) 
+              
+    def _create_gpu_weights(self, cpu_weights: Dict[str, torch.Tensor], device: torch.cuda.device) -> Dict[str, torch.Tensor]:
+        gpu_weights = {}
+        for param_name, weight_cpu in cpu_weights.items():
+            gpu_weights[param_name] = torch.zeros_like(
+                weight_cpu, 
+                device=device,
+            ).contiguous()
+        return gpu_weights
+
+    def _create_cpu_weights(self, layer) -> Dict[str, torch.Tensor]: 
+        pin_memory = is_pin_memory_available()
+        cpu_weights = {}
+        from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsWNA16MarlinMoEMethod
+        from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsWNA16MoEMethod  
+        from vllm.model_executor.layers.quantization.fp8 import Fp8MoEMethod  
+        from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsW8A8Fp8MoEMethod
+        from vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method import UnquantizedFusedMoEMethod 
+        is_fp8 =  isinstance(layer.quant_method, Fp8MoEMethod) or isinstance(layer.quant_method, CompressedTensorsW8A8Fp8MoEMethod)
+        is_wna16 = (isinstance(layer.quant_method, CompressedTensorsWNA16MarlinMoEMethod) or isinstance(layer.quant_method, CompressedTensorsWNA16MoEMethod))
+        is_regular = isinstance(layer.quant_method, UnquantizedFusedMoEMethod)
+        
+        if is_fp8 or is_wna16: 
+            param_names = ["w13_weight", "w2_weight"]
+            for param_name in param_names:
+                if param_name == "w13_weight":
+                    E = layer.local_num_experts
+                    N = layer.intermediate_size_per_partition * 2
+                    K = layer.hidden_size
+                    shape = (E, N, K * 18 // 32)
+                elif param_name == "w2_weight":
+                    E = layer.local_num_experts
+                    N = layer.hidden_size
+                    K = layer.intermediate_size_per_partition
+                    shape = (E, N, K * 18 // 32)
+                
+                weight_cpu = torch.zeros(
+                    shape,
+                    dtype=torch.uint8,
+                    device="cpu",
+                    requires_grad=False,
+                    pin_memory=pin_memory
+                ).contiguous()
+                
+          
+                cpu_weights[param_name] = weight_cpu
+                logger.debug(f"Created {param_name} with shape {shape} for FP8/WNA16 layer")
+                
+        elif is_regular: 
+            w13_shape = (layer.local_num_experts, 
+                        layer.intermediate_size_per_partition * 2, 
+                        layer.hidden_size)
+            w13_weight_cpu = torch.zeros(
+                w13_shape,
+                dtype=layer.moe_config.in_dtype,
+                device="cpu",
+                requires_grad=False,
+                pin_memory=pin_memory,
+            ).contiguous()
+         
+            
+            cpu_weights['w13_weight'] = w13_weight_cpu
+            logger.debug(f"Created w13_weight with shape {w13_shape} for regular layer")
+             
+            w2_shape = (layer.local_num_experts,
+                       layer.hidden_size,
+                       layer.intermediate_size_per_partition)
+            w2_weight_cpu = torch.zeros(
+                w2_shape,
+                dtype=layer.moe_config.in_dtype,
+                device="cpu",
+                requires_grad=False,
+                pin_memory=pin_memory,
+            ).contiguous() 
+            
+            cpu_weights['w2_weight'] = w2_weight_cpu
+            logger.debug(f"Created w2_weight with shape {w2_shape} for regular layer")
+        
+        return cpu_weights
+    
+    def get_gpu_weights(self) -> Dict[str, torch.Tensor]:  
+        return self.gpu_weight_buf
+    
+    def get_cpu_weights(self) -> Dict[str, torch.Tensor]:  
+        return self.cpu_weight_buf
+      
 
 
 # Mark the FusedMoE weight_loader as supporting MoE-specific parameters
