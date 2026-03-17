@@ -109,8 +109,8 @@ vLLM已验证的大部分原版MOE模型
 sync && echo 3 | sudo tee /proc/sys/vm/drop_caches
 free -h
 
-pip uninstall transformers flashinfer-cubin -y
-pip install transformers==4.57.6 flashinfer-cubin==0.6.4
+pip uninstall transformers -y
+pip install transformers==4.57.6
 
 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 VLLM_TEST_FORCE_FP8_MARLIN=1 \
@@ -172,7 +172,6 @@ LK_THREAD_BINDING=CPU_CORE \
 LK_THREADS=44 \
 OMP_NUM_THREADS=44 \
 LVLLM_MOE_USE_WEIGHT=INT4 \
-LVLLM_GPU_RESIDENT_MOE_LAYERS=0 \
 LVLLM_GPU_PREFETCH_WINDOW=1 \
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=2048 \
 LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
@@ -182,7 +181,7 @@ vllm serve \
     --host 0.0.0.0 \
     --port 8070 \
     --tensor-parallel-size 2 \
-    --max-model-len 40000 \
+    --max-model-len 70000 \
     --gpu-memory-utilization 0.9046 \
     --trust-remote-code \
     --tokenizer-mode auto \
@@ -190,7 +189,7 @@ vllm serve \
     --compilation_config.cudagraph_mode FULL_DECODE_ONLY \
     --enable-prefix-caching \
     --enable-chunked-prefill \
-    --max-num-batched-tokens 16384 \
+    --max-num-batched-tokens 18000 \
     --max-num-seqs 4 \
     --compilation_config.mode VLLM_COMPILE \
     --enable-auto-tool-choice \

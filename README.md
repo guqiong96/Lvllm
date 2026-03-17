@@ -109,8 +109,8 @@ Note 1: Enabling GPU Prefill, Input Length 32K-64K
 sync && echo 3 | sudo tee /proc/sys/vm/drop_caches
 free -h
 
-pip uninstall transformers flashinfer-cubin -y
-pip install transformers==4.57.6 flashinfer-cubin==0.6.4
+pip uninstall transformers
+pip install transformers==4.57.6
 
 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 VLLM_TEST_FORCE_FP8_MARLIN=1 \
