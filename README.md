@@ -517,6 +517,7 @@ MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TY
 
 rm -rf ~/.cache/vllm
 rm -rf ~/.cache/flashinfer
+rm -rf ~/.triton/cache
 ```  
  
 ## Optimization Tips
