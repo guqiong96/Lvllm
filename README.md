@@ -19,6 +19,7 @@ Note 1: x86 CPUs with AVX2 or above instruction sets and Nvidia GPUs are support
 - [Version Changes](#version-changes)
 - [Supported Models](#supported-models)
 - [Performance Reference](#performance-reference)
+- [How to Run NVIDIA-Nemotron-3-Super-120B-A12B-BF16](#how-to-run-nvidia-nemotron-3-super-120b-a12b-bf16)
 - [How to Run Qwen3.5-122B-A10B](#how-to-run-qwen35-122b-a10b)
 - [How to Run Qwen3.5-397B-A17B](#how-to-run-qwen35-397b-a17b)
 - [How to Run MiniMax-M2.5](#how-to-run-minimax-m25)
@@ -32,6 +33,7 @@ Note 1: x86 CPUs with AVX2 or above instruction sets and Nvidia GPUs are support
 ## Version Changes
 
 ```bash
+2026-03-19: lvllm-v1.9.10 - fix known issues，Supports the new moe model type, which does not have gate_proj, for example: NVIDIA-Nemotron-3-Super-120B-A12B-BF16
 2026-03-11: lvllm-v1.9.2 - FP8、AWQ4bit MoE Models enable GPU Prefill acceleration without additional memory occupation, FP8 MoE Model cancel TO_DTYPE runtime type conversion, KEEP model temporarily not support GPU Prefill
 2026-03-05: lvllm-v1.9.0 - Optimize GPU prefill and regular prefill to ensure output quality
 2026-03-01: lvllm-v1.8.10 - fix known issues, support new models
@@ -60,6 +62,7 @@ Most of the original MOE models verified by vLLM
 
 | Model Name | Status |
 |---------|------|
+| NVIDIA-Nemotron-3-Super-120B-A12B-BF16 | ✅ Tested |
 | Qwen3.5-35B-A3B | ✅ Tested |
 | Qwen3.5-122B-A10B | ✅ Tested |
 | Qwen3.5-397B-A17B | ✅ Tested |
@@ -103,6 +106,52 @@ Note 1: https://hf-mirror.com/cyankiwi provides AWQ 4bit symmetric quantized mod
 
 Note 1: Enabling GPU Prefill, Input Length 32K-64K
 
+## How to Run NVIDIA-Nemotron-3-Super-120B-A12B-BF16
+```bash
+pip uninstall transformers -y
+pip install transformers==4.57.6
+
+VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
+VLLM_TEST_FORCE_FP8_MARLIN=1 \
+NCCL_SOCKET_IFNAME=lo \
+NCCL_IB_DISABLE=1 \
+GLOO_SOCKET_IFNAME=lo \
+NCCL_SOCKET_TIMEOUT=600000 \
+VLLM_SKIP_P2P_CHECK=1 \
+LVLLM_MOE_NUMA_ENABLED=1 \
+LK_THREAD_BINDING=CPU_CORE \
+LK_THREADS=44 \
+OMP_NUM_THREADS=44 \
+LVLLM_MOE_USE_WEIGHT=INT4 \
+LVLLM_GPU_RESIDENT_MOE_LAYERS=0 \
+LVLLM_GPU_PREFETCH_WINDOW=1 \
+LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=2048 \
+LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
+LVLLM_MOE_QUANT_ON_GPU=1 \
+vllm serve \
+    --model /home/guqiong/Models/NVIDIA-Nemotron-3-Super-120B-A12B-BF16 \
+    --host 0.0.0.0 \
+    --port 8070 \
+    --tensor-parallel-size 2 \
+    --max-model-len 40000 \
+    --gpu-memory-utilization 0.9046 \
+    --trust-remote-code \
+    --tokenizer-mode auto \
+    --served-model-name NVIDIA-Nemotron-3-Super-120B-A12B-BF16 \
+    --compilation_config.cudagraph_mode FULL_DECODE_ONLY \
+    --enable-prefix-caching \
+    --enable-chunked-prefill \
+    --max-num-batched-tokens 16384 \
+    --max-num-seqs 4 \
+    --compilation_config.mode VLLM_COMPILE
+    
+
+    # this params is from model page, can be omitted
+    --enable-auto-tool-choice \
+    --mamba-ssm-cache-dtype float16 \
+    --reasoning-parser super_v3 \
+    --tool-call-parser qwen3_coder \
+```
 
 ## How to Run Qwen3.5-122B-A10B
 ```bash
