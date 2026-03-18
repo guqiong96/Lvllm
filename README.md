@@ -133,7 +133,7 @@ vllm serve \
     --host 0.0.0.0 \
     --port 8070 \
     --tensor-parallel-size 2 \
-    --max-model-len 40000 \
+    --max-model-len 52000 \
     --gpu-memory-utilization 0.9046 \
     --trust-remote-code \
     --tokenizer-mode auto \
@@ -141,16 +141,12 @@ vllm serve \
     --compilation_config.cudagraph_mode FULL_DECODE_ONLY \
     --enable-prefix-caching \
     --enable-chunked-prefill \
-    --max-num-batched-tokens 16384 \
+    --max-num-batched-tokens 36000 \
     --max-num-seqs 4 \
-    --compilation_config.mode VLLM_COMPILE
-    
-
-    # this params is from model page, can be omitted
+    --compilation_config.mode VLLM_COMPILE \
     --enable-auto-tool-choice \
-    --mamba-ssm-cache-dtype float16 \
-    --reasoning-parser super_v3 \
-    --tool-call-parser qwen3_coder \
+    --reasoning-parser qwen3 \
+    --tool-call-parser qwen3_coder
 ```
 
 ## How to Run Qwen3.5-122B-A10B

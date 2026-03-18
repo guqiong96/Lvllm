@@ -378,7 +378,7 @@ class FusedMoE(CustomOp):
         self.vllm_config = vllm_config
         
         if vllm_config.model_config is not None:
-            self.check_nan_in_output = (vllm_config.model_config.architecture in ["MiniMaxM2ForCausalLM", "Step3p5ForCausalLM", "NemotronHForCausalLM"])
+            self.check_nan_in_output = (vllm_config.model_config.architecture in ["MiniMaxM2ForCausalLM", "Step3p5ForCausalLM"])
         else:
             self.check_nan_in_output = False
         
