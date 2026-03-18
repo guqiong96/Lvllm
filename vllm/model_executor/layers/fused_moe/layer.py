@@ -378,9 +378,15 @@ class FusedMoE(CustomOp):
         self.vllm_config = vllm_config
         
         if vllm_config.model_config is not None:
-            self.check_nan_in_output = (vllm_config.model_config.architecture == "MiniMaxM2ForCausalLM" or vllm_config.model_config.architecture == "Step3p5ForCausalLM")
+            self.check_nan_in_output = (vllm_config.model_config.architecture in ["MiniMaxM2ForCausalLM", "Step3p5ForCausalLM", "NemotronHForCausalLM"])
         else:
             self.check_nan_in_output = False
+        
+        if vllm_config.model_config is not None:
+            self.has_gate_proj  = not (vllm_config.model_config.architecture == "NemotronHForCausalLM")
+        else:
+            self.has_gate_proj = True
+      
             
         # FIXME (varun): We should have a better way of inferring the activation
         # datatype. This works for now as the tensor datatype entering the MoE
@@ -1882,7 +1888,8 @@ class FusedMoE(CustomOp):
             num_processes,                # num_processes
             process_id,                   # process_id
             gpu_id,                       # gpu_id
-            num_experts,        # expert_num
+            self.local_num_experts,        # expert_num
+            has_gate_proj,                 # has_gate_proj
             self.top_k,                    # routed_expert_num
             self.hidden_size,              # hidden_size
             self.intermediate_size_per_partition,             # intermediate_size
@@ -1950,38 +1957,7 @@ class FusedMoE(CustomOp):
         packed_factor = self.quant_method.packed_factor  # 8 （bit)
          
  
-        weights_per_container = packed_factor // num_bits  # 2
- 
-        num_experts, total_intermediate_size, compressed_hidden_dim = w13_weight.shape
- 
-        intermediate_size = total_intermediate_size // 2
-        hidden_size = compressed_hidden_dim * weights_per_container 
- 
-        expected_w2_shape = (
-            num_experts,
-            hidden_size,
-            intermediate_size // weights_per_container
-        )
-
-        assert w2_weight.shape == expected_w2_shape, \
-            f"w2_weight {w2_weight.shape} != {expected_w2_shape}"
- 
-        expected_w13_scale_shape = (
-            num_experts,
-            total_intermediate_size,
-            hidden_size // group_size
-        )
-
-        expected_w2_scale_shape = (
-            num_experts,
-            hidden_size,
-            intermediate_size // group_size
-        )
-
-        assert w13_scale.shape == expected_w13_scale_shape, \
-            f"w13_scale {w13_scale.shape} != {expected_w13_scale_shape}"
-        assert w2_scale.shape == expected_w2_scale_shape, \
-            f"w2_scale {w2_scale.shape} != {expected_w2_scale_shape}"
+        weights_per_container = packed_factor // num_bits  # 2 
         
         w13_weight_ptr = w13_weight.contiguous().data_ptr()
         w2_weight_ptr = w2_weight.contiguous().data_ptr()
@@ -2002,6 +1978,7 @@ class FusedMoE(CustomOp):
             num_processes,                # num_processes
             process_id,                   # process_id
             gpu_id,                       # gpu_id
+            self.has_gate_proj,             # has_gate_proj
             self.local_num_experts,        # expert_num
             self.top_k,                    # routed_expert_num
             self.hidden_size,                   # hidden_size
@@ -2050,9 +2027,8 @@ class FusedMoE(CustomOp):
         w2_weight = self.w2_weight
         
         hidden_ggml_type = self.get_ggml_type_from_dtype(self.moe_config.in_dtype)
-        num_experts, total_intermediate_size, hidden_size = w13_weight.shape
-        intermediate_size = total_intermediate_size // 2 
-        assert w2_weight.shape == (num_experts, hidden_size, intermediate_size), f"Down weight shape {w2_weight.shape} must be (num_experts, hidden_size, intermediate_size)"
+        E, N, K = w13_weight.shape 
+        assert w2_weight.shape == (E, K, N // 2), f"Down weight shape {w2_weight.shape} must be (E, K, N // 2)"
         
         if block_quant:
             w13_weight_scale = self.w13_weight_scale_inv
@@ -2069,8 +2045,8 @@ class FusedMoE(CustomOp):
             w13_weight_scale = self.w13_weight_scale
             w2_weight_scale = self.w2_weight_scale
             scale_num_experts, scale_total_N, scale_K = w13_weight_scale.shape 
-            assert w13_weight_scale.shape == (scale_num_experts, intermediate_size * 2 , 1), f"Up weight scale shape {w13_weight_scale.shape} must be (scale_num_experts, intermediate_size * 2 , 1)"
-            assert w2_weight_scale.shape == (scale_num_experts, hidden_size , 1), f"Down weight scale shape {w2_weight_scale.shape} must be (scale_num_experts, hidden_size , 1)"
+            assert w13_weight_scale.shape == (scale_num_experts, N, 1), f"Up weight scale shape {w13_weight_scale.shape} must be (scale_num_experts, intermediate_size * 2 , 1)"
+            assert w2_weight_scale.shape == (scale_num_experts, K , 1), f"Down weight scale shape {w2_weight_scale.shape} must be (scale_num_experts, hidden_size , 1)"
          
         
         scale_ggml_type = self.get_ggml_type_from_dtype(w13_weight_scale.dtype)
@@ -2086,6 +2062,7 @@ class FusedMoE(CustomOp):
             num_processes,                # num_processes
             process_id,                   # process_id
             gpu_id,                       # gpu_id
+            self.has_gate_proj,             # has_gate_proj
             self.local_num_experts,        # expert_num
             self.top_k,                    # routed_expert_num
             self.hidden_size,                   # hidden_size
@@ -2123,10 +2100,9 @@ class FusedMoE(CustomOp):
         w2_weight_scale_inv = self.w2_weight_scale_inv
         
         group_shape = self.quant_method.weight_block_size
-        num_experts, total_intermediate_size, hidden_size = w13_weight.shape
-        intermediate_size = total_intermediate_size // 2
+        E, N, K = w13_weight.shape 
          
-        assert w2_weight.shape == (num_experts, hidden_size, intermediate_size)
+        assert w2_weight.shape == (E, K, N // 2)
         
         if is_lk_moe_quant_on_gpu():
             dequant_device = torch.cuda.current_device()
@@ -2135,7 +2111,7 @@ class FusedMoE(CustomOp):
         w13_fp32_list = []
         w2_fp32_list = [] 
          
-        for expert_idx in range(num_experts): 
+        for expert_idx in range(E): 
             expert_w13_weight = w13_weight[expert_idx].to(device=dequant_device)
             expert_w13_scale_inv = w13_weight_scale_inv[expert_idx].to(device=dequant_device)
             expert_w2_weight = w2_weight[expert_idx].to(device=dequant_device)
@@ -2181,6 +2157,7 @@ class FusedMoE(CustomOp):
             num_processes,                     # num_processes
             process_id,                       # process_id
             gpu_id,                           # gpu_id
+            self.has_gate_proj,             # has_gate_proj
             self.local_num_experts,            # expert_num
             self.top_k,                        # routed_expert_num
             self.hidden_size,                  # hidden_size
@@ -2223,23 +2200,21 @@ class FusedMoE(CustomOp):
         group_shape = self.quant_method.weight_block_size
 
              
-        num_experts, total_intermediate_size, hidden_size = w13_weight.shape
-        intermediate_size = total_intermediate_size // 2 
-        assert w2_weight.shape == (num_experts, hidden_size, intermediate_size), f"Down weight shape {w2_weight.shape} must be (num_experts, hidden_size, intermediate_size)"
+        E, N, K = w13_weight.shape 
+        assert w2_weight.shape == (E, K, N // 2), f"Down weight shape {w2_weight.shape} must be (E, K, N // 2)"
         
-        scale_num_experts, scale_total_intermediate_size, scale_hidden_size = w13_weight_scale_inv.shape
-        scale_intermediate_size = scale_total_intermediate_size // 2
+        E1, N1, K1 = w13_weight_scale_inv.shape 
         
-        assert w2_weight_scale_inv.shape == (scale_num_experts, scale_hidden_size, scale_intermediate_size), f"Down weight scale shape {w2_weight_scale_inv.shape} must be (scale_num_experts, scale_hidden_size, scale_intermediate_size)"
+        assert w2_weight_scale_inv.shape == (E1, K1, N1 // 2), f"Down weight scale shape {w2_weight_scale_inv.shape} must be (E1, K1, N1 // 2)"
         
         if is_lk_moe_quant_on_gpu():
             dequant_device = torch.cuda.current_device()
         else:
             dequant_device = torch.device("cpu")
-        w13_buf = torch.zeros(intermediate_size, hidden_size, dtype=torch.float32, device=dequant_device, requires_grad=False) 
-        w2_buf = torch.zeros(hidden_size, intermediate_size, dtype=torch.float32, device=dequant_device, requires_grad=False)
+        w13_buf = torch.zeros(E, N, K, dtype=torch.float32, device=dequant_device, requires_grad=False) 
+        w2_buf = torch.zeros(E, K, N // 2, dtype=torch.float32, device=dequant_device, requires_grad=False)
         
-        for expert_idx in range(num_experts): 
+        for expert_idx in range(E): 
             expert_w13_weight = w13_weight[expert_idx].to(dequant_device).to(device=dequant_device)  # torch.Size([1024, 2048])
             expert_w13_scale_inv = w13_weight_scale_inv[expert_idx].to(device=dequant_device)  # torch.Size([8, 16]) 
             expert_w2_weight = w2_weight[expert_idx].to(device=dequant_device)   # torch.Size([2048, 512])
@@ -2282,6 +2257,7 @@ class FusedMoE(CustomOp):
             num_processes,                # num_processes
             process_id,                   # process_id
             gpu_id,                       # gpu_id
+            self.has_gate_proj,             # has_gate_proj
             self.local_num_experts,        # expert_num
             self.top_k,                    # routed_expert_num
             self.hidden_size,              # hidden_size
@@ -2314,13 +2290,12 @@ class FusedMoE(CustomOp):
         w13_weight_scale = self.w13_weight_scale
         w2_weight_scale = self.w2_weight_scale
         
-        num_experts, total_intermediate_size, hidden_size = w13_weight.shape
-        intermediate_size = total_intermediate_size // 2 
+        E, N, K = w13_weight.shape 
          
-        assert w2_weight.shape == (num_experts, hidden_size, intermediate_size)
+        assert w2_weight.shape == (E, K, N // 2)
          
-        assert w13_weight_scale.shape == (num_experts, total_intermediate_size, 1)
-        assert w2_weight_scale.shape == (num_experts, hidden_size, 1)
+        assert w13_weight_scale.shape == (E, N, 1)
+        assert w2_weight_scale.shape == (E, K, 1)
         
         if is_lk_moe_quant_on_gpu():
             dequant_device = torch.cuda.current_device()
@@ -2329,7 +2304,7 @@ class FusedMoE(CustomOp):
         w13_fp32_list = []
         w2_fp32_list = [] 
         
-        for expert_idx in range(num_experts): 
+        for expert_idx in range(E): 
             expert_w13_weight = w13_weight[expert_idx].to(device=dequant_device)  # [intermediate_size, hidden_size]
             expert_w13_scale = w13_weight_scale[expert_idx].to(device=dequant_device)  # [total_intermediate_size, 1]
             expert_w2_weight = w2_weight[expert_idx].to(device=dequant_device)  # [hidden_size, intermediate_size]
@@ -2374,6 +2349,7 @@ class FusedMoE(CustomOp):
             num_processes,                     # num_processes
             process_id,                       # process_id
             gpu_id,                           # gpu_id
+            self.has_gate_proj,             # has_gate_proj
             self.local_num_experts,            # expert_num
             self.top_k,                        # routed_expert_num
             self.hidden_size,                  # hidden_size
@@ -2412,25 +2388,17 @@ class FusedMoE(CustomOp):
         w13_projs = []
         w2_projs = [] 
              
-        num_experts, total_intermediate_size, hidden_size = w13_weight.shape
-        intermediate_size = total_intermediate_size // 2 
-        assert w2_weight.shape == (num_experts, hidden_size, intermediate_size), f"Down weight shape {w2_weight.shape} must be (num_experts, hidden_size, intermediate_size)"
-        
-        scale_num_experts, scale_total_intermediate_size, _ = w13_weight_scale.shape
-        scale_intermediate_size = scale_total_intermediate_size // 2
-        
-        assert w2_weight_scale.shape == (scale_num_experts, hidden_size, 1), f"Down weight scale shape {w2_weight_scale.shape} must be (scale_num_experts, scale_hidden_size, 1)"
-        
+        E, N, K = w13_weight.shape 
         
         if is_lk_moe_quant_on_gpu():
             dequant_device = torch.cuda.current_device()
         else:
             dequant_device = torch.device("cpu")
         
-        w13_buf = torch.zeros(intermediate_size, hidden_size, dtype=torch.float32, device=dequant_device, requires_grad=False) 
-        w2_buf = torch.zeros(hidden_size, intermediate_size, dtype=torch.float32, device=dequant_device, requires_grad=False)
+        w13_buf = torch.zeros(N, K, dtype=torch.float32, device=dequant_device, requires_grad=False) 
+        w2_buf = torch.zeros(K, N // 2, dtype=torch.float32, device=dequant_device, requires_grad=False)
         
-        for expert_idx in range(num_experts): 
+        for expert_idx in range(E): 
             expert_w13_weight = w13_weight[expert_idx].to(device=dequant_device)  # shape: [1408, 4096]
             expert_w13_scale = w13_weight_scale[expert_idx].to(device=dequant_device)    # shape: [1408, 1]
             expert_w2_weight = w2_weight[expert_idx].to(device=dequant_device)    # shape: [4096, 1408]
@@ -2466,6 +2434,7 @@ class FusedMoE(CustomOp):
             num_processes,                # num_processes
             process_id,                   # process_id
             gpu_id,                       # gpu_id
+            self.has_gate_proj,             # has_gate_proj
             self.local_num_experts,        # expert_num
             self.top_k,                    # routed_expert_num
             self.hidden_size,              # hidden_size
@@ -2493,14 +2462,8 @@ class FusedMoE(CustomOp):
         w13_ggml_type = self.get_ggml_type_from_dtype(self.w13_weight.dtype)
         w2_ggml_type = self.get_ggml_type_from_dtype(self.w2_weight.dtype ) 
         hidden_ggml_type = self.get_ggml_type_from_dtype(self.moe_config.in_dtype)
-     
-        num_experts, total_intermediate_size, hidden_size = self.w13_weight.shape
-        intermediate_size = total_intermediate_size // 2
-        
-        assert self.w13_weight.shape == (num_experts, self.intermediate_size_per_partition * 2, self.hidden_size), f"Up weight shape {self.w13_weight.shape} must be (num_experts, total_intermediate_size, hidden_size)"
-        
-        assert self.w2_weight.shape == (num_experts, self.hidden_size, self.intermediate_size_per_partition), f"Down weight shape {self.w2_weight.shape} must be (num_experts, hidden_size, intermediate_size)"
-        
+      
+         
         w13_ptr = self.w13_weight.contiguous().data_ptr()
         w2_ptr = self.w2_weight.contiguous().data_ptr()
         
@@ -2510,7 +2473,8 @@ class FusedMoE(CustomOp):
             num_processes,                # num_processes
             process_id,                   # process_id
             gpu_id,                       # gpu_id
-            num_experts,        # expert_num
+            self.has_gate_proj,             # has_gate_proj
+            self.local_num_experts,        # expert_num
             self.top_k,                    # routed_expert_num
             self.hidden_size,              # hidden_size
             self.intermediate_size_per_partition,             # intermediate_size
@@ -2773,7 +2737,7 @@ class WeightBufManager:
             for param_name in param_names:
                 if param_name == "w13_weight":
                     E = layer.local_num_experts
-                    N = layer.intermediate_size_per_partition * 2
+                    N = layer.intermediate_size_per_partition * 2 if layer.has_gate_proj else layer.intermediate_size_per_partition
                     K = layer.hidden_size
                     shape = (E, N, K * 18 // 32)
                 elif param_name == "w2_weight":
@@ -2796,7 +2760,7 @@ class WeightBufManager:
                 
         elif is_regular: 
             w13_shape = (layer.local_num_experts, 
-                        layer.intermediate_size_per_partition * 2, 
+                        layer.intermediate_size_per_partition * 2 if layer.has_gate_proj else layer.intermediate_size_per_partition,    
                         layer.hidden_size)
             w13_weight_cpu = torch.zeros(
                 w13_shape,
