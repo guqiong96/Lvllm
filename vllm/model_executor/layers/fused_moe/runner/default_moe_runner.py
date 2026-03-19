@@ -259,7 +259,7 @@ class DefaultMoERunner(MoERunner):
         return (
             self.moe_config.moe_parallel_config.use_deepep_ll_kernels
             or self.moe_config.moe_parallel_config.use_mori_kernels
-            or self.moe_config.moe_parallel_config.use_fi_all2allv_kernels
+            or self.moe_config.moe_parallel_config.use_fi_nvl_two_sided_kernels
             or self.moe_config.moe_parallel_config.use_nixl_ep_kernels
         ) and envs.VLLM_ENABLE_MOE_DP_CHUNK
 
@@ -914,21 +914,30 @@ def moe_prepare_gpu_prefill(layer, forward_context: ForwardContext, device: torc
                         ) 
                     elif is_regular:
                         if param_name == "w13_weight":
-                            layer.lk_moe.collect_weights(
-                                True,  
-                                0,
-                                0,
-                                weight_cpu.data_ptr(),  
-                                0  # 0   gate  
-                            )
-                            
-                            layer.lk_moe.collect_weights(
-                                True,  
-                                0,
-                                0,
-                                weight_cpu.data_ptr(),  
-                                1  # 1   up
-                            )
+                            if layer.has_gate_proj:
+                                layer.lk_moe.collect_weights(
+                                    True,  
+                                    0,
+                                    0,
+                                    weight_cpu.data_ptr(),  
+                                    0  # 0   gate  
+                                )
+                                
+                                layer.lk_moe.collect_weights(
+                                    True,  
+                                    0,
+                                    0,
+                                    weight_cpu.data_ptr(),  
+                                    1  # 1   up
+                                )
+                            else:
+                                layer.lk_moe.collect_weights(
+                                    True,  
+                                    0,
+                                    0,
+                                    weight_cpu.data_ptr(),  
+                                    1  # 1   up
+                                )
                         elif param_name == "w2_weight":
                             layer.lk_moe.collect_weights(
                                 True,  

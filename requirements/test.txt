@@ -59,6 +59,16 @@ attrs==24.2.0
     #   referencing
 audioread==3.0.1
     # via librosa
+av==16.1.0
+    # via -r requirements/test.in
+azure-core==1.38.2
+    # via
+    #   azure-identity
+    #   azure-storage-blob
+azure-identity==1.25.2
+    # via runai-model-streamer-azure
+azure-storage-blob==12.28.0
+    # via runai-model-streamer-azure
 backoff==2.2.1
     # via
     #   -r requirements/test.in
@@ -98,8 +108,10 @@ certifi==2024.8.30
     #   rasterio
     #   requests
     #   sentry-sdk
-cffi==1.17.1
-    # via soundfile
+cffi==2.0.0
+    # via
+    #   cryptography
+    #   soundfile
 chardet==5.2.0
     # via mbstrdecoder
 charset-normalizer==3.4.0
@@ -143,6 +155,12 @@ coverage==7.10.6
     # via pytest-cov
 cramjam==2.9.0
     # via fastparquet
+cryptography==46.0.5
+    # via
+    #   azure-identity
+    #   azure-storage-blob
+    #   msal
+    #   pyjwt
 cuda-bindings==12.9.4
 cuda-pathfinder==1.3.3
     # via cuda-bindings
@@ -356,6 +374,10 @@ inflect==5.6.2
     # via datamodel-code-generator
 iniconfig==2.0.0
     # via pytest
+instanttensor==0.1.5
+    # via -r requirements/test.in
+isodate==0.7.2
+    # via azure-storage-blob
 isoduration==20.11.0
     # via jsonschema
 isort==5.13.2
@@ -453,12 +475,18 @@ mbstrdecoder==1.1.3
     #   typepy
 mdurl==0.1.2
     # via markdown-it-py
-mistral-common==1.9.1
+mistral-common==1.10.0
     # via -r requirements/test.in
 more-itertools==10.5.0
     # via lm-eval
 mpmath==1.3.0
     # via sympy
+msal==1.34.0
+    # via
+    #   azure-identity
+    #   msal-extensions
+msal-extensions==1.3.1
+    # via azure-identity
 msgpack==1.1.0
     # via
     #   librosa
@@ -765,6 +793,8 @@ pydantic-extra-types==2.10.5
     # via mistral-common
 pygments==2.18.0
     # via rich
+pyjwt==2.11.0
+    # via msal
 pyogrio==0.11.0
     # via geopandas
 pyparsing==3.2.0
@@ -875,6 +905,7 @@ regex==2024.9.11
     #   transformers
 requests==2.32.3
     # via
+    #   azure-core
     #   buildkite-test-collector
     #   datasets
     #   diffusers
@@ -887,6 +918,7 @@ requests==2.32.3
     #   lightly
     #   lm-eval
     #   mistral-common
+    #   msal
     #   mteb
     #   pooch
     #   ray
@@ -920,11 +952,14 @@ rpds-py==0.20.1
 rsa==4.9.1
     # via google-auth
 rtree==1.4.0
-runai-model-streamer==0.15.3
+    # via torchgeo
+runai-model-streamer==0.15.7
     # via -r requirements/test.in
-runai-model-streamer-gcs==0.15.3
+runai-model-streamer-azure==0.15.7
     # via runai-model-streamer
-runai-model-streamer-s3==0.15.3
+runai-model-streamer-gcs==0.15.7
+    # via runai-model-streamer
+runai-model-streamer-s3==0.15.7
     # via runai-model-streamer
 s3transfer==0.10.3
     # via boto3
@@ -1080,6 +1115,7 @@ tomli-w==1.2.0
     #   accelerate
     #   bitsandbytes
     #   encodec
+    #   instanttensor
     #   kornia
     #   lightly
     #   lightning
@@ -1146,6 +1182,9 @@ typing-extensions==4.15.0
     #   aiosignal
     #   albumentations
     #   alembic
+    #   azure-core
+    #   azure-identity
+    #   azure-storage-blob
     #   chz
     #   fastapi
     #   grpcio
