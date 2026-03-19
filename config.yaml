@@ -13,7 +13,7 @@ enable_prefix_caching: true
 enable-chunked-prefill: true
 max_num_batched_tokens: 36000
 dtype: "bfloat16"
-max_num_seqs: 1
+max_num_seqs: 4
 compilation_config.mode: "VLLM_COMPILE"
 enable-auto-tool-choice: true
 # mamba-ssm-cache-dtype: "float16"
