@@ -547,15 +547,14 @@ class DefaultMoERunner(MoERunner):
                         local_topk_ids
                     )
                 else:
-                    from vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method import UnquantizedFusedMoEMethod
-                    from vllm.model_executor.layers.quantization.gguf import fused_moe_gguf
+                    from vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method import UnquantizedFusedMoEMethod 
                     if layer.is_gpu_prefill_layer and not isinstance(self.quant_method, UnquantizedFusedMoEMethod):
                         topk_weights, topk_ids = self.router.select_experts(
                             hidden_states=staged_hidden_states,
                             router_logits=staged_router_logits,
                         )
                         local_topk_ids = layer.global_to_local_expert_ids(topk_ids) if layer.use_ep else topk_ids
-                        final_hidden_states = fused_moe_gguf(
+                        final_hidden_states = torch.ops.vllm._fused_moe_gguf(
                             staged_hidden_states,
                             layer.w13_weight.data,
                             layer.w2_weight.data,
@@ -583,11 +582,10 @@ class DefaultMoERunner(MoERunner):
                         local_topk_ids
                     )
                 else:
-                    from vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method import UnquantizedFusedMoEMethod
-                    from vllm.model_executor.layers.quantization.gguf import fused_moe_gguf
+                    from vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method import UnquantizedFusedMoEMethod 
                     if layer.is_gpu_prefill_layer and not isinstance(self.quant_method, UnquantizedFusedMoEMethod):
                         local_topk_ids = layer.global_to_local_expert_ids(topk_ids) if layer.use_ep else topk_ids
-                        final_hidden_states = fused_moe_gguf(
+                        final_hidden_states = torch.ops.vllm._fused_moe_gguf(
                             staged_hidden_states,
                             layer.w13_weight.data,
                             layer.w2_weight.data,
@@ -770,14 +768,13 @@ class DefaultMoERunner(MoERunner):
                     )
                 else:
                     from vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method import UnquantizedFusedMoEMethod
-                    from vllm.model_executor.layers.quantization.gguf import fused_moe_gguf
                     if layer.is_gpu_prefill_layer and not isinstance(self.quant_method, UnquantizedFusedMoEMethod):
                         topk_weights, topk_ids = self.router.select_experts(
                             hidden_states=hidden_states,
                             router_logits=router_logits,
                         )
                         local_topk_ids = layer.global_to_local_expert_ids(topk_ids) if layer.use_ep else topk_ids
-                        final_hidden_states = fused_moe_gguf(
+                        final_hidden_states = torch.ops.vllm._fused_moe_gguf(
                             hidden_states,
                             layer.w13_weight.data,
                             layer.w2_weight.data,
@@ -806,11 +803,10 @@ class DefaultMoERunner(MoERunner):
                         local_topk_ids  
                     )
                 else:    
-                    from vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method import UnquantizedFusedMoEMethod
-                    from vllm.model_executor.layers.quantization.gguf import fused_moe_gguf
+                    from vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method import UnquantizedFusedMoEMethod 
                     if layer.is_gpu_prefill_layer and not isinstance(self.quant_method, UnquantizedFusedMoEMethod):
                         local_topk_ids = layer.global_to_local_expert_ids(topk_ids) if layer.use_ep else topk_ids
-                        final_hidden_states = fused_moe_gguf(
+                        final_hidden_states = torch.ops.vllm._fused_moe_gguf(
                             hidden_states,
                             layer.w13_weight.data,
                             layer.w2_weight.data,
