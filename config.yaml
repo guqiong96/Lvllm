@@ -1,21 +1,21 @@
-model: "/home/guqiong/Models/NVIDIA-Nemotron-3-Super-120B-A12B-BF16"
+model: "/home/guqiong/Models/Qwen3.5-35B-A3B"
 host: "0.0.0.0"
 port: 8070
 tensor-parallel-size: 2
 #pipeline-parallel-size: 2 
-max-model-len: 52000
+max-model-len: 250000
 gpu-memory-utilization: 0.9046 
 trust-remote-code: true
 tokenizer-mode: "auto"
-served-model-name: "NVIDIA-Nemotron-3-Super-120B-A12B-BF16"
+served-model-name: "Qwen3.5-35B-A3B"
 compilation_config.cudagraph_mode: "FULL_DECODE_ONLY"
 enable_prefix_caching: true
 enable-chunked-prefill: true
 max_num_batched_tokens: 36000
 dtype: "bfloat16"
-max_num_seqs: 2
+max_num_seqs: 4
 compilation_config.mode: "VLLM_COMPILE"
-# enable-auto-tool-choice: true
+enable-auto-tool-choice: true
 # mamba-ssm-cache-dtype: "float16"
 # reasoning-parser: "super_v3"
 # tool-call-parser: "qwen3_coder"
@@ -36,6 +36,6 @@ compilation_config.mode: "VLLM_COMPILE"
 # hf-overrides.num_nextn_predict_layers: 1
 # speculative_config.method: "step3p5_mtp"
 # speculative_config.num_speculative_tokens: 1
-# reasoning-parser: "qwen3"
-# tool-call-parser: "qwen3_coder"
+reasoning-parser: "qwen3"
+tool-call-parser: "qwen3_coder"
 
