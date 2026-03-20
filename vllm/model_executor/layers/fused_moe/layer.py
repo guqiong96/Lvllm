@@ -1705,6 +1705,28 @@ class FusedMoE(CustomOp):
             ("CPU" if not self.is_gpu_resident_layer else "GPU") + "]")
             return
         try:    
+            if is_lk_moe_use_gpu_prefill() and not hasattr(FusedMoE, '_gpu_weights_placeholder'): 
+                from vllm.model_executor.layers.fused_moe.runner.default_moe_runner import create_cpu_weights
+                import threading
+                
+                batch_size = getattr(self.vllm_config, 'scheduler_config.max_num_seqs.max_num_seqs', None)
+                batch_size = min(batch_size, 4)
+                
+                FusedMoE._batch_lock = threading.Lock()  
+                
+                FusedMoE._cpu_weights_placeholder = {} 
+                FusedMoE._gpu_weights_placeholder = {}
+                FusedMoE._batch_usage = {}
+                param_names = ["w13_weight", "w2_weight"]
+                
+                for batch_id in range(batch_size):
+                    FusedMoE._cpu_weights_placeholder[batch_id] = create_cpu_weights(self) 
+                    FusedMoE._gpu_weights_placeholder[batch_id] = {}
+                    for param_name in param_names:
+                        FusedMoE._gpu_weights_placeholder[batch_id][param_name] = torch.zeros_like(FusedMoE._cpu_weights_placeholder[batch_id][param_name], device=torch.cuda.current_device())
+                    FusedMoE._batch_usage[batch_id] = False
+                logger.info(f"Initialized lk_moe gpu prefill buffers with {batch_size} batches")
+                
             from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsWNA16MarlinMoEMethod
             from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsWNA16MoEMethod 
             from vllm.model_executor.layers.quantization.awq_marlin import AWQMarlinMoEMethod
@@ -2666,7 +2688,7 @@ class FusedMoE(CustomOp):
                         expert_ids_cpu = topk_ids.to(dtype=torch.int32, device='cpu', memory_format=torch.contiguous_format, non_blocking=non_blocking)
                         weights_cpu = topk_weights.to(dtype=torch.float32, device='cpu', memory_format=torch.contiguous_format, non_blocking=non_blocking)
                         hidden_states_cpu = hidden_states.to(device='cpu', memory_format=torch.contiguous_format, non_blocking=non_blocking)
-                        output_cpu = torch.zeros_like(hidden_states, device='cpu').contiguous()
+                        output_cpu = torch.zeros_like(hidden_states, device='cpu')
                         bsz_tensor = torch.tensor([hidden_states.size(0)], device='cpu', dtype=torch.int32).contiguous()
                         
                         prefill_stream.synchronize()
