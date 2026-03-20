@@ -1712,6 +1712,7 @@ class FusedMoE(CustomOp):
                 scheduler_config = getattr(self.vllm_config, 'scheduler_config', None)
                 if scheduler_config:
                     batch_size = getattr(scheduler_config, 'max_num_seqs', 4)
+                    batch_size = max(batch_size, 4)
                 else:
                     batch_size = 4
                 

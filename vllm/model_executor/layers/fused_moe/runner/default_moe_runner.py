@@ -948,6 +948,7 @@ def create_cpu_weights(layer) -> Dict[str, torch.Tensor]:
     return cpu_weights
  
 def moe_prepare_gpu_prefill(layer, forward_context: ForwardContext, device: torch.device):
+    
     from vllm.model_executor.layers.fused_moe.layer import FusedMoE   
     from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsWNA16MarlinMoEMethod
     from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsWNA16MoEMethod  
@@ -955,32 +956,44 @@ def moe_prepare_gpu_prefill(layer, forward_context: ForwardContext, device: torc
     from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsW8A8Fp8MoEMethod
     from vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method import UnquantizedFusedMoEMethod
     if layer.is_gpu_prefill_layer: 
+        batch_key = id(forward_context.batch_descriptor)
+        logger.debug(f"batch_key={batch_key}, forward_context={id(forward_context)}")
         batch_id = getattr(forward_context, '_prefetch_batch_id', None)
         is_temporary = False
+         
+        if batch_id is not None:
+            stored_batch_key = getattr(forward_context, '_prefetch_batch_key', None)
+            if stored_batch_key != batch_key:
+                logger.warning(f"Batch key mismatch! stored={stored_batch_key}, current={batch_key}, "
+                       f"resetting batch_id from {batch_id} to None")
+                batch_id = None
         
         if batch_id is None:
-            with FusedMoE._batch_lock:  
+            with FusedMoE._batch_lock: 
                 batch_id = getattr(forward_context, '_prefetch_batch_id', None)
+                if batch_id is not None:
+                    stored_batch_key = getattr(forward_context, '_prefetch_batch_key', None)
+                    if stored_batch_key != batch_key:
+                        batch_id = None
+                
                 if batch_id is None:
                     for bid, in_use in FusedMoE._batch_usage.items():
                         if not in_use:
                             batch_id = bid
                             FusedMoE._batch_usage[bid] = True
                             forward_context._prefetch_batch_id = batch_id
+                            forward_context._prefetch_batch_key = batch_key  
                             break
                     
                     if batch_id is None:
                         batch_id = -1  
                         is_temporary = True
                         forward_context._prefetch_batch_id = batch_id
+                        forward_context._prefetch_batch_key = batch_key 
          
         with torch.no_grad():
-            if not hasattr(forward_context, '_prefetch_streams'):
-                forward_context._prefetch_streams = {}
 
             batch_key = id(forward_context.batch_descriptor)
-            if batch_key not in forward_context._prefetch_streams:
-                forward_context._prefetch_streams[batch_key] = torch.cuda.Stream()
 
             prefetch_stream = forward_context._prefetch_streams[batch_key]
             prefetch_events = forward_context._prefetch_events
@@ -1051,7 +1064,7 @@ def moe_prepare_gpu_prefill(layer, forward_context: ForwardContext, device: torc
                         else:
                             raise ValueError(f"Unsupported param_name {param_name} for layer")
                     weight_gpu.copy_(weight_cpu, non_blocking=True)
-                    weight_gpu.record_stream(forward_context._prefetch_stream) 
+                    weight_gpu.record_stream(prefetch_stream) 
                     setattr(layer, param_name, torch.nn.Parameter(weight_gpu, requires_grad=False))
                 
                 layer_id = id(layer)
@@ -1077,6 +1090,8 @@ def moe_clean_gpu_prefill(layer, forward_context: ForwardContext):
                     FusedMoE._batch_usage[batch_id] = False
             
             delattr(forward_context, '_prefetch_batch_id')
+            if hasattr(forward_context, '_prefetch_batch_key'):
+                delattr(forward_context, '_prefetch_batch_key')
   
 
 def moe_cleanup(layer, layer_name: str, hidden_states: torch.Tensor, forward_context: ForwardContext): 
@@ -1121,18 +1136,21 @@ def moe_prefetch(layer, layer_name: str, hidden_states: torch.Tensor,
     if not layer.should_use_gpu_prefill(hidden_states):
         return
     
-    if not hasattr(forward_context, '_prefetch_stream'):
-        forward_context._prefetch_stream = torch.cuda.Stream()
+    if not hasattr(forward_context, '_prefetch_streams'):
+        forward_context._prefetch_streams = {}
         
     if not hasattr(forward_context, '_prefetch_events'):
-        forward_context._prefetch_events = {}  # layer_id -> event
+        forward_context._prefetch_events = {}  
+        
+    if not hasattr(forward_context, '_batch_prefetch_states'):
+        forward_context._batch_prefetch_states = {}
     
     layer_idx = extract_layer_index(layer_name)
     batch_key = id(forward_context.batch_descriptor) 
     
-    if not hasattr(forward_context, '_batch_prefetch_states'):
-        forward_context._batch_prefetch_states = {}
-    
+    if batch_key not in forward_context._prefetch_streams:
+        forward_context._prefetch_streams[batch_key] = torch.cuda.Stream()
+     
     if batch_key not in forward_context._batch_prefetch_states:
         forward_context._batch_prefetch_states[batch_key] = {
             'state': {},  # layer_idx -> prefetch_count
