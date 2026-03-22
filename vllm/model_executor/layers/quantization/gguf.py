@@ -196,7 +196,7 @@ def _fused_mul_mat_gguf(
     # HACK: when doing chunked prefill we don't generate output tokens
     # so input to logits generator is empty which causes invalid parameter
     if x.shape[0] == 0:
-        return torch.empty(x.shape[0], qweight.shape[0], dtype=x.dtype, device=x.device)
+        return torch.zeros(x.shape[0], qweight.shape[0], dtype=x.dtype, device=x.device)
     # there is no need to call any kernel for fp16/bf16
     if qweight_type in UNQUANTIZED_TYPES:
         return x @ qweight.T
@@ -226,7 +226,7 @@ def _fused_mul_mat_gguf_fake(
     qweight: torch.Tensor,
     qweight_type: int,
 ) -> torch.Tensor:
-    return torch.empty(x.shape[0], qweight.shape[0], dtype=x.dtype, device=x.device)
+    return torch.zeros(x.shape[0], qweight.shape[0], dtype=x.dtype, device=x.device)
 
 
 try:
@@ -256,14 +256,14 @@ def _fused_moe_gguf(
     def act(x: torch.Tensor):
         d = x.shape[-1] // 2
         output_shape = x.shape[:-1] + (d,)
-        out = torch.empty(output_shape, dtype=x.dtype, device=x.device)
+        out = torch.zeros(output_shape, dtype=x.dtype, device=x.device)
         apply_moe_activation(activation_enum, out, x)
         return out
 
     # lazy import to avoid triggering triton import in CPU backend
     from vllm.model_executor.layers.fused_moe.fused_moe import moe_align_block_size
 
-    out_hidden_states = torch.empty_like(x)
+    out_hidden_states = torch.zeros_like(x)
     # unless we decent expert reuse we are better off running moe_vec kernel
     if (
         qweight_type2 in MMQ_QUANT_TYPES
@@ -275,9 +275,18 @@ def _fused_moe_gguf(
         top_k = topk_ids.shape[1]
         BLOCK_SIZE = ops.ggml_moe_get_block_size(qweight_type)
 
-        sorted_token_ids, expert_ids, num_tokens_post_padded = moe_align_block_size(
-            topk_ids, BLOCK_SIZE, E
-        )
+        has_neg_one = (topk_ids == -1).any()
+        if has_neg_one:
+            temp_topk_ids = topk_ids.clone()
+            temp_topk_ids[temp_topk_ids == -1] = E
+            sorted_token_ids, expert_ids, num_tokens_post_padded = moe_align_block_size(
+                temp_topk_ids, BLOCK_SIZE, E + 1
+            )
+            expert_ids[expert_ids == E] = -1
+        else:
+            sorted_token_ids, expert_ids, num_tokens_post_padded = moe_align_block_size(
+                topk_ids, BLOCK_SIZE, E
+            )
         out = ops.ggml_moe_a8(
             x,
             w1,
@@ -301,9 +310,12 @@ def _fused_moe_gguf(
             1,
             num_tokens * top_k,
         )
-        out = out.reshape(num_tokens, top_k, w2.shape[1]).mul_(
-            topk_weights.view(num_tokens, top_k, 1)
-        )
+        out = out.reshape(num_tokens, top_k, w2.shape[1])
+        
+        if has_neg_one:
+            out = out.mul_((topk_ids != -1).unsqueeze(-1))
+        
+        out = out.mul_(topk_weights.view(num_tokens, top_k, 1))
         ops.moe_sum(out, out_hidden_states)
     elif qweight_type2 in MMVQ_QUANT_TYPES and qweight_type in MMVQ_QUANT_TYPES:
         num_tokens, _ = x.shape
@@ -316,9 +328,13 @@ def _fused_moe_gguf(
         out = ops.ggml_moe_a8_vec(
             out, w2, topk_ids, 1, qweight_type2, w2.shape[1], num_tokens * top_k
         )
-        out = out.reshape(num_tokens, top_k, w2.shape[1]).mul_(
-            topk_weights.view(num_tokens, top_k, 1)
-        )
+        out = out.reshape(num_tokens, top_k, w2.shape[1])
+        
+        has_neg_one = (topk_ids == -1).any()
+        if has_neg_one:
+            out = out.mul_((topk_ids != -1).unsqueeze(-1))
+        
+        out = out.mul_(topk_weights.view(num_tokens, top_k, 1))
         ops.moe_sum(out, out_hidden_states)
     else:
         logger.warning_once(
@@ -330,6 +346,8 @@ def _fused_moe_gguf(
             inp = x[tok].reshape((1,) + x.shape[1:])
             current_hidden_state = None
             for ww, ii in zip(w, idx):
+                if ii == -1:
+                    continue
                 expert_up = w1[ii]
 
                 out = fused_mul_mat_gguf(inp, expert_up, qweight_type)
@@ -357,7 +375,7 @@ def _fused_moe_gguf_fake(
     qweight_type2: int,
     activation: str,
 ) -> torch.Tensor:
-    return torch.empty_like(x)
+    return torch.zeros_like(x)
 
 
 try:
@@ -402,7 +420,7 @@ def _apply_gguf_embedding_fake(
     hidden_size: int,
     dtype: torch.dtype | None = None,
 ) -> torch.Tensor:
-    return torch.empty(x.shape[0], hidden_size, dtype=dtype, device=x.device)
+    return torch.zeros(x.shape[0], hidden_size, dtype=dtype, device=x.device)
 
 
 try:
