@@ -230,13 +230,7 @@ def _layerwise_process(layer: torch.nn.Module, info: LayerReloadingInfo):
         param = getattr(layer, name)
         args.arguments["param"] = param
         param.weight_loader(*args.args, **args.kwargs)
-
-    # Process weights (quantization, repacking, etc.)
-    # Attention/MLA are processed in `finalize_layerwise_reload`
-    quant_method = getattr(layer, "quant_method", None)
-    if isinstance(quant_method, QuantizeMethodBase):
-        quant_method.process_weights_after_loading(layer)
-
+        
     # Copy processed values into original tensor storage (preserves cudagraph refs)
     # this code is a no-op if not reloading (because kernel tensors is empty)
     parameters, buffers = info.kernel_tensors
@@ -246,6 +240,32 @@ def _layerwise_process(layer: torch.nn.Module, info: LayerReloadingInfo):
         buffer.data.copy_(getattr(layer, name))
 
     _place_kernel_tensors(layer, info)
+    
+    from vllm.model_executor.layers.fused_moe.layer import FusedMoE
+    if isinstance(layer, FusedMoE) and not getattr(layer, "process_lk_moe_already_called", False):
+        layer.process_weights_after_loading() 
+
+    device_idx = torch.cuda.current_device()
+    cuda_device = torch.device(f"cuda:{device_idx}") 
+    # Process weights (quantization, repacking, etc.)
+    # Attention/MLA are processed in `finalize_layerwise_reload`
+    quant_method = getattr(layer, "quant_method", None)
+    if isinstance(quant_method, QuantizeMethodBase):
+        from vllm.model_executor.model_loader.utils import device_loading_context
+        with device_loading_context(layer, cuda_device):
+            quant_method.process_weights_after_loading(layer)
+            
+    if isinstance(layer, FusedMoE) and not getattr(layer, "process_lk_moe_already_called", False):
+        layer.clean_weights_after_loading() 
+        setattr(layer, "process_lk_moe_already_called", True)
+    
+    if isinstance(layer, (Attention, MLAAttention)) and hasattr(
+            layer, "process_weights_after_loading"
+        ):
+        # TODO(lucas): see if there is a way to unify the signatures
+        # of process_weights_after_loading
+        with device_loading_context(layer, cuda_device):
+            layer.process_weights_after_loading(layer.model_config.dtype)
 
     info.reset()
     logger.debug("%s: Processed", layer.__class__.__name__)

@@ -33,6 +33,7 @@ Note 1: x86 CPUs with AVX2 or above instruction sets and Nvidia GPUs are support
 ## Version Changes
 
 ```bash
+2026-03-22: lvllm-v2.0.0 - FP8 MoE models support layer-wise loading when quantizing INT4 experts, reducing peak memory usage, LVLLM_ENABLE_MOE_LAYERWISEISE_LOAD=1
 2026-03-19: lvllm-v1.9.10 - fix known issues，Supports the new moe model type, which does not have gate_proj, for example: NVIDIA-Nemotron-3-Super-120B-A12B-BF16
 2026-03-11: lvllm-v1.9.2 - FP8、AWQ4bit MoE Models enable GPU Prefill acceleration without additional memory occupation, FP8 MoE Model cancel TO_DTYPE runtime type conversion, KEEP model temporarily not support GPU Prefill
 2026-03-05: lvllm-v1.9.0 - Optimize GPU prefill and regular prefill to ensure output quality
@@ -128,6 +129,7 @@ LVLLM_GPU_PREFETCH_WINDOW=1 \
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=2048 \
 LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
 LVLLM_MOE_QUANT_ON_GPU=1 \
+LVLLM_ENABLE_MOE_LAYERWISEISE_LOAD=1 \
 vllm serve \
     --model /home/guqiong/Models/NVIDIA-Nemotron-3-Super-120B-A12B-BF16 \
     --host 0.0.0.0 \
@@ -174,6 +176,7 @@ LVLLM_GPU_PREFETCH_WINDOW=1 \
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=2048 \
 LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
 LVLLM_MOE_QUANT_ON_GPU=1 \
+LVLLM_ENABLE_MOE_LAYERWISEISE_LOAD=1 \
 vllm serve \
     --model /home/guqiong/Models/Qwen3.5-122B-A10B \
     --host 0.0.0.0 \
@@ -222,6 +225,7 @@ LVLLM_GPU_PREFETCH_WINDOW=1 \
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=2048 \
 LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
 LVLLM_MOE_QUANT_ON_GPU=1 \
+LVLLM_ENABLE_MOE_LAYERWISEISE_LOAD=1 \
 vllm serve \
     --model /home/guqiong/Models/Qwen3.5-397B-A17B-FP8 \
     --host 0.0.0.0 \
@@ -269,6 +273,7 @@ LVLLM_GPU_PREFETCH_WINDOW=1 \
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 \
 LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
 LVLLM_MOE_QUANT_ON_GPU=1 \
+LVLLM_ENABLE_MOE_LAYERWISEISE_LOAD=1 \
 vllm serve \
     --model /home/guqiong/Downloads/MiniMax-M2.5 \
     --host 0.0.0.0 \
@@ -324,6 +329,7 @@ LVLLM_GPU_PREFETCH_WINDOW=1 \
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=2048 \
 LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
 LVLLM_MOE_QUANT_ON_GPU=1 \
+LVLLM_ENABLE_MOE_LAYERWISEISE_LOAD=1 \
 vllm serve \
     --model /home/guqiong/Models/Kimi-K2.5 \
     --host 0.0.0.0 \
@@ -374,6 +380,7 @@ LVLLM_GPU_PREFETCH_WINDOW=1 \
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=2048 \
 LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
 LVLLM_MOE_QUANT_ON_GPU=1 \
+LVLLM_ENABLE_MOE_LAYERWISEISE_LOAD=1 \
 vllm serve \
     --model /home/guqiong/Models/GLM-4.7-FP8 \
     --host 0.0.0.0 \
@@ -610,6 +617,8 @@ LVLLM_MOE_USE_WEIGHT=INT4
 ```bash
 # Slow model loading can prevent OOM. Recommended values: use `0` when memory is sufficient during model file loading, use `1` when memory is limited.
 LVLLM_ENABLE_NUMA_INTERLEAVE=1 
+# FP8 MoE model layerwise loading, reduce peak memory usage
+LVLLM_ENABLE_MOE_LAYERWISEISE_LOAD=1
 ```
 
 ### Model Loading with GPU Expert Quantization
