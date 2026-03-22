@@ -119,6 +119,14 @@ def test_lk_moe_gpu_resident_layer_idx_disabled_feature(
     assert envs.is_lk_moe_gpu_resident_layer_idx(123)
 
 
+def test_lk_moe_gpu_prefetch_window_defaults_to_one(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.delenv("LVLLM_GPU_PREFETCH_WINDOW", raising=False)
+
+    assert envs.get_gpu_prefetch_window() == 1
+
+
 class TestEnvWithChoices:
     """Test cases for env_with_choices function."""
 

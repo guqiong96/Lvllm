@@ -596,7 +596,16 @@ class Worker(WorkerBase):
         # We skip EPLB here since we don't want to record dummy metrics
         for size in sorted(warmup_sizes, reverse=True):
             logger.info("Compile and warming up model for size %d", size)
-            self.model_runner._dummy_run(size, skip_eplb=True, remove_lora=False)
+            # Compile-range warmups should stay eager from the cudagraph
+            # wrapper's perspective. They still trigger torch.compile, but
+            # must not lazily capture piecewise/full CUDA graphs after the
+            # profiling phase has disabled unexpected captures.
+            self.model_runner._dummy_run(
+                size,
+                skip_eplb=True,
+                remove_lora=False,
+                cudagraph_runtime_mode=CUDAGraphMode.NONE,
+            )
         self.model_runner.maybe_remove_all_loras(self.model_runner.lora_config)
 
         # Warmup and tune the kernels used during model execution before

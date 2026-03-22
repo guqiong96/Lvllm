@@ -193,8 +193,14 @@ vllm serve \
     --enable-auto-tool-choice \
     --tool-call-parser qwen3_coder \
     --reasoning-parser qwen3 \
+    --default-chat-template-kwargs '{"enable_thinking": false}' \
     --language-model-only
 ```
+
+For plain chat clients, keep `--language-model-only` and disable thinking by
+default as shown above. Otherwise Qwen3.5 may return internal reasoning text in
+`message.reasoning`, and clients that render it directly can show garbled
+content instead of the final answer.
 
 
 ## How to Run Qwen3.5-397B-A17B
@@ -241,8 +247,14 @@ vllm serve \
     --enable-auto-tool-choice \
     --tool-call-parser qwen3_coder \
     --reasoning-parser qwen3 \
+    --default-chat-template-kwargs '{"enable_thinking": false}' \
     --language-model-only
 ```
+
+For plain chat clients, keep `--language-model-only` and disable thinking by
+default as shown above. Otherwise Qwen3.5 may return internal reasoning text in
+`message.reasoning`, and clients that render it directly can show garbled
+content instead of the final answer.
 
 # How to Run MiniMax-M2.5
 
@@ -407,7 +419,7 @@ vllm serve \
 | `OMP_NUM_THREADS` | Performance Parameter | System logical core count | OpenMP thread count: set to same as `LK_THREADS` | |
 | `LVLLM_MOE_USE_WEIGHT` | Performance Parameter | `INT4` |  FP8 model runtime expert weight format `KEEP`: same as model, `INT4`: int4 |
 | `LVLLM_GPU_RESIDENT_MOE_LAYERS` | GPU Prefill Parameter | None | MOE expert layers resident on GPU `0`: layer 0, `0-1`: layers 0 to 1, `0,9`: layers 0 and 9 | After reserving sufficient KV Cache VRAM, allocating multiple layers can increase performance and reduce corresponding memory usage, including layer 0 to achieve acceleration effect |
-| `LVLLM_GPU_PREFETCH_WINDOW` | GPU Prefill Parameter | None | Prefetch window size `1`: prefetch 1 layer of MOE experts | Generally, prefetching 1 to 2 layers is sufficient |
+| `LVLLM_GPU_PREFETCH_WINDOW` | GPU Prefill Parameter | `1` | Prefetch window size `1`: prefetch 1 layer of MOE experts | Generally, prefetching 1 to 2 layers is sufficient |
 | `LVLLM_GPU_PREFILL_MIN_BATCH_SIZE` | GPU Prefill Parameter | None | Minimum input length for using GPU prefill `4096`: when input length reaches this value, start GPU prefill | The value should not be too small, set to 0 to disable GPU prefill function |
 | `LVLLM_ENABLE_NUMA_INTERLEAVE` | Performance Parameter | 0 | `0`：load model quickly, `1`：load model slowly to avoid OOM | Suggested value: use `0` when memory is abundant, use `1` when memory is tight |
 | `LVLLM_MOE_QUANT_ON_GPU` | Performance Parameter | 0 | `0`：enable CPU expert quantization, `1`：enable GPU expert quantization | enable if GPU memory is abundant (only effective at loading time, inference will not occupy extra GPU memory)，accelerate model loading speed |
