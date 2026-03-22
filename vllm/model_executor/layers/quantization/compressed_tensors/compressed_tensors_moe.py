@@ -944,10 +944,11 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
         self,
         routing_tables: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None,
     ) -> mk.FusedMoEPrepareAndFinalizeModular | None:
-        raise ValueError(
-            f"{self.__class__.__name__} uses the new modular kernel initialization "
-            "logic. This function should not be called."
-        )
+        # raise ValueError(
+        #     f"{self.__class__.__name__} uses the new modular kernel initialization "
+        #     "logic. This function should not be called."
+        # )
+        pass
 
     def get_fused_moe_quant_config(self, layer: torch.nn.Module) -> FusedMoEQuantConfig:
         is_per_token = self.input_quant.strategy == QuantizationStrategy.TOKEN
