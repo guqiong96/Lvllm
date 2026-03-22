@@ -742,9 +742,21 @@ class Qwen3NextGatedDeltaNet(nn.Module, MambaBase):
 
         # Run warmup for each possible BT value of chunk_fwd_kernel_o:
         #   T=16 → BT=16, T=32 → BT=32, T=64 → BT=64.
+        #
+        # Some large-head GDN models (for example Qwen3.5 with 64 GDN heads)
+        # hit a fragile Triton/FLA startup path when the synthetic warmup
+        # sequence length is smaller than the head count. Those shapes are
+        # only used here for autotune priming, so skip them and keep the
+        # larger warmup sizes that cover the dominant BT=64 path used by
+        # long prefills.
+        min_safe_t = max(num_k_heads, num_v_heads)
+        warmup_lengths = [T for T in (16, 32, 64) if T >= min_safe_t]
+        if not warmup_lengths:
+            warmup_lengths = [max(64, min_safe_t)]
+
         # Other kernels always use BT=chunk_size(64), so their autotune
         # cache is populated on the first pass and reused thereafter.
-        for T in (16, 32, 64):
+        for T in warmup_lengths:
             q = torch.randn(
                 1, T, num_k_heads, self.head_k_dim, device=device, dtype=dtype
             )
