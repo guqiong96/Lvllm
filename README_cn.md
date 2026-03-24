@@ -146,7 +146,7 @@ vllm serve \
     --enable-prefix-caching \
     --enable-chunked-prefill \
     --max-num-batched-tokens 36000 \
-    --max-num-seqs 4 \
+    --max-num-seqs 2 \
     --compilation_config.mode VLLM_COMPILE \
     --enable-auto-tool-choice \
     --reasoning-parser qwen3 \
@@ -194,7 +194,7 @@ vllm serve \
     --enable-prefix-caching \
     --enable-chunked-prefill \
     --max-num-batched-tokens 16384 \
-    --max-num-seqs 4 \
+    --max-num-seqs 2 \
     --compilation_config.mode VLLM_COMPILE \
     --enable-auto-tool-choice \
     --tool-call-parser qwen3_coder \
@@ -242,7 +242,7 @@ vllm serve \
     --enable-prefix-caching \
     --enable-chunked-prefill \
     --max-num-batched-tokens 18000 \
-    --max-num-seqs 4 \
+    --max-num-seqs 2 \
     --compilation_config.mode VLLM_COMPILE \
     --enable-auto-tool-choice \
     --tool-call-parser qwen3_coder \
@@ -291,7 +291,7 @@ vllm serve \
     --enable-chunked-prefill \
     --max-num-batched-tokens 32000 \
     --dtype bfloat16 \
-    --max-num-seqs 4 \
+    --max-num-seqs 2 \
     --compilation_config.mode VLLM_COMPILE \
     --enable-auto-tool-choice \
     --tool-call-parser minimax_m2 \
@@ -348,7 +348,7 @@ vllm serve \
     --enable-chunked-prefill \
     --max-num-batched-tokens 32000 \
     --dtype bfloat16 \
-    --max-num-seqs 4 \
+    --max-num-seqs 2 \
     --compilation_config.mode VLLM_COMPILE \
     --enable-auto-tool-choice \
     --tool-call-parser kimi_k2 \
@@ -399,7 +399,7 @@ vllm serve \
     --enable-chunked-prefill \
     --max-num-batched-tokens 32000 \
     --dtype bfloat16 \
-    --max-num-seqs 4 \
+    --max-num-seqs 2 \
     --compilation_config.mode VLLM_COMPILE \
     --enable-auto-tool-choice \
     --tool-call-parser glm47 \
@@ -599,7 +599,7 @@ LK_THREADS=44
 # 24G显存开启GPU预填充时，留出足够临时显存用于计算，否则会导致长上下文预填充性能大幅下降，启动时间过长
 --gpu-memory-utilization 0.9046
 # 最多4并发，常规节省显存
---max-num-seqs 4
+--max-num-seqs 2
 # 关闭GPU预填充时,节省显存，性能不变，但如果开启GPU预填充会导致性能下降
 --max-num-batched-tokens 4096  
 # 开启GPU预填充时，4096~32000，GPU预填充加速情况、显存大小调节，超过上下文大小无意义

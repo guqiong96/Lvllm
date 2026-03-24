@@ -144,7 +144,7 @@ vllm serve \
     --enable-prefix-caching \
     --enable-chunked-prefill \
     --max-num-batched-tokens 36000 \
-    --max-num-seqs 4 \
+    --max-num-seqs 2 \
     --compilation_config.mode VLLM_COMPILE \
     --enable-auto-tool-choice \
     --reasoning-parser qwen3 \
@@ -191,7 +191,7 @@ vllm serve \
     --enable-prefix-caching \
     --enable-chunked-prefill \
     --max-num-batched-tokens 16384 \
-    --max-num-seqs 4 \
+    --max-num-seqs 2 \
     --compilation_config.mode VLLM_COMPILE \
     --enable-auto-tool-choice \
     --tool-call-parser qwen3_coder \
@@ -240,7 +240,7 @@ vllm serve \
     --enable-prefix-caching \
     --enable-chunked-prefill \
     --max-num-batched-tokens 16384 \
-    --max-num-seqs 4 \
+    --max-num-seqs 2 \
     --compilation_config.mode VLLM_COMPILE \
     --enable-auto-tool-choice \
     --tool-call-parser qwen3_coder \
@@ -289,7 +289,7 @@ vllm serve \
     --enable-chunked-prefill \
     --max-num-batched-tokens 32000 \
     --dtype bfloat16 \
-    --max-num-seqs 4 \
+    --max-num-seqs 2 \
     --compilation_config.mode VLLM_COMPILE \
     --enable-auto-tool-choice \
     --tool-call-parser minimax_m2 \
@@ -345,7 +345,7 @@ vllm serve \
     --enable-chunked-prefill \
     --max-num-batched-tokens 32000 \
     --dtype bfloat16 \
-    --max-num-seqs 4 \
+    --max-num-seqs 2 \
     --compilation_config.mode VLLM_COMPILE \
     --enable-auto-tool-choice \
     --tool-call-parser kimi_k2 \
@@ -396,7 +396,7 @@ vllm serve \
     --enable-chunked-prefill \
     --max-num-batched-tokens 32000 \
     --dtype bfloat16 \
-    --max-num-seqs 4 \
+    --max-num-seqs 2 \
     --compilation_config.mode VLLM_COMPILE \
     --enable-auto-tool-choice \
     --tool-call-parser glm47 \
@@ -595,7 +595,7 @@ LK_THREADS=44
 # 24G VRAM with GPU prefill enabled, leave sufficient temporary VRAM for calculations, otherwise long context prefill performance will drop significantly, startup time will be too long
 --gpu-memory-utilization 0.9046 
 # Maximum 4 concurrent, regular VRAM savings
---max-num-seqs 4 
+--max-num-seqs 2 
 # Save VRAM when GPU prefill is disabled, performance remains unchanged, but if enable GPU prefill will cause performance drop
 --max-num-batched-tokens 4096
 # or larger and less than context size, enable GPU prefill, obtain best performance, but if disable GPU prefill will cause performance drop
