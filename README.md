@@ -124,7 +124,6 @@ LK_THREAD_BINDING=CPU_CORE \
 LK_THREADS=44 \
 OMP_NUM_THREADS=44 \
 LVLLM_MOE_USE_WEIGHT=INT4 \
-LVLLM_GPU_RESIDENT_MOE_LAYERS=0 \
 LVLLM_GPU_PREFETCH_WINDOW=1 \
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=2048 \
 LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
@@ -170,7 +169,6 @@ LK_THREAD_BINDING=CPU_CORE \
 LK_THREADS=44 \
 OMP_NUM_THREADS=44 \
 LVLLM_MOE_USE_WEIGHT=INT4 \
-LVLLM_GPU_RESIDENT_MOE_LAYERS=0 \
 LVLLM_GPU_PREFETCH_WINDOW=1 \
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=2048 \
 LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
@@ -194,8 +192,7 @@ vllm serve \
     --compilation_config.mode VLLM_COMPILE \
     --enable-auto-tool-choice \
     --tool-call-parser qwen3_coder \
-    --reasoning-parser qwen3 \
-    --language-model-only
+    --reasoning-parser qwen3
 ```
 
 
@@ -219,7 +216,6 @@ LK_THREAD_BINDING=CPU_CORE \
 LK_THREADS=44 \
 OMP_NUM_THREADS=44 \
 LVLLM_MOE_USE_WEIGHT=INT4 \
-LVLLM_GPU_RESIDENT_MOE_LAYERS=0 \
 LVLLM_GPU_PREFETCH_WINDOW=1 \
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=2048 \
 LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
@@ -243,8 +239,7 @@ vllm serve \
     --compilation_config.mode VLLM_COMPILE \
     --enable-auto-tool-choice \
     --tool-call-parser qwen3_coder \
-    --reasoning-parser qwen3 \
-    --language-model-only
+    --reasoning-parser qwen3
 ```
 
 # How to Run MiniMax-M2.5
@@ -267,7 +262,6 @@ LK_THREAD_BINDING=CPU_CORE \
 LK_THREADS=44 \
 OMP_NUM_THREADS=44 \
 LVLLM_MOE_USE_WEIGHT=INT4 \
-LVLLM_GPU_RESIDENT_MOE_LAYERS=0-1 \
 LVLLM_GPU_PREFETCH_WINDOW=1 \
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 \
 LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
@@ -322,7 +316,6 @@ LK_THREAD_BINDING=CPU_CORE \
 LK_THREADS=44 \
 OMP_NUM_THREADS=44 \
 LVLLM_MOE_USE_WEIGHT=INT4 \
-LVLLM_GPU_RESIDENT_MOE_LAYERS=0-1 \
 LVLLM_GPU_PREFETCH_WINDOW=1 \
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=2048 \
 LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
@@ -372,7 +365,6 @@ LK_THREAD_BINDING=CPU_CORE \
 LK_THREADS=44 \
 OMP_NUM_THREADS=44 \
 LVLLM_MOE_USE_WEIGHT=INT4 \
-LVLLM_GPU_RESIDENT_MOE_LAYERS=0 \
 LVLLM_GPU_PREFETCH_WINDOW=1 \
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=2048 \
 LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
@@ -535,14 +527,12 @@ LVLLM_GPU_RESIDENT_MOE_LAYERS=0-5
  
 ### Enable GPU Prefill
 ```bash
-# to achieve optimal performance with GPU prefill enabled, include layer 0
-LVLLM_GPU_RESIDENT_MOE_LAYERS=0  
 # Prefetch 1 layer, recommended value is 1, more is meaningless
 LVLLM_GPU_PREFETCH_WINDOW=1 
 # Start GPU prefill when input length reaches 4096, can be decreased or increased based on CPU prefill performance, starting prefill earlier or later
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 
 # exceeding context size is meaningless
---max-num-batched-tokens 32000 
+--max-num-batched-tokens 36000 
 ``` 
  
 ### Disable GPU Prefill
