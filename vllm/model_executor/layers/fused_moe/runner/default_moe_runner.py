@@ -1012,11 +1012,11 @@ def moe_prepare_gpu_prefill(layer, forward_context: ForwardContext, device: torc
                  
                 for param_name in param_names:
                     if is_temporary:
-                        weight_cpu = cpu_weights[param_name]
-                        weight_gpu = torch.zeros_like(weight_cpu, device=device)
+                        weight_cpu = cpu_weights[param_name].contiguous()
+                        weight_gpu = torch.zeros_like(weight_cpu, device=device, memory_format=torch.contiguous_format)
                     else:
-                        weight_cpu = FusedMoE._cpu_weights_placeholder[batch_id][param_name]
-                        weight_gpu = FusedMoE._gpu_weights_placeholder[batch_id][param_name] 
+                        weight_cpu = FusedMoE._cpu_weights_placeholder[batch_id][param_name].contiguous()
+                        weight_gpu = FusedMoE._gpu_weights_placeholder[batch_id][param_name].contiguous()
                      
                     
                     is_fp8 =  isinstance(layer.quant_method, Fp8MoEMethod) or isinstance(layer.quant_method, CompressedTensorsW8A8Fp8MoEMethod)
@@ -1223,3 +1223,6 @@ def moe_wait_prefetch(layer, hidden_states: torch.Tensor, forward_context: Forwa
         layer.w13_weight.record_stream(current_stream)
     if hasattr(layer, 'w2_weight') and layer.w2_weight is not None:
         layer.w2_weight.record_stream(current_stream)
+        
+    if not torch.cuda.is_current_stream_capturing():
+        torch.cuda.current_stream().synchronize()
