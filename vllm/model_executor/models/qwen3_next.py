@@ -1727,10 +1727,22 @@ def gdn_in_proj_fake(
     ba_output_size: int,
     layer_name: str,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Fake implementation for torch.compile."""
+    forward_context: ForwardContext = get_forward_context()
+    self = forward_context.no_compile_layers[layer_name]
+     
+    batch_size = hidden_states.shape[0]
+     
+    num_k_heads = self.num_k_heads // self.tp_size
+    num_v_heads = self.num_v_heads // self.tp_size
+     
+    qkvz_output_size = (num_k_heads * self.head_k_dim * 2 + 
+                        num_v_heads * self.head_v_dim * 2)
+     
+    ba_output_size = num_v_heads * 2  # b and a
+    
     return hidden_states.new_empty(
-        hidden_states.shape[0], qkvz_output_size
-    ), hidden_states.new_empty(hidden_states.shape[0], ba_output_size)
+        batch_size, qkvz_output_size
+    ), hidden_states.new_empty(batch_size, ba_output_size)
 
 
 def gdn_attention_core(
