@@ -144,7 +144,7 @@ vllm serve \
     --compilation_config.cudagraph_mode FULL_DECODE_ONLY \
     --enable-prefix-caching \
     --enable-chunked-prefill \
-    --max-num-batched-tokens 36000 \
+    --max-num-batched-tokens 32000 \
     --max-num-seqs 2 \
     --compilation_config.mode VLLM_COMPILE
 ```
@@ -183,7 +183,7 @@ vllm serve \
     --compilation_config.cudagraph_mode FULL_DECODE_ONLY \
     --enable-prefix-caching \
     --enable-chunked-prefill \
-    --max-num-batched-tokens 36000 \
+    --max-num-batched-tokens 32000 \
     --max-num-seqs 2 \
     --compilation_config.mode VLLM_COMPILE \
     --enable-auto-tool-choice \
@@ -574,7 +574,7 @@ LVLLM_GPU_PREFETCH_WINDOW=1
 # Start GPU prefill when input length reaches 4096, can be decreased or increased based on CPU prefill performance, starting prefill earlier or later
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 
 # exceeding context size is meaningless
---max-num-batched-tokens 36000 
+--max-num-batched-tokens 32000 
 ``` 
  
 ### Disable GPU Prefill
