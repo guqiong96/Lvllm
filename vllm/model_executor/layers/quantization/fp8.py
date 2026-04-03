@@ -17,6 +17,7 @@ from vllm.model_executor.kernels.linear import (
     init_fp8_linear_kernel,
 )
 from vllm.model_executor.kernels.linear.scaled_mm import MarlinFP8ScaledMMLinearKernel
+from vllm.model_executor.kernels.linear.scaled_mm import MarlinFP8ScaledMMLinearKernel
 from vllm.model_executor.layers.attention import Attention
 from vllm.model_executor.layers.fused_moe import (
     FusedMoE,

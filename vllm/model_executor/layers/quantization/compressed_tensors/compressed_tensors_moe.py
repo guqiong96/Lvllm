@@ -50,6 +50,11 @@ from vllm.model_executor.layers.fused_moe.oracle.mxfp4 import (
     make_mxfp4_moe_kernel,
     make_mxfp4_moe_quant_config,
 )
+from vllm.model_executor.layers.fused_moe.oracle.mxfp4 import (
+    Mxfp4MoeBackend,
+    make_mxfp4_moe_kernel,
+    make_mxfp4_moe_quant_config,
+)
 from vllm.model_executor.layers.fused_moe.oracle.nvfp4 import (
     convert_to_nvfp4_moe_kernel_format,
     is_global_sf_supported_for_nvfp4_backend,

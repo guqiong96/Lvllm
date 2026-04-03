@@ -29,6 +29,7 @@ __all__ = [
     "record_metadata_for_reloading",
     "initialize_layerwise_reload",
     "finalize_layerwise_processing",
+    "finalize_layerwise_processing",
     "finalize_layerwise_reload",
 ]
 
@@ -276,6 +277,12 @@ def _layerwise_process(layer: torch.nn.Module, info: LayerReloadingInfo):
         
     # Copy processed values into original tensor storage (preserves cudagraph refs)
     # this code is a no-op if not reloading (because kernel tensors is empty)
+    if info.kernel_tensors is not None:
+        parameters, buffers = info.kernel_tensors
+        for name, param in parameters.items():
+            param.data.copy_(getattr(layer, name))
+        for name, buffer in buffers.items():
+            buffer.data.copy_(getattr(layer, name))
     if info.kernel_tensors is not None:
         parameters, buffers = info.kernel_tensors
         for name, param in parameters.items():

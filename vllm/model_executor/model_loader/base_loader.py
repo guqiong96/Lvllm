@@ -10,6 +10,7 @@ from vllm.config import ModelConfig, VllmConfig
 from vllm.config.load import LoadConfig
 from vllm.logger import init_logger
 from vllm.model_executor.model_loader.reload import finalize_layerwise_processing
+from vllm.model_executor.model_loader.reload import finalize_layerwise_processing
 from vllm.model_executor.model_loader.utils import (
     initialize_model,
     process_weights_after_loading,
