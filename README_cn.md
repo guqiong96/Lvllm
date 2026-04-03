@@ -146,7 +146,10 @@ vllm serve \
     --enable-chunked-prefill \
     --max-num-batched-tokens 32000 \
     --max-num-seqs 2 \
-    --compilation_config.mode VLLM_COMPILE
+    --compilation_config.mode VLLM_COMPILE \
+    --enable-auto-tool-choice \
+    --reasoning-parser gemma4 \
+    --tool-call-parser gemma4
 ```
 
 
