@@ -19,6 +19,7 @@ Note 1: x86 CPUs with AVX2 or above instruction sets and Nvidia GPUs are support
 - [Version Changes](#version-changes)
 - [Supported Models](#supported-models)
 - [Performance Reference](#performance-reference)
+- [How to Run gemma-4-26B-A4B-it](#how-to-run-gemma-4-26b-a-4b-it)
 - [How to Run NVIDIA-Nemotron-3-Super-120B-A12B-BF16](#how-to-run-nvidia-nemotron-3-super-120b-a12b-bf16)
 - [How to Run Qwen3.5-122B-A10B](#how-to-run-qwen35-122b-a10b)
 - [How to Run Qwen3.5-397B-A17B](#how-to-run-qwen35-397b-a17b)
@@ -63,6 +64,7 @@ Most of the original MOE models verified by vLLM
 
 | Model Name | Status |
 |---------|------|
+| gemma-4-26B-A4B-it | ✅ Tested |
 | NVIDIA-Nemotron-3-Super-120B-A12B-BF16 | ✅ Tested |
 | Qwen3.5-35B-A3B | ✅ Tested |
 | Qwen3.5-122B-A10B | ✅ Tested |
@@ -106,6 +108,46 @@ Note 1: https://hf-mirror.com/cyankiwi provides AWQ 4bit symmetric quantized mod
 | MiniMax-M2.1 Original | fp8+bfloat16 | 5000 <sup>Note 1</sup> | 29 | Dual EPYC 9684x | Single Nvidia RTX 5090 | 4800MT/s |
 
 Note 1: Enabling GPU Prefill, Input Length 32K-64K
+
+
+## How to Run gemma-4-26b-a-4b-it
+```bash
+pip uninstall transformers -y
+pip install transformers==5.5.0
+
+VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
+VLLM_TEST_FORCE_FP8_MARLIN=1 \
+NCCL_SOCKET_IFNAME=lo \
+NCCL_IB_DISABLE=1 \
+GLOO_SOCKET_IFNAME=lo \
+NCCL_SOCKET_TIMEOUT=600000 \
+VLLM_SKIP_P2P_CHECK=1 \
+LVLLM_MOE_NUMA_ENABLED=1 \
+LK_THREAD_BINDING=CPU_CORE \
+LK_THREADS=44 \
+OMP_NUM_THREADS=44 \
+LVLLM_MOE_USE_WEIGHT=INT4 \
+LVLLM_GPU_PREFETCH_WINDOW=1 \
+LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=2048 \
+LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
+LVLLM_MOE_QUANT_ON_GPU=1 \
+vllm serve \
+    --model /home/guqiong/Models/gemma-4-26B-A4B-it \
+    --host 0.0.0.0 \
+    --port 8070 \
+    --tensor-parallel-size 2 \
+    --max-model-len 160000 \
+    --gpu-memory-utilization 0.9046 \
+    --trust-remote-code \
+    --tokenizer-mode auto \
+    --served-model-name gemma-4-26B-A4B-it \
+    --compilation_config.cudagraph_mode FULL_DECODE_ONLY \
+    --enable-prefix-caching \
+    --enable-chunked-prefill \
+    --max-num-batched-tokens 36000 \
+    --max-num-seqs 2 \
+    --compilation_config.mode VLLM_COMPILE
+```
 
 ## How to Run NVIDIA-Nemotron-3-Super-120B-A12B-BF16
 ```bash
@@ -351,7 +393,7 @@ sync && echo 3 | sudo tee /proc/sys/vm/drop_caches
 free -h
 
 pip uninstall transformers -y
-pip install transformers==4.57.6
+pip install transformers==5.3.0
 
 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 \
 VLLM_TEST_FORCE_FP8_MARLIN=1 \

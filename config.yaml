@@ -1,4 +1,4 @@
-model: "/home/guqiong/Downloads/MiniMax-M2.5"
+model: "/home/guqiong/Models/gemma-4-26B-A4B-it"
 host: "0.0.0.0"
 port: 8070
 tensor-parallel-size: 2
@@ -7,7 +7,7 @@ max-model-len: 38000
 gpu-memory-utilization: 0.9046 
 trust-remote-code: true
 tokenizer-mode: "auto"
-served-model-name: "MiniMax-M2.5"
+served-model-name: "gemma-4-26B-A4B-it"
 compilation_config.cudagraph_mode: "FULL_DECODE_ONLY"
 enable_prefix_caching: true
 enable-chunked-prefill: true
@@ -15,14 +15,14 @@ max_num_batched_tokens: 36000
 dtype: "bfloat16"
 max_num_seqs: 2
 compilation_config.mode: "VLLM_COMPILE"
-enable-auto-tool-choice: true
+# enable-auto-tool-choice: true
 # mamba-ssm-cache-dtype: "float16"
 # reasoning-parser: "super_v3"
 # tool-call-parser: "qwen3_coder"
 # kv_cache_dtype: "fp8"  
 # speculative-config: '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
-tool-call-parser: "minimax_m2"
-reasoning-parser: "minimax_m2_append_think"
+# tool-call-parser: "minimax_m2"
+# reasoning-parser: "minimax_m2_append_think"
 # speculative-config.method: mtp
 # speculative-config.num_speculative_tokens: 1
 # tool-call-parser: glm47
