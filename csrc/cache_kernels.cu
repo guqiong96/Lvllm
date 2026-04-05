@@ -91,9 +91,9 @@ void swap_blocks_batch(const torch::Tensor& src_ptrs,
 
   if (n == 0) return;
 
-  const int64_t* src_data = src_ptrs.data_ptr<int64_t>();
-  const int64_t* dst_data = dst_ptrs.data_ptr<int64_t>();
-  const int64_t* size_data = sizes.data_ptr<int64_t>();
+  int64_t* src_data = src_ptrs.mutable_data_ptr<int64_t>();
+  int64_t* dst_data = dst_ptrs.mutable_data_ptr<int64_t>();
+  int64_t* size_data = sizes.mutable_data_ptr<int64_t>();
 
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
@@ -104,25 +104,27 @@ void swap_blocks_batch(const torch::Tensor& src_ptrs,
   static_assert(sizeof(CUdeviceptr) == sizeof(int64_t));
   static_assert(sizeof(size_t) == sizeof(int64_t));
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12080
-
-  CUmemcpyAttributes attrs[1];
-  size_t attrsIdxs[1];
-  
-  attrs[0] = {};
-  attrs[0].srcAccessOrder = CU_MEMCPY_SRC_ACCESS_ORDER_STREAM;
-  attrsIdxs[0] = 0;  
-  
+  CUmemcpyAttributes attr = {};
+  attr.srcAccessOrder = CU_MEMCPY_SRC_ACCESS_ORDER_STREAM;
+  size_t attrs_idx = 0;
+  #if defined(CUDA_VERSION) && CUDA_VERSION >= 13000
   CUresult result = cuMemcpyBatchAsync(
-      reinterpret_cast<CUdeviceptr*>(const_cast<int64_t*>(dst_data)),
-      reinterpret_cast<CUdeviceptr*>(const_cast<int64_t*>(src_data)),
-      reinterpret_cast<size_t*>(const_cast<int64_t*>(size_data)),
-      static_cast<size_t>(n),  
-      attrs,                    
-      attrsIdxs,                 
-      1,                      
-      static_cast<CUstream>(stream)
-  );
-  TORCH_CHECK(result == CUDA_SUCCESS, "cuMemcpyBatchAsync failed with error ", result);
+      reinterpret_cast<CUdeviceptr*>(dst_data),
+      reinterpret_cast<CUdeviceptr*>(src_data),
+      reinterpret_cast<size_t*>(size_data), static_cast<size_t>(n), &attr,
+      &attrs_idx, 1, static_cast<CUstream>(stream));
+  TORCH_CHECK(result == CUDA_SUCCESS, "cuMemcpyBatchAsync failed with error ",
+              result);
+  #else
+  size_t fail_idx = 0;
+  CUresult result = cuMemcpyBatchAsync(
+      reinterpret_cast<CUdeviceptr*>(dst_data),
+      reinterpret_cast<CUdeviceptr*>(src_data),
+      reinterpret_cast<size_t*>(size_data), static_cast<size_t>(n), &attr,
+      &attrs_idx, 1, &fail_idx, static_cast<CUstream>(stream));
+  TORCH_CHECK(result == CUDA_SUCCESS, "cuMemcpyBatchAsync failed at index ",
+              fail_idx, " with error ", result);
+  #endif
 #else
   // Fallback for CUDA < 12.8 and ROCm: individual async copies.
   // cudaMemcpyDefault lets the driver infer direction from pointer types.
