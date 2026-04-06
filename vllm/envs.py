@@ -1992,7 +1992,7 @@ def get_moe_compute_strategy() -> MoeComputeStrategy:
         elif strategy_upper == "KEEP":
             print("Warning: KEEP strategy is currently not supported for FP8 models, falling back to INT4")
             return MoeComputeStrategy.INT4
-        elif strategy_upper == "": 
+        elif strategy_upper == "INT4": 
             return MoeComputeStrategy.INT4
         return MoeComputeStrategy(strategy_upper)
     except ValueError: 

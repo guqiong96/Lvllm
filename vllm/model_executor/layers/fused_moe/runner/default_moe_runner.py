@@ -859,17 +859,9 @@ from typing import Dict, Optional, List
 from vllm.envs import extract_layer_index  
  
 
-def create_cpu_weights(layer) -> Dict[str, torch.Tensor]: 
+def create_cpu_weights(layer, is_fp8: bool, is_wna16: bool, is_regular: bool) -> Dict[str, torch.Tensor]: 
     pin_memory = is_pin_memory_available()
     cpu_weights = {}
-    from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsWNA16MarlinMoEMethod
-    from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsWNA16MoEMethod  
-    from vllm.model_executor.layers.quantization.fp8 import Fp8MoEMethod  
-    from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsW8A8Fp8MoEMethod
-    from vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method import UnquantizedFusedMoEMethod 
-    is_fp8 =  isinstance(layer.quant_method, Fp8MoEMethod) or isinstance(layer.quant_method, CompressedTensorsW8A8Fp8MoEMethod)
-    is_wna16 = (isinstance(layer.quant_method, CompressedTensorsWNA16MarlinMoEMethod) or isinstance(layer.quant_method, CompressedTensorsWNA16MoEMethod))
-    is_regular = isinstance(layer.quant_method, UnquantizedFusedMoEMethod)
     
     if is_fp8 or is_wna16: 
         param_names = ["w13_weight", "w2_weight"]
@@ -901,13 +893,15 @@ def create_cpu_weights(layer) -> Dict[str, torch.Tensor]:
         w13_shape = (layer.local_num_experts, 
                     layer.intermediate_size_per_partition * 2 if layer.has_gate_proj else layer.intermediate_size_per_partition,    
                     layer.hidden_size)
+        w13_buffer_size = w13_shape[0] * w13_shape[1] * w13_shape[2] * 2 
+
         w13_weight_cpu = torch.zeros(
-            w13_shape,
-            dtype=layer.moe_config.in_dtype,
+            w13_buffer_size,
+            dtype=torch.uint8,
             device="cpu",
             requires_grad=False,
             pin_memory=pin_memory,
-        ).contiguous()
+        ).contiguous() 
         
         
         cpu_weights['w13_weight'] = w13_weight_cpu
@@ -916,9 +910,10 @@ def create_cpu_weights(layer) -> Dict[str, torch.Tensor]:
         w2_shape = (layer.local_num_experts,
                     layer.hidden_size,
                     layer.intermediate_size_per_partition)
+        w2_buffer_size = w2_shape[0] * w2_shape[1] * w2_shape[2] * 2
         w2_weight_cpu = torch.zeros(
-            w2_shape,
-            dtype=layer.moe_config.in_dtype,
+            w2_buffer_size,
+            dtype=torch.uint8,
             device="cpu",
             requires_grad=False,
             pin_memory=pin_memory,
@@ -1005,18 +1000,44 @@ def moe_prepare_gpu_prefill(layer, forward_context: ForwardContext, device: torc
                     is_wna16 = (isinstance(layer.quant_method, CompressedTensorsWNA16MarlinMoEMethod) or isinstance(layer.quant_method, CompressedTensorsWNA16MoEMethod))
                     is_regular = isinstance(layer.quant_method, UnquantizedFusedMoEMethod)
                     if is_fp8 or is_wna16:
+                        if param_name == "w13_weight":
+                            E = layer.local_num_experts
+                            N = layer.intermediate_size_per_partition * 2 if layer.has_gate_proj else layer.intermediate_size_per_partition
+                            K = layer.hidden_size
+                            shape = (E, N, K * 18 // 32)
+                        elif param_name == "w2_weight":
+                            E = layer.local_num_experts
+                            N = layer.hidden_size
+                            K = layer.intermediate_size_per_partition
+                            shape = (E, N, K * 18 // 32) 
+                        
+                        total_elements = shape[0] * shape[1] * shape[2]
+                        weight_buffer = weight_cpu[:total_elements].reshape(shape)
+                        weight_buffer_gpu = weight_gpu.view(torch.uint8)[:total_elements].reshape(shape)
                         layer.lk_moe.collectWeight(
                             param_name,
-                            weight_cpu.data_ptr()
+                            weight_buffer.data_ptr()
                         ) 
                     elif is_regular:
+                        if param_name == "w13_weight":
+                            E = layer.local_num_experts
+                            N = layer.intermediate_size_per_partition * 2 if layer.has_gate_proj else layer.intermediate_size_per_partition
+                            K = layer.hidden_size
+                            shape = (E, N, K)
+                        elif param_name == "w2_weight":
+                            E = layer.local_num_experts
+                            N = layer.hidden_size
+                            K = layer.intermediate_size_per_partition
+                            shape = (E, N, K)
+                        weight_buffer = weight_cpu.view(layer.moe_config.in_dtype).reshape(shape)
+                        weight_buffer_gpu = weight_gpu.view(layer.moe_config.in_dtype).reshape(shape)
                         if param_name == "w13_weight":
                             if layer.has_gate_proj:
                                 layer.lk_moe.collect_weights(
                                     True,  
                                     0,
                                     0,
-                                    weight_cpu.data_ptr(),  
+                                    weight_buffer.data_ptr(),  
                                     0  # 0   gate  
                                 )
                                 
@@ -1024,7 +1045,7 @@ def moe_prepare_gpu_prefill(layer, forward_context: ForwardContext, device: torc
                                     True,  
                                     0,
                                     0,
-                                    weight_cpu.data_ptr(),  
+                                    weight_buffer.data_ptr(),  
                                     1  # 1   up
                                 )
                             else:
@@ -1032,7 +1053,7 @@ def moe_prepare_gpu_prefill(layer, forward_context: ForwardContext, device: torc
                                     True,  
                                     0,
                                     0,
-                                    weight_cpu.data_ptr(),  
+                                    weight_buffer.data_ptr(),  
                                     1  # 1   up
                                 )
                         elif param_name == "w2_weight":
@@ -1040,14 +1061,14 @@ def moe_prepare_gpu_prefill(layer, forward_context: ForwardContext, device: torc
                                 True,  
                                 0,
                                 0,
-                                weight_cpu.data_ptr(),  
+                                weight_buffer.data_ptr(),  
                                 2  # w2
                             )
                         else:
                             raise ValueError(f"Unsupported param_name {param_name} for layer")
-                    weight_gpu.copy_(weight_cpu, non_blocking=True)
-                    weight_gpu.record_stream(prefetch_stream) 
-                    setattr(layer, param_name, torch.nn.Parameter(weight_gpu, requires_grad=False))
+                    weight_buffer_gpu.copy_(weight_buffer, non_blocking=True)
+                    weight_buffer_gpu.record_stream(prefetch_stream) 
+                    setattr(layer, param_name, torch.nn.Parameter(weight_buffer_gpu, requires_grad=False))
                 
                 layer_id = id(layer)
                 event = torch.cuda.Event()

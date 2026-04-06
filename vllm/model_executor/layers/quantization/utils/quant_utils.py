@@ -433,7 +433,10 @@ def unpack_quantized_values_into_int32(
 
     return res.permute(inv_perm)
 
-
+def normalize_prefix(prefix: str) -> str:
+    if prefix.startswith("model."):
+        prefix = prefix[6:]
+    return prefix
 def is_layer_skipped(
     prefix: str,
     ignored_layers: list[str],
@@ -441,6 +444,7 @@ def is_layer_skipped(
     *,
     skip_with_substr: bool = False,
 ) -> bool:
+    prefix = normalize_prefix(prefix)
     def prefix_full_match(prefix: str, ignored_layers: list[str]) -> bool:
         return prefix in ignored_layers
 

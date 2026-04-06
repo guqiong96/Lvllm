@@ -1733,8 +1733,29 @@ class FusedMoE(CustomOp):
             logger.info(f"Initialized lk_moe with {self.local_num_experts} experts for layer {self.layer_name} [" + 
             ("CPU" if not self.is_gpu_resident_layer else "GPU") + "]")
             return
-        try:    
-            if is_lk_moe_use_gpu_prefill() and not hasattr(FusedMoE, '_gpu_weights_placeholder'): 
+        try:
+            from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsWNA16MarlinMoEMethod
+            from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsWNA16MoEMethod  
+            from vllm.model_executor.layers.quantization.fp8 import Fp8MoEMethod  
+            from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsW8A8Fp8MoEMethod
+            from vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method import UnquantizedFusedMoEMethod 
+            is_regular = isinstance(self.quant_method, UnquantizedFusedMoEMethod)
+            is_fp8 =  isinstance(self.quant_method, Fp8MoEMethod) or isinstance(self.quant_method, CompressedTensorsW8A8Fp8MoEMethod)
+            is_wna16 = (isinstance(self.quant_method, CompressedTensorsWNA16MarlinMoEMethod) or isinstance(self.quant_method, CompressedTensorsWNA16MoEMethod))
+            
+            
+            max_placeholder = 3 if is_regular else 2 if is_fp8 else 1 if is_wna16 else 0
+            if not hasattr(FusedMoE, '_max_placeholder'):
+                FusedMoE._max_placeholder = max_placeholder
+                placeholder_create_or_replace_need = True
+            elif FusedMoE._max_placeholder < max_placeholder:
+                FusedMoE._max_placeholder = max_placeholder
+                placeholder_create_or_replace_need = True
+            else:
+                placeholder_create_or_replace_need = False
+                
+                    
+            if is_lk_moe_use_gpu_prefill() and placeholder_create_or_replace_need: 
                 from vllm.model_executor.layers.fused_moe.runner.default_moe_runner import create_cpu_weights
                 import threading
                 
@@ -1753,7 +1774,7 @@ class FusedMoE(CustomOp):
                 param_names = ["w13_weight", "w2_weight"]
                 
                 for batch_id in range(batch_size):
-                    FusedMoE._cpu_weights_placeholder[batch_id] = create_cpu_weights(self) 
+                    FusedMoE._cpu_weights_placeholder[batch_id] = create_cpu_weights(self, is_fp8, is_wna16, is_regular) 
                     FusedMoE._gpu_weights_placeholder[batch_id] = {}
                     for param_name in param_names:
                         FusedMoE._gpu_weights_placeholder[batch_id][param_name] = torch.zeros_like(FusedMoE._cpu_weights_placeholder[batch_id][param_name], device=torch.cuda.current_device())
