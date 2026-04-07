@@ -148,6 +148,7 @@ vllm serve \
     --max-num-batched-tokens 32000 \
     --max-num-seqs 2 \
     --compilation_config.mode VLLM_COMPILE \
+    --kv-sharing-fast-prefill \
     --enable-auto-tool-choice \
     --reasoning-parser gemma4 \
     --tool-call-parser gemma4
@@ -192,6 +193,7 @@ vllm serve \
     --max-num-batched-tokens 32000 \
     --max-num-seqs 2 \
     --compilation_config.mode VLLM_COMPILE \
+    --kv-sharing-fast-prefill \
     --enable-auto-tool-choice \
     --reasoning-parser qwen3 \
     --tool-call-parser qwen3_coder
@@ -239,6 +241,7 @@ vllm serve \
     --max-num-batched-tokens 16384 \
     --max-num-seqs 2 \
     --compilation_config.mode VLLM_COMPILE \
+    --kv-sharing-fast-prefill \
     --enable-auto-tool-choice \
     --tool-call-parser qwen3_coder \
     --reasoning-parser qwen3
@@ -286,6 +289,7 @@ vllm serve \
     --max-num-batched-tokens 18000 \
     --max-num-seqs 2 \
     --compilation_config.mode VLLM_COMPILE \
+    --kv-sharing-fast-prefill \
     --enable-auto-tool-choice \
     --tool-call-parser qwen3_coder \
     --reasoning-parser qwen3
@@ -332,6 +336,7 @@ vllm serve \
     --dtype bfloat16 \
     --max-num-seqs 2 \
     --compilation_config.mode VLLM_COMPILE \
+    --kv-sharing-fast-prefill \
     --enable-auto-tool-choice \
     --tool-call-parser minimax_m2 \
     --reasoning-parser minimax_m2_append_think 
@@ -387,6 +392,7 @@ vllm serve \
     --dtype bfloat16 \
     --max-num-seqs 2 \
     --compilation_config.mode VLLM_COMPILE \
+    --kv-sharing-fast-prefill \
     --enable-auto-tool-choice \
     --tool-call-parser kimi_k2 \
     --reasoning-parser kimi_k2 
@@ -436,6 +442,7 @@ vllm serve \
     --dtype bfloat16 \
     --max-num-seqs 2 \
     --compilation_config.mode VLLM_COMPILE \
+    --kv-sharing-fast-prefill \
     --enable-auto-tool-choice \
     --tool-call-parser glm47 \
     --reasoning-parser glm45 

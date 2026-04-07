@@ -1,19 +1,19 @@
-model: "/home/guqiong/Models/Qwen3.5-35B-A3B-FP8-Lite"
+model: "/home/guqiong/Models/Qwen3.5-35B-A3B-FP8"
 host: "0.0.0.0"
 port: 8070
 tensor-parallel-size: 2
 #pipeline-parallel-size: 2 
-max-model-len: 138000
+max-model-len: 190000
 gpu-memory-utilization: 0.9046 
 trust-remote-code: true
 tokenizer-mode: "auto"
-served-model-name: "Qwen3.5-35B-A3B-FP8-Lite"
+served-model-name: "Qwen3.5-35B-A3B-FP8"
 compilation_config.cudagraph_mode: "FULL_DECODE_ONLY"
 enable_prefix_caching: true
 enable-chunked-prefill: true
-max_num_batched_tokens: 36000
+max_num_batched_tokens: 32000
 dtype: "bfloat16"
-max_num_seqs: 2
+max_num_seqs: 4
 compilation_config.mode: "VLLM_COMPILE"
 enable-auto-tool-choice: true
 # mamba-ssm-cache-dtype: "float16"
@@ -38,4 +38,7 @@ enable-auto-tool-choice: true
 # speculative_config.num_speculative_tokens: 1
 reasoning-parser: "qwen3"
 tool-call-parser: "qwen3_coder"
+# reasoning-parser: "gemma4"
+# tool-call-parser: "gemma4"
+kv-sharing-fast-prefill: true
 

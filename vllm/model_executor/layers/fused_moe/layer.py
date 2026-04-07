@@ -1759,12 +1759,13 @@ class FusedMoE(CustomOp):
                 from vllm.model_executor.layers.fused_moe.runner.default_moe_runner import create_cpu_weights
                 import threading
                 
-                scheduler_config = getattr(self.vllm_config, 'scheduler_config', None)
-                if scheduler_config:
-                    batch_size = getattr(scheduler_config, 'max_num_seqs', 4)
-                    batch_size = min(batch_size, 4)
-                else:
-                    batch_size = 4
+                # scheduler_config = getattr(self.vllm_config, 'scheduler_config', None)
+                # if scheduler_config:
+                #     batch_size = getattr(scheduler_config, 'max_num_seqs', 4)
+                #     batch_size = min(batch_size, 4)
+                # else:
+                #     batch_size = 4
+                batch_size = 1
                 
                 FusedMoE._batch_lock = threading.Lock()  
                 

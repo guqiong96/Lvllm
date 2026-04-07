@@ -76,6 +76,10 @@ def _resolve_layer_name(layer_name: str | ModuleName) -> str:
     return layer_name.value if isinstance(layer_name, ModuleName) else layer_name
 
 
+import threading
+
+_gpu_prefill_lock = threading.Lock()
+
 # Note: _moe_forward and _moe_forward_shared should not contain any
 # implementation details, They should merely pass along control to
 # the runner's 'forward_dispatch' method.
@@ -89,14 +93,24 @@ def _moe_forward(
     layer = get_layer_from_name(_resolve_layer_name(layer_name))
     layer_name = layer.layer_name
     if layer.should_use_gpu_prefill(hidden_states):
-        moe_prefetch(layer, layer_name, hidden_states, forward_context, get_gpu_prefetch_window())
-        moe_wait_prefetch(layer, hidden_states, forward_context)
-        # TODO(bnell): this can be removed after MK migration is complete.
-        layer.ensure_moe_quant_config_init()
-        fused_output = layer.runner.forward_dispatch(
-            layer, hidden_states, router_logits, shared_experts_input
-        )
-        moe_cleanup(layer, layer_name, hidden_states, forward_context)
+        if _gpu_prefill_lock.acquire(blocking=False):
+            try:
+                moe_prefetch(layer, layer_name, hidden_states, forward_context, 1)
+                moe_wait_prefetch(layer, hidden_states, forward_context)
+                layer.ensure_moe_quant_config_init()
+                fused_output = layer.runner.forward_dispatch(
+                    layer, hidden_states, router_logits, shared_experts_input
+                )
+                moe_cleanup(layer, layer_name, hidden_states, forward_context)
+                return fused_output
+            finally:
+                _gpu_prefill_lock.release()
+        else:
+            logger.debug("GPU prefill busy, fallback to normal path")
+            layer.ensure_moe_quant_config_init()
+            return layer.runner.forward_dispatch(
+                layer, hidden_states, router_logits, shared_experts_input
+            )
     else: 
         layer.ensure_moe_quant_config_init()
         fused_output = layer.runner.forward_dispatch(
@@ -124,14 +138,25 @@ def _moe_forward_shared(
     layer = get_layer_from_name(_resolve_layer_name(layer_name)) 
     layer_name = layer.layer_name
     if layer.should_use_gpu_prefill(hidden_states): 
-        moe_prefetch(layer, layer_name, hidden_states, forward_context, get_gpu_prefetch_window())
-        moe_wait_prefetch(layer, hidden_states, forward_context)
-        # TODO(bnell): this can be removed after MK migration is complete.
-        layer.ensure_moe_quant_config_init()
-        shared_out, fused_out = layer.runner.forward_dispatch(
-            layer, hidden_states, router_logits, shared_experts_input
-        )
-        moe_cleanup(layer, layer_name, hidden_states, forward_context)
+        if _gpu_prefill_lock.acquire(blocking=False):
+            try:
+                moe_prefetch(layer, layer_name, hidden_states, forward_context, 1)
+                moe_wait_prefetch(layer, hidden_states, forward_context)
+                # TODO(bnell): this can be removed after MK migration is complete.
+                layer.ensure_moe_quant_config_init()
+                shared_out, fused_out = layer.runner.forward_dispatch(
+                    layer, hidden_states, router_logits, shared_experts_input
+                )
+                moe_cleanup(layer, layer_name, hidden_states, forward_context)
+            finally:
+                _gpu_prefill_lock.release()
+        else:
+            logger.debug("GPU prefill busy, fallback to normal path")
+            layer.ensure_moe_quant_config_init()
+            shared_out, fused_out = layer.runner.forward_dispatch(
+                layer, hidden_states, router_logits, shared_experts_input
+            )
+        
     else:
         layer.ensure_moe_quant_config_init()
         shared_out, fused_out = layer.runner.forward_dispatch(
