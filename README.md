@@ -23,7 +23,7 @@ Note 1: x86 CPUs with AVX2 or above instruction sets and Nvidia GPUs are support
 - [How to Run NVIDIA-Nemotron-3-Super-120B-A12B-BF16](#how-to-run-nvidia-nemotron-3-super-120b-a12b-bf16)
 - [How to Run Qwen3.5-122B-A10B](#how-to-run-qwen35-122b-a10b)
 - [How to Run Qwen3.5-397B-A17B](#how-to-run-qwen35-397b-a17b)
-- [How to Run MiniMax-M2.5](#how-to-run-minimax-m25)
+- [How to Run MiniMax-M2.7](#how-to-run-minimax-m27)
 - [How to Run Kimi-K2.5](#how-to-run-kimi-k25)
 - [How to Run GLM-4.7-FP8](#how-to-run-glm-47-fp8)
 - [Configuration Parameters](#configuration-parameters)
@@ -74,6 +74,7 @@ Most of the original MOE models verified by vLLM
 | Qwen3-Next-80B-A3B-Instruct | ✅ Tested |
 | Qwen3-Coder-30B-A3B-Instruct | ✅ Tested |
 | Qwen3-VL-30B-A3B-Instruct | ✅ Tested |
+| MiniMax-M2.7 | ✅ Tested |
 | MiniMax-M2.5 | ✅ Tested |
 | MiniMax-M2.1 | ✅ Tested |
 | GLM-4.7 | ✅ Tested |
@@ -292,7 +293,7 @@ vllm serve \
     --reasoning-parser qwen3
 ```
 
-# How to Run MiniMax-M2.5
+# How to Run MiniMax-M2.7
 
  
 ```bash
@@ -317,7 +318,7 @@ LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096 \
 LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
 LVLLM_MOE_QUANT_ON_GPU=1 \
 vllm serve \
-    --model /home/guqiong/Downloads/MiniMax-M2.5 \
+    --model /home/guqiong/Models/MiniMax-M2.7 \
     --host 0.0.0.0 \
     --port 8070 \
     --tensor-parallel-size 2 \
@@ -325,7 +326,7 @@ vllm serve \
     --gpu-memory-utilization 0.9046 \
     --trust-remote-code \
     --tokenizer-mode auto \
-    --served-model-name MiniMax-M2.5 \
+    --served-model-name MiniMax-M2.7 \
     --compilation_config.cudagraph_mode FULL_DECODE_ONLY \
     --enable-prefix-caching \
     --enable-chunked-prefill \
