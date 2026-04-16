@@ -592,8 +592,7 @@ LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=4096
 ### Disable GPU Prefill
 ```bash
 # Disable GPU prefill
-LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=0
-LVLLM_GPU_PREFILL_MIN_BATCH_SIZE="" 
+LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=0 
 # 1024 to 8192, too large is meaningless (occupies too much VRAM and long startup time)
 --max-num-batched-tokens 4096
 ``` 
