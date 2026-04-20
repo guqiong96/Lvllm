@@ -19,6 +19,7 @@ from vllm.utils.hashing import sha256_cbor, xxhash_cbor
 from vllm.utils.math_utils import cdiv, round_up
 from vllm.utils.mem_utils import format_gib
 from vllm.v1.kv_cache_interface import (
+    AttentionSpec,
     ChunkedLocalAttentionSpec,
     FullAttentionSpec,
     KVCacheConfig,
@@ -1676,6 +1677,31 @@ def generate_scheduler_kv_cache_config(
     return cfg
 
 
+def token_capacity_kv_cache_groups(
+    vllm_config: VllmConfig, kv_cache_config: KVCacheConfig
+) -> list[KVCacheGroupSpec]:
+    """KV cache groups that contribute to per-token capacity.
+
+    Attention groups always scale with sequence length. Mamba groups only
+    scale when ``mamba_cache_mode == 'all'``; in ``'none'`` and ``'align'``
+    they hold O(1) state per request and pre-reserve a fixed number of
+    blocks, so counting them in the per-token divisor under-reports
+    capacity on hybrid models.
+
+    Falls back to all groups if the filter would produce an empty list.
+    """
+    mamba_scales = (
+        getattr(vllm_config.cache_config, "mamba_cache_mode", "none") == "all"
+    )
+    groups = [
+        g
+        for g in kv_cache_config.kv_cache_groups
+        if isinstance(g.kv_cache_spec, AttentionSpec)
+        or (isinstance(g.kv_cache_spec, MambaSpec) and mamba_scales)
+    ]
+    return groups or list(kv_cache_config.kv_cache_groups)
+
+
 def _report_kv_cache_config(
     vllm_config: VllmConfig, kv_cache_config: KVCacheConfig
 ) -> None:
@@ -1686,15 +1712,12 @@ def _report_kv_cache_config(
         vllm_config: The global VllmConfig
         kv_cache_config: The resolved KV cache configuration
     """
-    min_block_size = min(
-        [group.kv_cache_spec.block_size for group in kv_cache_config.kv_cache_groups]
-    )
+    capacity_groups = token_capacity_kv_cache_groups(vllm_config, kv_cache_config)
+    min_block_size = min(g.kv_cache_spec.block_size for g in capacity_groups)
 
     # Log the KV cache size and maximum concurrency.
     num_tokens = (
-        kv_cache_config.num_blocks
-        // len(kv_cache_config.kv_cache_groups)
-        * min_block_size
+        kv_cache_config.num_blocks // len(capacity_groups) * min_block_size
     )
     dcp_size = vllm_config.parallel_config.decode_context_parallel_size
     pcp_size = vllm_config.parallel_config.prefill_context_parallel_size

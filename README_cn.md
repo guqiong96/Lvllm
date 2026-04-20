@@ -142,7 +142,7 @@ vllm serve \
     --host 0.0.0.0 \
     --port 8070 \
     --tensor-parallel-size 2 \
-    --max-model-len 100000 \
+    --max-model-len auto \
     --gpu-memory-utilization 0.9046 \
     --trust-remote-code \
     --tokenizer-mode auto \
@@ -185,7 +185,7 @@ vllm serve \
     --host 0.0.0.0 \
     --port 8070 \
     --tensor-parallel-size 2 \
-    --max-model-len 160000 \
+    --max-model-len auto \
     --gpu-memory-utilization 0.9046 \
     --trust-remote-code \
     --tokenizer-mode auto \
@@ -230,7 +230,7 @@ vllm serve \
     --host 0.0.0.0 \
     --port 8070 \
     --tensor-parallel-size 2 \
-    --max-model-len 52000 \
+    --max-model-len auto \
     --gpu-memory-utilization 0.9046 \
     --trust-remote-code \
     --tokenizer-mode auto \
@@ -278,7 +278,7 @@ vllm serve \
     --host 0.0.0.0 \
     --port 8070 \
     --tensor-parallel-size 2 \
-    --max-model-len 40000 \
+    --max-model-len auto \
     --gpu-memory-utilization 0.9046 \
     --trust-remote-code \
     --tokenizer-mode auto \
@@ -326,7 +326,7 @@ vllm serve \
     --host 0.0.0.0 \
     --port 8070 \
     --tensor-parallel-size 2 \
-    --max-model-len 70000 \
+    --max-model-len auto \
     --gpu-memory-utilization 0.9046 \
     --trust-remote-code \
     --tokenizer-mode auto \
@@ -372,7 +372,7 @@ vllm serve \
     --host 0.0.0.0 \
     --port 8070 \
     --tensor-parallel-size 2 \
-    --max-model-len 50000 \
+    --max-model-len auto \
     --gpu-memory-utilization 0.9046 \
     --trust-remote-code \
     --tokenizer-mode auto \
@@ -428,7 +428,7 @@ vllm serve \
     --host 0.0.0.0 \
     --port 8070 \
     --tensor-parallel-size 2 \
-    --max-model-len 33000 \
+    --max-model-len auto \
     --gpu-memory-utilization 0.9046 \
     --trust-remote-code \
     --tokenizer-mode auto \
@@ -478,7 +478,7 @@ vllm serve \
     --host 0.0.0.0 \
     --port 8070 \
     --tensor-parallel-size 2 \
-    --max-model-len 40000 \
+    --max-model-len auto \
     --gpu-memory-utilization 0.9046 \
     --trust-remote-code \
     --tokenizer-mode auto \
