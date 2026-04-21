@@ -25,7 +25,7 @@ Note 1: x86 CPUs with AVX2 or above instruction sets and Nvidia GPUs are support
 - [How to Run Qwen3.5-122B-A10B](#how-to-run-qwen35-122b-a10b)
 - [How to Run Qwen3.5-397B-A17B](#how-to-run-qwen35-397b-a17b)
 - [How to Run MiniMax-M2.7](#how-to-run-minimax-m27)
-- [How to Run Kimi-K2.5](#how-to-run-kimi-k25)
+- [How to Run Kimi-K2.6](#how-to-run-kimi-k26)
 - [How to Run GLM-4.7-FP8](#how-to-run-glm-47-fp8)
 - [Configuration Parameters](#configuration-parameters)
 - [Installation Steps](#installation-steps)
@@ -82,6 +82,7 @@ Most of the original MOE models verified by vLLM
 | GLM-4.7 | ✅ Tested |
 | GLM-4.7-Flash | ✅ Tested |
 | GLM-4.6V | ✅ Tested |
+| Kimi k2.6 | ✅ Tested |
 | Kimi k2.5 | ✅ Tested |
 
 Unlisted original MOE models from Qwen3 series, GLM series, and MiniMax series are theoretically supported and pending actual testing.
@@ -392,7 +393,7 @@ vllm serve \
 --enable_expert_parallel # enable expert parallelism, 8-card inference of minimax-m2.1、minimax-m2.5 model requires setting
 ```
 
-## How to Run Kimi-K2.5
+## How to Run Kimi-K2.6
 
 ```bash
 sync && echo 3 | sudo tee /proc/sys/vm/drop_caches
@@ -418,7 +419,7 @@ LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=2048 \
 LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
 LVLLM_MOE_QUANT_ON_GPU=1 \
 vllm serve \
-    --model /home/guqiong/Models/Kimi-K2.5 \
+    --model /home/guqiong/Models/Kimi-K2.6 \
     --host 0.0.0.0 \
     --port 8070 \
     --tensor-parallel-size 2 \
@@ -426,7 +427,7 @@ vllm serve \
     --gpu-memory-utilization 0.9046 \
     --trust-remote-code \
     --tokenizer-mode auto \
-    --served-model-name Kimi-K2.5 \
+    --served-model-name Kimi-K2.6 \
     --compilation_config.cudagraph_mode FULL_AND_PIECEWISE \
     --enable-prefix-caching \
     --enable-chunked-prefill \
@@ -510,7 +511,7 @@ vllm serve \
 
 | Parameter | Example Value | Description |
 |-----------|-------|-------------|
-| `model` | `/home/guqiong/Models/Models/MiniMax-M2.5` | Model directory path |
+| `model` | `/home/guqiong/Models/Models/MiniMax-M2.7` | Model directory path |
 | `host` | `0.0.0.0` | Service binding IP address |
 | `port` | `8070` | Service binding port number |
 | `tensor-parallel-size` | `2` | Tensor parallel size, less than or equal to the number of GPUs |
@@ -519,7 +520,7 @@ vllm serve \
 | `gpu-memory-utilization` | `0.92` | GPU memory utilization percentage allocated to vLLM, less than or equal to 1 |
 | `trust-remote-code` | `true` | Whether to trust remote code, recommended value: `true` |
 | `tokenizer-mode` | `auto` | Tokenizer mode, recommended value: `auto` |
-| `served-model-name` | `MiniMax-M2.5` | Served model name |
+| `served-model-name` | `MiniMax-M2.7` | Served model name |
 | `compilation_config.cudagraph_mode` | `FULL_DECODE_ONLY` | Enable CUDA graph mode, recommended value |
 | `enable_prefix_caching` | `true` | Enable prefix caching, recommended value |
 | `enable-chunked-prefill` | `true` | Enable chunked prefill, recommended value |
