@@ -1,17 +1,17 @@
-model: "/home/guqiong/Models/Qwen3.6-35B-A3B"
+model: "/home/guqiong/Models/Qwen3.6-35B-A3B-FP8"
 host: "0.0.0.0"
 port: 8070
 tensor-parallel-size: 2
 #pipeline-parallel-size: 2 
-max-model-len: 100000
+max-model-len: auto
 gpu-memory-utilization: 0.95 
 trust-remote-code: true
 tokenizer-mode: "auto"
-served-model-name: "Qwen3.6-35B-A3B"
+served-model-name: "Qwen3.6-35B-A3B-FP8"
 compilation_config.cudagraph_mode: "FULL_DECODE_ONLY"
 enable_prefix_caching: true
 enable-chunked-prefill: true
-max_num_batched_tokens: 32000
+max_num_batched_tokens: 4096
 dtype: "bfloat16"
 max_num_seqs: 4
 compilation_config.mode: "VLLM_COMPILE"
@@ -19,12 +19,10 @@ enable-auto-tool-choice: true
 # mamba-ssm-cache-dtype: "float16"
 # reasoning-parser: "super_v3"
 # tool-call-parser: "qwen3_coder"
-kv_cache_dtype: "turboquant_3bit_nc"  
-# speculative-config: '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
+kv_cache_dtype: "turboquant_4bit_nc"  
+speculative-config: '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
 # tool-call-parser: "minimax_m2"
 # reasoning-parser: "minimax_m2_append_think"
-# speculative-config.method: mtp
-# speculative-config.num_speculative_tokens: 1
 # tool-call-parser: glm47
 # reasoning-parser: glm45
 # tool-call-parser: "kimi_k2"
@@ -33,12 +31,8 @@ kv_cache_dtype: "turboquant_3bit_nc"
 # disable-cascade-attn: true
 # reasoning-parser: "step3p5" 
 # tool-call-parser: "step3p5"  
-# hf-overrides.num_nextn_predict_layers: 1
-# speculative_config.method: "step3p5_mtp"
-# speculative_config.num_speculative_tokens: 1
 reasoning-parser: "qwen3"
 tool-call-parser: "qwen3_coder"
 # reasoning-parser: "gemma4"
 # tool-call-parser: "gemma4"
-kv-sharing-fast-prefill: true
 
