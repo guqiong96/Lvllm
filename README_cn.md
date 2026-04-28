@@ -562,6 +562,7 @@ sudo sh cuda_13.2.0_595.45.04_linux.run
 ```bash
 conda create -n Lvllm python==3.12.11
 conda activate Lvllm
+pip install setuptools_scm
 
 # 升级libstdcxx-ng（避免glibcxx版本问题）
 conda install -c conda-forge libstdcxx-ng
@@ -579,11 +580,9 @@ sudo dnf install numactl-devel        # Rocky Linux
 git clone https://github.com/guqiong96/Lvllm.git
 cd Lvllm
 
-# 安装PyTorch 2.10.0
-pip install torchaudio triton torchvision torch==2.10.0
+# 安装PyTorch 2.11.0
+pip install torchaudio triton torchvision torch==2.11.0
 
-# 安装构建依赖
-pip install -r requirements/build.txt
 ```
  
 ### 4. 安装Lvllm
@@ -607,14 +606,15 @@ MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TY
 # 此命令适合普通用户，如果保留本地修改内容的用户应知道提前做处理
 git fetch && git reset --hard origin/main && git clean -fd 
 
-# 安装PyTorch 2.10.0
+# 安装PyTorch 2.11.0
 pip uninstall torchaudio triton torchvision torch vllm
-pip install torchaudio triton torchvision  torch==2.10.0
+pip install torchaudio triton torchvision  torch==2.11.0
 
 # Qwen3-VL GLM4.6V 需要安装 xformers
   
 # 编译安装
-pip install -r requirements/build.txt
+rm -rf .deps/*build* 
+rm -rf build 
 MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
 
 rm -rf ~/.cache/vllm

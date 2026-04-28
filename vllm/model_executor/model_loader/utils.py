@@ -111,7 +111,7 @@ def process_weights_after_loading(
         if isinstance(module, FusedMoE) and not getattr(module, "process_lk_moe_already_called", False):
             module.clean_weights_after_loading() 
             setattr(module, "process_lk_moe_already_called", True)
- 
+
     # Initialize post-load attention weights for both Attention and MLA.
     # NOTE: Happens after other modules so we can easily decompress weights.
     for _, module in model.named_modules():
@@ -186,7 +186,7 @@ _MODEL_ARCH_BY_HASH = dict[int, tuple[type[nn.Module], str]]()
 def _get_model_architecture(model_config: ModelConfig) -> tuple[type[nn.Module], str]:
     from vllm.model_executor.models.adapters import as_embedding_model, as_seq_cls_model
 
-    architectures = getattr(model_config.hf_config, "architectures", [])
+    architectures = getattr(model_config.hf_config, "architectures", None) or []
 
     model_cls, arch = model_config.registry.resolve_model_cls(
         architectures,
@@ -226,7 +226,7 @@ def get_model_architecture(model_config: ModelConfig) -> tuple[type[nn.Module], 
             model_config.runner_type,
             model_config.trust_remote_code,
             model_config.model_impl,
-            tuple(getattr(model_config.hf_config, "architectures", [])),
+            tuple(getattr(model_config.hf_config, "architectures", None) or []),
         )
     )
     if key in _MODEL_ARCH_BY_HASH:

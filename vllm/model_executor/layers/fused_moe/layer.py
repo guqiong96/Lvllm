@@ -8,7 +8,6 @@ from typing import Literal, cast, get_args, overload
 import torch
 from torch.nn.parameter import UninitializedParameter
 
-import vllm.envs as envs
 from vllm._aiter_ops import rocm_aiter_ops
 from vllm.config import VllmConfig, get_current_vllm_config
 from vllm.config.parallel import ExpertPlacementStrategy
@@ -19,7 +18,7 @@ from vllm.distributed import (
 )
 from vllm.distributed.eplb.eplb_state import EplbLayerState, EplbState
 from vllm.logger import init_logger
-from vllm.model_executor.custom_op import CustomOp
+from vllm.model_executor.custom_op import PluggableLayer
 from vllm.model_executor.layers.fused_moe.activation import MoEActivation
 from vllm.model_executor.layers.fused_moe.config import (
     FusedMoEConfig,
@@ -39,8 +38,11 @@ from vllm.model_executor.layers.fused_moe.rocm_aiter_fused_moe import (
 from vllm.model_executor.layers.fused_moe.router.router_factory import (
     create_fused_moe_router,
 )
-from vllm.model_executor.layers.fused_moe.runner.default_moe_runner import (
-    DefaultMoERunner,
+from vllm.model_executor.layers.fused_moe.runner.moe_runner import (
+    MoERunner,
+)
+from vllm.model_executor.layers.fused_moe.runner.moe_runner_interface import (
+    MoERunnerInterface,
 )
 from vllm.model_executor.layers.fused_moe.runner.shared_experts import (
     SharedExperts,
@@ -57,6 +59,7 @@ from vllm.model_executor.layers.quantization.base_config import (
 from vllm.platforms import current_platform
 
 logger = init_logger(__name__)
+
 import threading
 from vllm.utils.platform_utils import is_pin_memory_available
 from vllm.envs import MoeComputeStrategy
@@ -68,27 +71,9 @@ if is_lk_moe_feature_enabled():
         1: torch.float16,    # GGML_TYPE_F16
         30: torch.bfloat16,  # GGML_TYPE_BF16 
     }
- 
-    SUPPORTED_GGML_QUANT_TYPES = {
-        2,  # GGML_TYPE_Q4_0
-        3,  # GGML_TYPE_Q4_1
-        8,  # GGML_TYPE_Q8_0
-        12, # GGML_TYPE_Q4_K
-        13, # GGML_TYPE_Q5_K
-        14, # GGML_TYPE_Q6_K
-        23, # GGML_TYPE_IQ4_XS
-        24, # GGML_TYPE_I8 
-    }
- 
-    def is_ggml_type_supported(ggml_type): 
-        if ggml_type in {0, 1, 30}:
-            return True 
-        if ggml_type in SUPPORTED_GGML_QUANT_TYPES:
-            return True
-        return False  
-    
 else:
     logger.error("Failed to import lk_moe module or LVLLM_MOE_NUMA_ENABLED is not set to 1, lk::MOE implementation will not be available")
+
 class FusedMoeWeightScaleSupported(Enum):
     TENSOR = "tensor"
     CHANNEL = "channel"
@@ -208,8 +193,7 @@ def determine_expert_placement_strategy(
             return "linear"
         if (
             moe_parallel_config.use_all2all_kernels
-            and not moe_parallel_config.use_deepep_ll_kernels
-            and not moe_parallel_config.use_nixl_ep_kernels
+            and not moe_parallel_config.needs_round_robin_routing_tables
         ):
             logger.warning(
                 "Round-robin expert placement currently only supports "
@@ -244,8 +228,8 @@ def get_compressed_expert_map(expert_map: torch.Tensor) -> str:
 
 
 # --8<-- [start:fused_moe]
-@CustomOp.register("fused_moe")
-class FusedMoE(CustomOp):
+@PluggableLayer.register("fused_moe")
+class FusedMoE(PluggableLayer):
     """FusedMoE layer for MoE models.
 
     This layer contains both MergedColumnParallel weights (gate_up_proj /
@@ -261,11 +245,18 @@ class FusedMoE(CustomOp):
         hidden_size: Input hidden state size of the transformer
         intermediate_size: Intermediate size of the experts
         params_dtype: Data type for the parameters.
-        reduce_results: Whether to all_reduce on the output of the layer
         renormalize: Whether to renormalize the logits in the fused_moe kernel
         quant_config: Quantization configure.
         enable_eplb: Whether to enable expert parallelism load balancer.
         router_logits_dtype: Data type for router logits buffers.
+        routed_scaling_factor: A scaling factor that is applied to the topk_weights
+                               by the router or the output of the layer depending
+                               on the value of `apply_routed_scale_to_output`
+        apply_routed_scale_to_output: Determine whether or not `routed_scaling_factor`
+                                      is applied to the topk_weights or to the experts
+                                      output. It is applied to the experts output
+                                      instead of the topk_weights when this feature is
+                                      not supported by the router (or the experts).
     """
 
     # --8<-- [end:fused_moe]
@@ -277,7 +268,6 @@ class FusedMoE(CustomOp):
         hidden_size: int,
         intermediate_size: int,
         params_dtype: torch.dtype | None = None,
-        reduce_results: bool = False,
         renormalize: bool = True,
         use_grouped_topk: bool = False,
         num_expert_group: int | None = None,
@@ -291,6 +281,7 @@ class FusedMoE(CustomOp):
         custom_routing_function: Callable | None = None,
         scoring_func: str = "softmax",
         routed_scaling_factor: float = 1.0,
+        swiglu_limit: float | None = None,
         e_score_correction_bias: torch.Tensor | None = None,
         apply_router_weight_on_input: bool = False,
         activation: str = "silu",
@@ -305,10 +296,12 @@ class FusedMoE(CustomOp):
         gate: torch.nn.Module | None = None,
         shared_experts: torch.nn.Module | None = None,
         routed_input_transform: torch.nn.Module | None = None,
+        routed_output_transform: torch.nn.Module | None = None,
+        apply_routed_scale_to_output: bool = False,
+        zero_expert_type: str | None = None,
+        hash_indices_table: torch.Tensor | None = None,
     ):
         super().__init__()
-
-        self._routed_input_transform = routed_input_transform
 
         if params_dtype is None:
             params_dtype = torch.get_default_dtype()
@@ -316,6 +309,7 @@ class FusedMoE(CustomOp):
 
         vllm_config = get_current_vllm_config()
         self.vllm_config = vllm_config
+        self.swiglu_limit = swiglu_limit
         
         if vllm_config.model_config is not None:
             self.check_nan_in_output = (vllm_config.model_config.architecture in ["MiniMaxM2ForCausalLM", "Step3p5ForCausalLM"])
@@ -326,8 +320,7 @@ class FusedMoE(CustomOp):
             self.has_gate_proj  = not (vllm_config.model_config.architecture == "NemotronHForCausalLM")
         else:
             self.has_gate_proj = True
-      
-            
+
         # FIXME (varun): We should have a better way of inferring the activation
         # datatype. This works for now as the tensor datatype entering the MoE
         # operation is typically unquantized (i.e. float16/bfloat16).
@@ -382,7 +375,6 @@ class FusedMoE(CustomOp):
                 f"({vllm_config.scheduler_config.max_num_batched_tokens})"
             )
         self.max_num_group_batch_size = self.get_max_num_group_batch_size()
-             
 
         self.enable_eplb = enable_eplb
         # TODO(bnell): should this be owned by router?
@@ -479,7 +471,6 @@ class FusedMoE(CustomOp):
 
         assert intermediate_size % self.tp_size == 0
         intermediate_size_per_partition = intermediate_size // self.tp_size
-        self.reduce_results = reduce_results
         self.renormalize = renormalize
 
         # TODO(bnell): these attributes are only used by monolithic kernels.
@@ -491,10 +482,18 @@ class FusedMoE(CustomOp):
         self.topk_group = topk_group
         self.custom_routing_function = custom_routing_function
         self.scoring_func = scoring_func
-        self.routed_scaling_factor = routed_scaling_factor
+        # When apply_routed_scale_to_output is True, we set the scaling factor
+        # to 1.0 so it ends up being a nop. Applying the scale will be handled
+        # by the runner in this case.
+        # The member variable must be set in the same way as the router since
+        # some quantization methods can access it.
+        self.routed_scaling_factor = (
+            routed_scaling_factor if not apply_routed_scale_to_output else 1.0
+        )
         self.e_score_correction_bias = e_score_correction_bias
         # TODO(bnell): end attributes
 
+        self.hash_indices_table = hash_indices_table
         self.apply_router_weight_on_input = apply_router_weight_on_input
         self.activation = MoEActivation.from_str(activation)
 
@@ -510,13 +509,16 @@ class FusedMoE(CustomOp):
             topk_group=topk_group,
             custom_routing_function=custom_routing_function,
             scoring_func=scoring_func,
-            routed_scaling_factor=routed_scaling_factor,
+            routed_scaling_factor=self.routed_scaling_factor,
             e_score_correction_bias=e_score_correction_bias,
             num_fused_shared_experts=self.num_fused_shared_experts,
             enable_eplb=enable_eplb,
             # TODO(bnell): once we can construct the MK at init time, we
             # can make this a value.
             indices_type_getter=lambda: self.quant_method.topk_indices_dtype,
+            zero_expert_type=zero_expert_type,
+            num_logical_experts=self.logical_num_experts,
+            hash_indices_table=self.hash_indices_table,
         )
         self.routing_method_type: RoutingMethodType = self.router.routing_method_type
 
@@ -533,7 +535,7 @@ class FusedMoE(CustomOp):
             in_dtype=moe_in_dtype,
             moe_backend=vllm_config.kernel_config.moe_backend,
             router_logits_dtype=router_logits_dtype,
-            max_num_tokens=envs.VLLM_MOE_DP_CHUNK_SIZE,
+            max_num_tokens=vllm_config.scheduler_config.max_num_batched_tokens,
             has_bias=has_bias,
             is_act_and_mul=is_act_and_mul,
             is_lora_enabled=vllm_config.lora_config is not None,
@@ -626,16 +628,22 @@ class FusedMoE(CustomOp):
         # Storing the runner in the FusedMoE is an intermediate state, eventually
         # the runner will own the FusedMoE layer and provide the execution interface
         # for MoE ops.
-        self.runner = DefaultMoERunner(
-            layer=self,
+        self.runner: MoERunnerInterface = MoERunner(
+            layer_name=self.layer_name,
             moe_config=self.moe_config,
             router=self.router,
-            routed_input_transform=self._routed_input_transform,
             gate=gate,
             shared_experts=shared_experts,
             quant_method=self.quant_method,
-            reduce_results=self.reduce_results,
             enable_dbo=self.vllm_config.parallel_config.enable_dbo,
+            routed_input_transform=routed_input_transform,
+            routed_output_transform=routed_output_transform,
+            # When apply_routed_scale_to_output is True, we allow
+            # the scaling factor to be passed to the runner, otherwise
+            # we pass 1.0 so it ends up being a nop.
+            routed_scaling_factor=routed_scaling_factor
+            if apply_routed_scale_to_output
+            else 1.0,
         )
 
     # TODO(bnell): This method is provided as a hook so vllm/lora/layers/fused_moe.py
@@ -718,8 +726,7 @@ class FusedMoE(CustomOp):
         # Currently routing_tables only needed for round-robin expert placement
         # with DeepEP-ll or NIXL EP all2all backends.
         if self.expert_placement_strategy != "round_robin" or (
-            not self.moe_parallel_config.use_deepep_ll_kernels
-            and not self.moe_parallel_config.use_nixl_ep_kernels
+            not self.moe_parallel_config.needs_round_robin_routing_tables
         ):
             return None
 
@@ -896,7 +903,10 @@ class FusedMoE(CustomOp):
         if shard_id == "w2":
             hidden_dim = self._get_hidden_dim(shard_dim, expert_data.ndim)
             expert_data = self._narrow_expert_data_for_padding(
-                expert_data, loaded_weight, hidden_dim=hidden_dim
+                expert_data,
+                loaded_weight,
+                hidden_dim=hidden_dim,
+                shard_dim=shard_dim,
             )
             expert_data.copy_(loaded_weight)
         elif shard_id in ("w1", "w3"):
@@ -936,29 +946,33 @@ class FusedMoE(CustomOp):
         expert_data: torch.Tensor,
         loaded_weight: torch.Tensor,
         hidden_dim: int,
+        shard_dim: int | None = None,
     ) -> torch.Tensor:
-        """Narrow expert_data hidden dim to match loaded_weight for padded
-        hidden_size.
+        """Narrow expert_data to match loaded_weight for padded dimensions.
 
         When backends (e.g., DeepEP) round up hidden_size, weight parameters
         are larger than checkpoint weights. Narrow the padded hidden dimension
-        before copying.
+        before copying. Similarly, when padding occurs on the shard
+        (intermediate) dimension (e.g. for MXFP4 GEMM), narrow that dimension
+        as well.
 
         Args:
             expert_data: The (possibly padded) parameter tensor to narrow.
             loaded_weight: The checkpoint weight tensor with original size.
             hidden_dim: The dimension index corresponding to hidden_size.
                 Must be non-negative.
+            shard_dim: The dimension index corresponding to the shard
+                (intermediate) dimension. Defaults to `None`.
         """
-        if (
-            loaded_weight.ndim > 0
-            and 0 <= hidden_dim < expert_data.ndim
-            and hidden_dim < loaded_weight.ndim
-            and expert_data.shape[hidden_dim] > loaded_weight.shape[hidden_dim]
-        ):
-            expert_data = expert_data.narrow(
-                hidden_dim, 0, loaded_weight.shape[hidden_dim]
-            )
+        dims = (hidden_dim,) if shard_dim is None else (hidden_dim, shard_dim)
+        if loaded_weight.ndim > 0:
+            for dim in dims:
+                if (
+                    0 <= dim < expert_data.ndim
+                    and dim < loaded_weight.ndim
+                    and expert_data.shape[dim] > loaded_weight.shape[dim]
+                ):
+                    expert_data = expert_data.narrow(dim, 0, loaded_weight.shape[dim])
         return expert_data
 
     def _load_w13(
@@ -1000,7 +1014,10 @@ class FusedMoE(CustomOp):
             expert_data = expert_data.narrow(shard_dim, shard_size, shard_size)
         hidden_dim = self._get_hidden_dim(shard_dim, expert_data.ndim)
         expert_data = self._narrow_expert_data_for_padding(
-            expert_data, loaded_weight, hidden_dim=hidden_dim
+            expert_data,
+            loaded_weight,
+            hidden_dim=hidden_dim,
+            shard_dim=shard_dim,
         )
         expert_data.copy_(loaded_weight)
 
@@ -1033,7 +1050,10 @@ class FusedMoE(CustomOp):
         # w2, down_proj: Load into only logical weight of w2.
         hidden_dim = self._get_hidden_dim(shard_dim, expert_data.ndim)
         expert_data = self._narrow_expert_data_for_padding(
-            expert_data, loaded_weight, hidden_dim=hidden_dim
+            expert_data,
+            loaded_weight,
+            hidden_dim=hidden_dim,
+            shard_dim=shard_dim,
         )
         expert_data.copy_(loaded_weight)
 
@@ -1117,7 +1137,11 @@ class FusedMoE(CustomOp):
         expert_id: int,
         return_success: bool = False,
     ) -> bool | None:
-        if self.quant_config and self.quant_config.get_name() == "mxfp4":
+        quant_config_name = self.quant_config and self.quant_config.get_name()
+        if quant_config_name == "humming":
+            assert hasattr(self.quant_method, "weight_schema")
+            quant_config_name = self.quant_method.weight_schema.quant_method
+        if quant_config_name == "gpt_oss_mxfp4":
             # (FIXME) for gpt-oss all experts are combined
             if "bias" in weight_name:
                 dim1 = loaded_weight.shape[1]
@@ -1229,7 +1253,7 @@ class FusedMoE(CustomOp):
             if shard_id in {"w1", "w3"}:
                 final_shape[1] *= 2
             final_shape[shard_dim] = final_shape[shard_dim] // self.tp_size
-            param.materialize(final_shape, device=loaded_weight.device, dtype=loaded_weight.dtype)
+            param.materialize(final_shape, dtype=loaded_weight.dtype)
 
         expert_data = param.data if full_load else param.data[expert_id]
 
@@ -1553,35 +1577,16 @@ class FusedMoE(CustomOp):
         self.ensure_moe_quant_config_init()
         return self.quant_method.moe_quant_config
 
-    def must_reduce_shared_expert_outputs(self) -> bool:
-        """
-        The shared_experts are typically computed using the RowParallelLinear
-        layer. The result of this function is typically used as
-        the reduce_results argument to the module.
-        When just tensor-parallel is used, it is not required to reduce
-        the shared_experts results immediately. Instead we reduce at the
-        once at the end of the MoE op. (Refer to DeepSeekV2MoE module)
-        With EP and all2all kernels - this is no longer viable as all
-        GPU ranks in DP, produce the complete set of hidden_states.
-        Therefore it is required that we reduce the shared_experts output
-        early.
-        """
-        return self.runner.must_reduce_shared_expert_outputs()
-
-    def maybe_all_reduce_tensor_model_parallel(self, final_hidden_states: torch.Tensor):
-        """
-        Some combine kernels reduce across GPU ranks by default.
-        """
-        return self.runner.maybe_all_reduce_tensor_model_parallel(final_hidden_states)
-
-    def forward_native(
+    def forward(
         self,
         hidden_states: torch.Tensor,
         router_logits: torch.Tensor,
-    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        input_ids: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         return self.runner.forward(
             hidden_states,
             router_logits,
+            input_ids,
         )
 
     @property
@@ -1589,13 +1594,6 @@ class FusedMoE(CustomOp):
         return (
             self._expert_map if not self.rocm_aiter_fmoe_enabled else self.expert_mask
         )
-
-    def forward_cuda(
-        self,
-        hidden_states: torch.Tensor,
-        router_logits: torch.Tensor,
-    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-        return self.forward_native(hidden_states, router_logits)
 
     @classmethod
     def make_expert_params_mapping(
@@ -1659,7 +1657,6 @@ class FusedMoE(CustomOp):
             f"intermediate_size_per_partition={self.intermediate_size_per_partition}, "  # noqa: E501
             f"tp_size={self.tp_size},\n"
             f"ep_size={self.ep_size}, "
-            f"reduce_results={self.reduce_results}, "
         )
 
         return s
@@ -1699,30 +1696,7 @@ class FusedMoE(CustomOp):
             return False
         if torch.cuda.is_current_stream_capturing():
             return False
-        return self.is_gpu_prefill_layer and hidden_states.size(0) >= get_gpu_prefill_min_batch_size()
-                
-            
-    def _get_ggml_type_from_quant_config(self,  quant_config, layer_idx, weight_type):  
-        if layer_idx < len(quant_config.moe_weight_type_map):
-            layer_info = quant_config.moe_weight_type_map[layer_idx]
-            if layer_info and weight_type in layer_info:
-                weight_name = layer_info[weight_type]
-                quant_name_to_type = {
-                    'F32': 0,     # GGML_TYPE_F32
-                    'F16': 1,     # GGML_TYPE_F16
-                    'BF16': 30,   # GGML_TYPE_BF16
-                    'Q4_0': 2,    # GGML_TYPE_Q4_0
-                    'Q4_1': 3,    # GGML_TYPE_Q4_1
-                    'Q8_0': 8,    # GGML_TYPE_Q8_0
-                    'Q4_K': 12,   # GGML_TYPE_Q4_K
-                    'Q5_K': 13,   # GGML_TYPE_Q5_K
-                    'Q6_K': 14,   # GGML_TYPE_Q6_K
-                    'IQ4_XS': 23, # GGML_TYPE_IQ4_XS
-                    'I8': 24,     # GGML_TYPE_I8
-                }
-                return quant_name_to_type.get(weight_name, None)
-            
-        raise ValueError(f"Weight type {layer_idx}.{weight_type} not found in quant_config") 
+        return self.is_gpu_prefill_layer and hidden_states.size(0) >= get_gpu_prefill_min_batch_size()     
     
     def _zero_tensor(self, tensor: torch.Tensor):
         if tensor is not None:
@@ -1734,10 +1708,10 @@ class FusedMoE(CustomOp):
             ("CPU" if not self.is_gpu_resident_layer else "GPU") + "]")
             return
         try:
-            from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsWNA16MarlinMoEMethod
-            from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsWNA16MoEMethod  
+            from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe.compressed_tensors_moe_wna16_marlin import CompressedTensorsWNA16MarlinMoEMethod
+            from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe.compressed_tensors_moe_wna16 import CompressedTensorsWNA16MoEMethod  
             from vllm.model_executor.layers.quantization.fp8 import Fp8MoEMethod  
-            from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsW8A8Fp8MoEMethod
+            from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe.compressed_tensors_moe_w8a8_fp8 import CompressedTensorsW8A8Fp8MoEMethod
             from vllm.model_executor.layers.fused_moe.unquantized_fused_moe_method import UnquantizedFusedMoEMethod 
             is_regular = isinstance(self.quant_method, UnquantizedFusedMoEMethod)
             is_fp8 =  isinstance(self.quant_method, Fp8MoEMethod) or isinstance(self.quant_method, CompressedTensorsW8A8Fp8MoEMethod)
@@ -1756,16 +1730,15 @@ class FusedMoE(CustomOp):
                 
                     
             if is_lk_moe_use_gpu_prefill() and placeholder_create_or_replace_need: 
-                from vllm.model_executor.layers.fused_moe.runner.default_moe_runner import create_cpu_weights
+                from vllm.model_executor.layers.fused_moe.runner.moe_runner import create_cpu_weights
                 import threading
                 
-                # scheduler_config = getattr(self.vllm_config, 'scheduler_config', None)
-                # if scheduler_config:
-                #     batch_size = getattr(scheduler_config, 'max_num_seqs', 4)
-                #     batch_size = min(batch_size, 4)
-                # else:
-                #     batch_size = 4
-                batch_size = 1
+                scheduler_config = getattr(self.vllm_config, 'scheduler_config', None)
+                if scheduler_config:
+                    batch_size = getattr(scheduler_config, 'max_num_seqs', 2)
+                    batch_size = min(batch_size, 4)
+                else:
+                    batch_size = 2
                 
                 FusedMoE._batch_lock = threading.Lock()  
                 
@@ -1782,12 +1755,11 @@ class FusedMoE(CustomOp):
                     FusedMoE._batch_usage[batch_id] = False
                 logger.info(f"Initialized lk_moe gpu prefill buffers with {batch_size} batches")
                 
-            from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsWNA16MarlinMoEMethod
-            from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsWNA16MoEMethod 
+            from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe.compressed_tensors_moe_wna16_marlin import CompressedTensorsWNA16MarlinMoEMethod
+            from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe.compressed_tensors_moe_wna16 import CompressedTensorsWNA16MoEMethod 
             from vllm.model_executor.layers.quantization.awq_marlin import AWQMarlinMoEMethod
             from vllm.model_executor.layers.quantization.fp8 import Fp8MoEMethod
-            from vllm.model_executor.layers.quantization.gguf import GGUFMoEMethod
-            from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsW8A8Fp8MoEMethod
+            from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe.compressed_tensors_moe_w8a8_fp8 import CompressedTensorsW8A8Fp8MoEMethod
             from vllm.model_executor.layers.quantization.modelopt import ModelOptNvFp4FusedMoE
             find_weight = False  
             with torch.no_grad():
@@ -1799,10 +1771,6 @@ class FusedMoE(CustomOp):
                     
                 if isinstance(self.quant_method, AWQMarlinMoEMethod):
                     self._process_awq_weights()
-                    find_weight = True 
-                
-                if isinstance(self.quant_method, GGUFMoEMethod): 
-                    self._process_gguf_weights()
                     find_weight = True
                     
                 if isinstance(self.quant_method, Fp8MoEMethod):
@@ -1838,9 +1806,9 @@ class FusedMoE(CustomOp):
             
     def clean_weights_after_loading(self):
         from vllm.model_executor.layers.quantization.fp8 import Fp8MoEMethod
-        from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsW8A8Fp8MoEMethod
-        from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsWNA16MarlinMoEMethod
-        from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import CompressedTensorsWNA16MoEMethod 
+        from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe.compressed_tensors_moe_w8a8_fp8 import CompressedTensorsW8A8Fp8MoEMethod
+        from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe.compressed_tensors_moe_wna16_marlin import CompressedTensorsWNA16MarlinMoEMethod
+        from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe.compressed_tensors_moe_wna16 import CompressedTensorsWNA16MoEMethod 
         if self.is_gpu_resident_layer:
             return
         try:  
@@ -1926,64 +1894,6 @@ class FusedMoE(CustomOp):
             return self.ep_size, self.ep_rank, torch.cuda.current_device()
         return self.tp_size, self.tp_rank, torch.cuda.current_device()
                    
-    def _process_gguf_weights(self):  
-        raise ValueError("GGUF Weights are not supported for lk moe ...")  
-    
-        from vllm.model_executor.models.utils import extract_layer_index
-        layer_idx = extract_layer_index(self.layer_name)
-        gate_ggml_type = self._get_ggml_type_from_quant_config(self.quant_config, layer_idx, 'gate')
-        up_ggml_type = self._get_ggml_type_from_quant_config(self.quant_config, layer_idx, 'up')
-        down_ggml_type = self._get_ggml_type_from_quant_config(self.quant_config, layer_idx, 'down')
-        
-        assert gate_ggml_type == up_ggml_type, f"Gate and Up weights must have the same GGML type, got {gate_ggml_type} and {up_ggml_type}"
-  
-        if not is_ggml_type_supported(gate_ggml_type) or not is_ggml_type_supported(up_ggml_type) or not is_ggml_type_supported(down_ggml_type) \
-            or gate_ggml_type != up_ggml_type:  
-            raise ValueError(f"GGML type {gate_ggml_type} or {up_ggml_type} or {down_ggml_type} is not supported for layer {layer_idx}")
-             
-        hidden_ggml_type = self.get_ggml_type_from_dtype(self.moe_config.in_dtype)
-        w13_ggml_type = gate_ggml_type
-        w2_ggml_type = down_ggml_type
-        
-        num_experts, total_intermediate_size, hidden_size = self.w13_qweight.shape
-        intermediate_size = total_intermediate_size // 2
-        assert intermediate_size == self.intermediate_size_per_partition, f"Intermediate size {intermediate_size} must be equal to intermediate_size_per_partition {self.intermediate_size_per_partition}"
-        assert self.w2_qweight.shape == (num_experts, self.hidden_size, self.w2_qweight.shape[2]), f"Down weight shape {self.w2_qweight.shape} must be (num_experts, hidden_size, w2_qweight.shape[2])"
-        
-        
-        w13_ptr = self.w13_qweight.contiguous().data_ptr()
-        
-        w2_ptr = self.w2_qweight.contiguous().data_ptr()
-        
-        num_processes, process_id, gpu_id = self._get_processes_info()
-        
-        self.lk_moe_config = lk_moe.MOEConfig(
-            num_processes,                # num_processes
-            process_id,                   # process_id
-            gpu_id,                       # gpu_id
-            self.local_num_experts,        # expert_num
-            has_gate_proj,                 # has_gate_proj
-            self.top_k,                    # routed_expert_num
-            self.hidden_size,              # hidden_size
-            self.intermediate_size_per_partition,             # intermediate_size
-            32,                            # stride
-            10,                            # group_min_len
-            self.max_num_group_batch_size,                          # group_max_len
-            hidden_ggml_type,           
-            w13_ggml_type,                # gate_type  
-            w2_ggml_type,                # down_type   
-            w13_ptr,                 # w13_ptr 
-            w2_ptr,                 # w2_ptr
-        )
-        self.lk_moe = lk_moe.MOE(self.lk_moe_config) 
-          
-        del w13_ptr, w2_ptr
-        del self.w13_qweight, self.w2_qweight
- 
-        import gc
-        gc.collect() 
-        
-    
     def _block_scale_broadcast_fixed(self, scale, target_shape, group_shape): 
         if torch.is_tensor(group_shape): 
             group_shape = group_shape.tolist()
@@ -2144,8 +2054,8 @@ class FusedMoE(CustomOp):
             10,                            # group_min_len
             self.max_num_group_batch_size,                          # group_max_len
             hidden_ggml_type,              # hidden_type 
-            8,
-            8,
+            500,
+            500,
             w13_weight_ptr,                     # w13_weight_ptr 
             w2_weight_ptr,                       # w2_weight_ptr   
             w13_weight_scale_ptr,               # w13_weight_scale_ptr
@@ -2769,6 +2679,26 @@ class FusedMoE(CustomOp):
         except Exception as e:
             logger.error(f"lk_moe forward failed with error: {e}, falling back to default path") 
             raise RuntimeError("lk_moe forward failed, fallback to default MoE implementation")
+
+
+
+# This is a temporary forwarding method which will be removed/modified layer.
+def fused_moe_make_expert_params_mapping(
+    model: torch.nn.Module,
+    ckpt_gate_proj_name: str,
+    ckpt_down_proj_name: str,
+    ckpt_up_proj_name: str,
+    num_experts: int,
+    num_redundant_experts: int = 0,
+) -> list[tuple[str, str, int, str]]:
+    return FusedMoE.make_expert_params_mapping(
+        model,
+        ckpt_gate_proj_name,
+        ckpt_down_proj_name,
+        ckpt_up_proj_name,
+        num_experts,
+        num_redundant_experts,
+    )
 
 
 # Mark the FusedMoE weight_loader as supporting MoE-specific parameters

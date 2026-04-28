@@ -556,6 +556,7 @@ sudo sh cuda_13.2.0_595.45.04_linux.run
 ```bash
 conda create -n Lvllm python==3.12.11
 conda activate Lvllm
+pip install setuptools_scm
 
 # Upgrade libstdcxx-ng (avoid glibcxx version issues)
 conda install -c conda-forge libstdcxx-ng
@@ -573,11 +574,9 @@ sudo dnf install numactl-devel        # Rocky Linux
 git clone https://github.com/guqiong96/Lvllm.git
 cd Lvllm
 
-# Install PyTorch 2.10.0
-pip install torchaudio triton torchvision torch==2.10.0
+# Install PyTorch 2.11.0
+pip install torchaudio triton torchvision torch==2.11.0
 
-# Install build dependencies
-pip install -r requirements/build.txt
 ```
 
 ### 4. Install Lvllm
@@ -600,14 +599,15 @@ If Lvllm is already installed and you need to update to the latest version, exec
 # This command is suitable for regular users; those who want to keep their local modifications should know to handle them in advance
 git fetch && git reset --hard origin/main && git clean -fd 
 
-# Install PyTorch 2.10.0
+# Install PyTorch 2.11.0
 pip uninstall torchaudio triton torchvision torch vllm
-pip install torchaudio triton torchvision torch==2.10.0
+pip install torchaudio triton torchvision torch==2.11.0
 
 # Qwen3-VL GLM4.6V requires xformers to be installed
 
 # Compile and install
-pip install -r requirements/build.txt
+rm -rf .deps/*build* 
+rm -rf build 
 MAX_JOBS=32 NVCC_THREADS=1 CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
 
 rm -rf ~/.cache/vllm

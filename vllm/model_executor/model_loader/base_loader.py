@@ -10,7 +10,6 @@ from vllm.config import ModelConfig, VllmConfig
 from vllm.config.load import LoadConfig
 from vllm.logger import init_logger
 from vllm.model_executor.model_loader.reload import finalize_layerwise_processing
-from vllm.model_executor.model_loader.reload import finalize_layerwise_processing
 from vllm.model_executor.model_loader.utils import (
     initialize_model,
     process_weights_after_loading,
@@ -19,7 +18,6 @@ from vllm.platforms import current_platform
 from vllm.tracing import instrument
 from vllm.utils.mem_utils import format_gib
 from vllm.utils.torch_utils import set_default_torch_dtype
-from typing import List
 
 logger = init_logger(__name__)
 
@@ -63,14 +61,8 @@ class BaseModelLoader(ABC):
             log_model_inspection(model)
 
             logger.debug("Loading weights on %s ...", load_device)
-            # Quantization does not happen in `load_weights` but after it
-            from vllm.envs import enabled_layerwise_load
-            if enabled_layerwise_load():
-                self._load_weights_layerwise(model, model_config, target_device)
-            else:
-                self.load_weights(model, model_config) 
-                process_weights_after_loading(model, model_config, target_device)
-                
+            self.load_weights(model, model_config)
+
             # Log peak GPU memory after loading weights. This is needed
             # to have test coverage on peak memory for online quantization.
             if current_platform.is_cuda():
@@ -78,7 +70,6 @@ class BaseModelLoader(ABC):
                 logger.debug_once(
                     "Peak GPU memory after loading weights: %s GiB",
                     format_gib(peak_memory),
-                    scope="local",
                 )
 
             # Process weights into kernel format. Note that when using online
@@ -86,33 +77,9 @@ class BaseModelLoader(ABC):
             if _has_online_quant(model):
                 finalize_layerwise_processing(model, model_config)
 
+            process_weights_after_loading(model, model_config, target_device)
+
         return model.eval()
-    
-    
-    def _load_weights_layerwise(
-        self, 
-        model: nn.Module, 
-        model_config: ModelConfig, 
-        target_device: torch.device
-    ) -> None:
-        
-        from vllm.model_executor.model_loader.reload import (
-            finalize_layerwise_reload,
-            initialize_layerwise_reload,
-            record_metadata_for_reloading,
-        )
-        
-        logger.info("Loading weights layerwise ...")
-         
-        record_metadata_for_reloading(model)
-         
-        initialize_layerwise_reload(model) 
-        
-        self.load_weights(model, model_config)
-         
-        finalize_layerwise_reload(model, model_config)
-        
-        logger.info("Layerwise weight loading completed")
 
 
 def log_model_inspection(model: nn.Module) -> None:

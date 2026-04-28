@@ -95,30 +95,6 @@ def test_is_envs_cache_enabled() -> None:
     assert not envs._is_envs_cache_enabled()
 
 
-def test_lk_moe_gpu_resident_layer_plan_parse(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("LVLLM_MOE_QUANT_ON_GPU", "1")
-    monkeypatch.setenv(
-        "LVLLM_GPU_RESIDENT_MOE_LAYERS",
-        "1, 3-5, 7, bad, 9-8, 11",
-    )
-
-    assert envs.get_lk_moe_gpu_resident_layer_plan() == frozenset(
-        {1, 3, 4, 5, 7, 11}
-    )
-    assert envs.is_lk_moe_gpu_resident_layer_idx(4)
-    assert not envs.is_lk_moe_gpu_resident_layer_idx(6)
-
-
-def test_lk_moe_gpu_resident_layer_idx_disabled_feature(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    monkeypatch.setenv("LVLLM_MOE_QUANT_ON_GPU", "0")
-    monkeypatch.setenv("LVLLM_GPU_RESIDENT_MOE_LAYERS", "")
-
-    # Feature disabled means all layers stay on GPU by default.
-    assert envs.is_lk_moe_gpu_resident_layer_idx(123)
-
-
 class TestEnvWithChoices:
     """Test cases for env_with_choices function."""
 

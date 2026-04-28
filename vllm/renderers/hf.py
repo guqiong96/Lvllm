@@ -21,11 +21,9 @@ from vllm.entrypoints.chat_utils import (
     ChatTemplateContentFormatOption,
     ChatTemplateResolutionError,
     ConversationMessage,
-    build_video_prompts_from_mm_data,
     load_chat_template,
     parse_chat_messages,
     parse_chat_messages_async,
-    rebuild_mm_uuids_from_mm_data,
 )
 from vllm.inputs import MultiModalDataDict, MultiModalUUIDDict
 from vllm.logger import init_logger
