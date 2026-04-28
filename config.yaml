@@ -19,7 +19,7 @@ enable-auto-tool-choice: true
 # mamba-ssm-cache-dtype: "float16"
 # reasoning-parser: "super_v3"
 # tool-call-parser: "qwen3_coder"
-# kv_cache_dtype: "fp8"  
+kv_cache_dtype: "turboquant_3bit_nc"  
 # speculative-config: '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
 # tool-call-parser: "minimax_m2"
 # reasoning-parser: "minimax_m2_append_think"
