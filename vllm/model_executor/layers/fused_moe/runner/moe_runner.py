@@ -129,10 +129,13 @@ def _moe_forward(
                     input_ids,
                 )
     else: 
-        layer.ensure_moe_quant_config_init()
-        fused_output = layer.runner.forward_dispatch(
-            layer, hidden_states, router_logits, shared_experts_input
-        )
+        return layer.runner._forward_impl(
+                layer,
+                hidden_states,
+                router_logits,
+                shared_experts_input,
+                input_ids,
+            )
     return fused_output
 
 
