@@ -1919,6 +1919,11 @@ class FusedMoE(PluggableLayer):
             topk_ids.size(1),
             torch.cuda.current_stream().cuda_stream,
         ) 
+        
+        if self.check_nan_in_output:
+            bad_mask = torch.isnan(output) | torch.isinf(output)
+            if bad_mask.any():
+                output.masked_fill_(bad_mask, 0.0)
         return output
 
 
