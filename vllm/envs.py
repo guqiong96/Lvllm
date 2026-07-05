@@ -2245,9 +2245,6 @@ def get_gpu_prefill_min_batch_size() -> int:
 def get_gpu_prefetch_window() -> int:
     return environment_variables["LVLLM_GPU_PREFETCH_WINDOW"]()
 
-def get_gpu_resident_experts() -> int:
-    return environment_variables["LVLLM_GPU_RESIDENT_MOE_EXPERTS"]()
-
 def extract_layer_index(layer_name: str, num_attn_module: int = 1) -> int:
     """
     Extract the layer index from the module name.
