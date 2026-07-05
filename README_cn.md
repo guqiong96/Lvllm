@@ -27,6 +27,7 @@ Lvllm使用最新的vLLM源码，重新设计实现了MOE模型混合推理模�
 ## 版本变更
  
 ```bash
+2026-07-05: lvllm-v2.3.0 - 优化GPU预填充速度，CPU AVX512优化，取消LVLLM_GPU_RESIDENT_MOE_EXPERTS
 2026-06-05: lvllm-v2.2.0 - 升级lk_moe模块, 支持nvfp4, mxfp4量化类型，增加LVLLM_GPU_RESIDENT_MOE_EXPERTS, 取消LVLLM_MOE_USE_WEIGHT、LVLLM_MOE_QUANT_ON_GPU
 2026-04-06: lvllm-v2.1.0 - 增强使用LK_POWER_SAVING=1节能效果，支持FP8+BF16+AWQ4bit的混合MOE层推理
 2026-03-22: lvllm-v2.0.0 - FP8 MoE模型使用INT4专家量化时支持逐层加载，减少峰值内存占用，LVLLM_ENABLE_MOE_LAYERWISEISE_LOAD=1
@@ -111,7 +112,6 @@ OMP_NUM_THREADS=44 \
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=2048 \
 LVLLM_GPU_PREFETCH_WINDOW=1 \
 LVLLM_GPU_RESIDENT_MOE_LAYERS=0-1,33-34 \
-LVLLM_GPU_RESIDENT_MOE_EXPERTS=64 \
 LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
 LVLLM_ENABLE_MOE_LAYERWISE_LOAD=1 \
 vllm serve \
@@ -151,7 +151,6 @@ vllm serve \
 | `LVLLM_GPU_PREFILL_MIN_BATCH_SIZE` | GPU预填充参数 | 无 | 使用GPU预填充的最小输入长度`4096`：输入长度达到该值后，启动GPU预填充 | 设置值不宜过小，设置为0则关闭GPU预填充功能 |
 | `LK_POWER_SAVING` | cpu节能 | 0 | `1`：启用cpu节能模式，`0`：禁用cpu节能模式 | 建议值：`0` |
 | `LVLLM_ENABLE_NUMA_INTERLEAVE` | 性能参数 | 0 | `0`：快速加载模型，`1`：慢速加载模型可避免OOM | 建议值：加载模型文件时，内存充裕使用`0`，内存紧张使用`1` |
-| `LVLLM_GPU_RESIDENT_MOE_EXPERTS` | GPU预填充参数 | 无 | 常驻GPU的MOE专家数量`64`: 每层64个专家|
 
  
 | 参数 | 示例值 | 说明 |

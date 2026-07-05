@@ -27,6 +27,7 @@ Note 1: x86 CPUs with AVX2 or higher instruction set and Nvidia GPU sm80 or high
 ## Version Changes
 
 ```bash
+2026-07-05: lvllm-v2.3.0 - Optimize GPU prefill speed, CPU AVX512 optimization, removed LVLLM_GPU_RESIDENT_MOE_EXPERTS
 2026-06-05: lvllm-v2.2.0 - Upgraded lk_moe module, added support for nvfp4, mxfp4 quantization types, added LVLLM_GPU_RESIDENT_MOE_EXPERTS, removed LVLLM_MOE_USE_WEIGHT, LVLLM_MOE_QUANT_ON_GPU
 2026-04-06: lvllm-v2.1.0 - Enhanced power saving effect with LK_POWER_SAVING=1, supports FP8+BF16+AWQ4bit hybrid MOE layer inference
 2026-03-22: lvllm-v2.0.0 - FP8 MoE models with INT4 expert quantization support layer-wise loading to reduce peak memory usage, LVLLM_ENABLE_MOE_LAYERWISE_LOAD=1
@@ -104,7 +105,6 @@ OMP_NUM_THREADS=44 \
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=2048 \
 LVLLM_GPU_PREFETCH_WINDOW=1 \
 LVLLM_GPU_RESIDENT_MOE_LAYERS=0-1,33-34 \
-LVLLM_GPU_RESIDENT_MOE_EXPERTS=64 \
 LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
 LVLLM_ENABLE_MOE_LAYERWISE_LOAD=1 \
 vllm serve \
@@ -141,7 +141,6 @@ vllm serve \
 | `LVLLM_GPU_PREFILL_MIN_BATCH_SIZE` | GPU Prefill Parameter | None | Minimum input length for GPU prefill `4096`: GPU prefill starts when input length reaches this value | Should not be set too small, set to 0 to disable GPU prefill |
 | `LK_POWER_SAVING` | CPU Power Saving | 0 | `1`: enable CPU power saving mode, `0`: disable | Recommended: `0` |
 | `LVLLM_ENABLE_NUMA_INTERLEAVE` | Performance Parameter | 0 | `0`: fast model loading, `1`: slow loading to avoid OOM | Recommended: use `0` if memory is sufficient, `1` if memory is tight |
-| `LVLLM_GPU_RESIDENT_MOE_EXPERTS` | GPU Prefill Parameter | None | Number of MOE experts resident on GPU `64`: 64 experts per layer |
 
 | Parameter | Example Value | Description |
 |-----------|--------------|-------------|

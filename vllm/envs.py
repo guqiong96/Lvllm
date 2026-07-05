@@ -250,7 +250,6 @@ if TYPE_CHECKING:
     LVLLM_GPU_RESIDENT_MOE_LAYERS: str | None = None
     LVLLM_GPU_PREFILL_MIN_BATCH_SIZE: int = 0
     LVLLM_GPU_PREFETCH_WINDOW: int = 1
-    LVLLM_GPU_RESIDENT_MOE_EXPERTS: int = 0
     VLLM_DEEPEP_BUFFER_SIZE_MB: int = 1024
     VLLM_DEEPEP_HIGH_THROUGHPUT_FORCE_INTRA_NODE: bool = False
     VLLM_DEEPEP_LOW_LATENCY_USE_MNNVL: bool = False
@@ -1886,9 +1885,6 @@ environment_variables: dict[str, Callable[[], Any]] = {
     "LVLLM_GPU_PREFETCH_WINDOW": lambda: int(
         os.getenv("LVLLM_GPU_PREFETCH_WINDOW", "3")
     ),
-    "LVLLM_GPU_RESIDENT_MOE_EXPERTS": lambda: int(
-        os.getenv("LVLLM_GPU_RESIDENT_MOE_EXPERTS", "0")
-    ),
     # Disables parallel execution of shared_experts via separate cuda stream
     "VLLM_DISABLE_SHARED_EXPERTS_STREAM": lambda: bool(
         int(os.getenv("VLLM_DISABLE_SHARED_EXPERTS_STREAM", "0"))
@@ -2160,7 +2156,6 @@ def compile_factors() -> dict[str, object]:
         "LVLLM_GPU_PREFILL_MIN_BATCH_SIZE",
         "LVLLM_GPU_PREFETCH_WINDOW",
         "LVLLM_ENABLE_NUMA_INTERLEAVE",
-        "LVLLM_GPU_RESIDENT_MOE_EXPERTS",
         "NO_COLOR",
     }
 
