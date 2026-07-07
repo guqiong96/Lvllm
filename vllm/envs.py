@@ -176,7 +176,7 @@ if TYPE_CHECKING:
     VLLM_TPU_MOST_MODEL_LEN: int | None = None
     VLLM_TPU_USING_PATHWAYS: bool = False
     VLLM_USE_DEEP_GEMM: bool = True
-    VLLM_MOE_USE_DEEP_GEMM: bool = True
+    VLLM_MOE_USE_DEEP_GEMM: bool = False
     VLLM_USE_DEEP_GEMM_E8M0: bool = True
     VLLM_USE_DEEP_GEMM_TMA_ALIGNED_SCALES: bool = True
     VLLM_DEEP_GEMM_WARMUP: Literal[
@@ -237,6 +237,12 @@ if TYPE_CHECKING:
     VLLM_NVTX_SCOPES_FOR_PROFILING: bool = False
     VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES: bool = True
     VLLM_OBJECT_STORAGE_SHM_BUFFER_NAME: str = "VLLM_OBJECT_STORAGE_SHM_BUFFER"
+    LVLLM_MOE_NUMA_ENABLED: bool = False
+    LVLLM_ENABLE_MOE_LAYERWISEISE_LOAD: bool = False
+    LVLLM_ENABLE_NUMA_INTERLEAVE: bool = False
+    LVLLM_GPU_RESIDENT_MOE_LAYERS: str | None = None
+    LVLLM_GPU_PREFILL_MIN_BATCH_SIZE: int = 0
+    LVLLM_GPU_PREFETCH_WINDOW: int = 1
     VLLM_DEEPEP_BUFFER_SIZE_MB: int = 1024
     VLLM_DEEPEP_HIGH_THROUGHPUT_FORCE_INTRA_NODE: bool = False
     VLLM_DEEPEP_LOW_LATENCY_USE_MNNVL: bool = False
@@ -1434,7 +1440,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
     "VLLM_USE_DEEP_GEMM": lambda: bool(int(os.getenv("VLLM_USE_DEEP_GEMM", "1"))),
     # Allow use of DeepGemm specifically for MoE fused ops (overrides only MoE).
     "VLLM_MOE_USE_DEEP_GEMM": lambda: bool(
-        int(os.getenv("VLLM_MOE_USE_DEEP_GEMM", "1"))
+        int(os.getenv("VLLM_MOE_USE_DEEP_GEMM", "0"))
     ),
     # Whether to use E8M0 scaling when DeepGEMM is used on Blackwell GPUs.
     "VLLM_USE_DEEP_GEMM_E8M0": lambda: bool(
@@ -1795,6 +1801,23 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # Debug workspace allocations.
     # logging of workspace resize operations.
     "VLLM_DEBUG_WORKSPACE": lambda: bool(int(os.getenv("VLLM_DEBUG_WORKSPACE", "0"))),
+    # Whether to enable NUMA for MOE.
+    "LVLLM_MOE_NUMA_ENABLED":
+    lambda: bool(int(os.getenv("LVLLM_MOE_NUMA_ENABLED", "0"))),
+    "LVLLM_ENABLE_MOE_LAYERWISEISE_LOAD": lambda: bool(int(os.getenv("LVLLM_ENABLE_MOE_LAYERWISEISE_LOAD", "0"))),
+    # Whether to enable NUMA interleaving for multiprocessing.
+    "LVLLM_ENABLE_NUMA_INTERLEAVE": lambda: bool(
+        int(os.getenv("LVLLM_ENABLE_NUMA_INTERLEAVE", "0"))
+    ),
+    "LVLLM_GPU_RESIDENT_MOE_LAYERS": lambda: os.environ.get("LVLLM_GPU_RESIDENT_MOE_LAYERS", None),
+    # Whether to enable GPU expert computation.
+    "LVLLM_GPU_PREFILL_MIN_BATCH_SIZE": lambda: int(
+        os.getenv("LVLLM_GPU_PREFILL_MIN_BATCH_SIZE", "0")
+    ),
+    # Prefetch window size for GPU expert computation.
+    "LVLLM_GPU_PREFETCH_WINDOW": lambda: int(
+        os.getenv("LVLLM_GPU_PREFETCH_WINDOW", "3")
+    ),
     # Disables parallel execution of shared_experts via separate cuda stream
     "VLLM_DISABLE_SHARED_EXPERTS_STREAM": lambda: bool(
         int(os.getenv("VLLM_DISABLE_SHARED_EXPERTS_STREAM", "0"))
@@ -2077,6 +2100,12 @@ def compile_factors() -> dict[str, object]:
         "VLLM_SKIP_MODEL_NAME_VALIDATION",
         "LOCAL_RANK",
         "CUDA_VISIBLE_DEVICES",
+        "LVLLM_MOE_NUMA_ENABLED",
+        "LVLLM_ENABLE_MOE_LAYERWISEISE_LOAD",
+        "LVLLM_GPU_RESIDENT_MOE_LAYERS",
+        "LVLLM_GPU_PREFILL_MIN_BATCH_SIZE",
+        "LVLLM_GPU_PREFETCH_WINDOW",
+        "LVLLM_ENABLE_NUMA_INTERLEAVE",
         "NO_COLOR",
     }
 
@@ -2125,3 +2154,165 @@ def compile_factors() -> dict[str, object]:
         factors[var] = normalize_value(os.getenv(var))
 
     return factors
+
+def is_lk_moe_feature_enabled() -> bool:
+    return environment_variables["LVLLM_MOE_NUMA_ENABLED"]()
+
+def is_numa_interleave_enabled() -> bool:
+    return environment_variables["LVLLM_ENABLE_NUMA_INTERLEAVE"]()
+ 
+def is_lk_moe_use_gpu_prefill() -> bool:
+    return environment_variables["LVLLM_GPU_PREFILL_MIN_BATCH_SIZE"]() > 0
+
+def disable_lk_moe_gpu_prefill() -> int:
+    origin_value = environment_variables["LVLLM_GPU_PREFILL_MIN_BATCH_SIZE"]()
+    environment_variables["LVLLM_GPU_PREFILL_MIN_BATCH_SIZE"] = lambda: 0
+    return origin_value
+
+def enable_lk_moe_gpu_prefill(value: int) -> int:
+    environment_variables["LVLLM_GPU_PREFILL_MIN_BATCH_SIZE"] = lambda: value
+    return value
+
+_is_in_profile_run = True
+
+def is_in_profile_run(): 
+    return _is_in_profile_run
+
+def set_profile_run(status: bool): 
+    global _is_in_profile_run
+    _is_in_profile_run = status
+    
+def get_gpu_prefill_min_batch_size() -> int:
+    return environment_variables["LVLLM_GPU_PREFILL_MIN_BATCH_SIZE"]() 
+
+ 
+
+def get_gpu_prefetch_window() -> int:
+    return environment_variables["LVLLM_GPU_PREFETCH_WINDOW"]()
+ 
+
+def extract_layer_index(layer_name: str, num_attn_module: int = 1) -> int:
+    """
+    Extract the layer index from the module name.
+    Examples:
+    - "encoder.layers.0" -> 0
+    - "encoder.layers.1.self_attn" -> 1
+    - "2.self_attn" -> 2
+    - "model.encoder.layers.0.sub.1" -> ValueError if num_attn_module == 1
+    """
+    subnames = layer_name.split(".")
+    int_vals: list[int] = []
+    for subname in subnames:
+        try:
+            int_vals.append(int(subname))
+        except ValueError:
+            continue
+    if num_attn_module == 1 or "attn" not in layer_name:
+        assert len(int_vals) == 1, (
+            f"layer name {layer_name} should only contain one integer"
+        )
+
+        return int_vals[0]
+    else:
+        assert len(int_vals) <= 2, (
+            f"layer name {layer_name} should contain most two integers"
+        )
+        layer_index = (
+            int_vals[0] * num_attn_module + int_vals[1]
+            if len(int_vals) == 2
+            else int_vals[0]
+        )
+        return layer_index
+
+def is_lk_moe_mtp_layer(layer_name: str) -> bool:
+    return layer_name.startswith("mtp.")
+    
+def is_lk_moe_gpu_prefill_layer(layer_name: str) -> bool:
+    return is_lk_moe_use_gpu_prefill() and not is_lk_moe_gpu_resident_layer(layer_name) and not is_lk_moe_mtp_layer(layer_name)
+    
+def is_lk_moe_cpu_layer(layer_name: str)-> bool:
+
+    return is_lk_moe_feature_enabled() and not is_lk_moe_gpu_resident_layer(layer_name) and not is_lk_moe_gpu_prefill_layer(layer_name) and not is_lk_moe_mtp_layer(layer_name)
+    
+def is_lk_moe_gpu_resident_layer(layer_name: str) -> bool:
+    
+    if not is_lk_moe_feature_enabled():
+        return True
+    
+    if is_lk_moe_mtp_layer(layer_name):
+        return True
+    
+    layer_id = extract_layer_index(layer_name)
+    
+  
+    disabled_layers_env = environment_variables.get("LVLLM_GPU_RESIDENT_MOE_LAYERS", "")()
+    if not disabled_layers_env:
+        return False   
+    
+    disabled_layers_env = disabled_layers_env.strip()
+    
+    disabled_layers = set()
+    for part in disabled_layers_env.split(','):
+        part = part.strip()
+        if not part:
+            continue
+        
+        if '-' in part:
+            try:
+                start, end = map(int, part.split('-')) 
+                if start <= end:
+                    disabled_layers.update(range(start, end + 1))
+            except ValueError: 
+                continue
+        else:
+            try:
+                disabled_layers.add(int(part))
+            except ValueError: 
+                continue
+     
+    return layer_id in disabled_layers
+
+def enabled_layerwise_load() -> bool:
+    return environment_variables["LVLLM_ENABLE_MOE_LAYERWISEISE_LOAD"]() 
+
+      
+import torch
+
+def check_tensor_stats(tensor, name, threshold=1e6):
+    
+    if torch.cuda.is_current_stream_capturing():
+        return 
+    with torch.no_grad(): 
+        info = {
+            'name': name,
+            'dtype': str(tensor.dtype),
+            'shape': tensor.shape,
+            'device': tensor.device,
+        }
+         
+        if tensor.is_floating_point():
+            try:
+                info.update({
+                    'mean': float(tensor.mean()),
+                    'std': float(tensor.std()),
+                    'min': float(tensor.min()),
+                    'max': float(tensor.max()),
+                    'has_nan': bool(tensor.isnan().any()),
+                    'has_inf': bool(tensor.isinf().any()),
+                })
+            except Exception as e:
+                info['error'] = f"Failed to compute stats: {e}"
+         
+        elif tensor.dtype in [torch.int8, torch.int16, torch.int32, torch.int64,
+                              torch.uint8, torch.bool]:
+            info.update({
+                'min': int(tensor.min()),
+                'max': int(tensor.max()),
+            })
+         
+        if tensor.is_floating_point() and 'max' in info:
+            if abs(info['max']) > threshold:
+                info['warning'] = f"Extreme value: {info['max']:.2e}"
+        
+        
+        return info

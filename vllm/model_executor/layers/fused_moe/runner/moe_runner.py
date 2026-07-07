@@ -548,29 +548,67 @@ class MoERunner(MoERunnerInterface):
             shared_experts_input, SharedExpertsOrder.NO_OVERLAP
         )
 
-        if self.routed_experts.quant_method.is_monolithic:
-            # Monolithic kernels: pass router_logits to routed_experts
-            fused_out = self.routed_experts.forward_monolithic(
-                x=hidden_states,
-                router_logits=router_logits,
-                input_ids=input_ids,
-            )
-        else:
-            # Modular kernels: select experts first, then call routed_experts
-            topk_weights, topk_ids = self.router.select_experts(
+        topk_weights, topk_ids = self.router.select_experts(
                 hidden_states=hidden_states,
                 router_logits=router_logits,
                 topk_indices_dtype=self._quant_method.topk_indices_dtype,
                 input_ids=input_ids,
             )
-
-            fused_out = self.routed_experts.forward_modular(
-                x=hidden_states,
-                topk_weights=topk_weights,
-                topk_ids=topk_ids,
-                shared_experts=self._shared_experts,
-                shared_experts_input=shared_experts_input,
-            )
+        local_topk_ids = self.routed_experts.global_to_local_expert_ids(topk_ids) if self.routed_experts.use_ep else topk_ids
+ 
+        if self.routed_experts.quant_method.is_monolithic:
+            if self.routed_experts.is_gpu_resident_layer:
+                fused_out = self.routed_experts.forward_monolithic(
+                    x=hidden_states,
+                    router_logits=router_logits,
+                    input_ids=input_ids,
+                )
+            elif torch.cuda.is_current_stream_capturing():
+                fused_out = self.routed_experts._cpu_decode(
+                    hidden_states,
+                    topk_weights, 
+                    local_topk_ids, 
+                )
+            elif self.routed_experts.is_gpu_prefill_layer and self.routed_experts.should_use_gpu_prefill(hidden_states):   
+                fused_out = self.routed_experts._gpu_prefill(
+                    hidden_states,
+                    topk_weights, 
+                    local_topk_ids,
+                )
+            else:
+                fused_out = self.routed_experts._cpu_prefill(
+                    hidden_states,
+                    topk_weights, 
+                    local_topk_ids,
+                )
+                  
+        else:
+            if self.routed_experts.is_gpu_resident_layer:
+                fused_out = self.routed_experts.forward_modular(
+                    x=hidden_states,
+                    topk_weights=topk_weights,
+                    topk_ids=topk_ids,
+                    shared_experts=self._shared_experts,
+                    shared_experts_input=shared_experts_input,
+                )
+            elif torch.cuda.is_current_stream_capturing():
+                fused_out = self.routed_experts._cpu_decode(
+                    hidden_states,
+                    topk_weights, 
+                    local_topk_ids, 
+                )
+            elif self.routed_experts.is_gpu_prefill_layer and self.routed_experts.should_use_gpu_prefill(hidden_states):   
+                fused_out = self.routed_experts._gpu_prefill(
+                    hidden_states,
+                    topk_weights, 
+                    local_topk_ids,
+                )
+            else:
+                fused_out = self.routed_experts._cpu_prefill(
+                    hidden_states,
+                    topk_weights, 
+                    local_topk_ids,
+                )
 
         self._maybe_apply_shared_experts(
             shared_experts_input,

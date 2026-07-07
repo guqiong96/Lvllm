@@ -533,6 +533,11 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
         params_dtype: torch.dtype,
         **extra_weight_attrs,
     ):
+        from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
+        from vllm.platforms import current_platform
+        device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
+        if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
+            device = "cpu"
         self.num_experts = num_experts
         weight_dtype = torch.uint8
         scale_dtype = torch.uint8
@@ -550,6 +555,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
                 2 * intermediate_size_per_partition,
                 hidden_size // 2,
                 dtype=weight_dtype,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -562,6 +568,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
                 2 * intermediate_size_per_partition,
                 hidden_size // mxfp4_block,
                 dtype=scale_dtype,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -576,6 +583,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
                 hidden_size,
                 intermediate_size_per_partition // 2,
                 dtype=weight_dtype,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -588,6 +596,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
                 hidden_size,
                 intermediate_size_per_partition // mxfp4_block,
                 dtype=scale_dtype,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -601,6 +610,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
                     num_experts,
                     2 * intermediate_size_per_partition,
                     dtype=torch.bfloat16,
+                    device=device,
                 ),
                 requires_grad=False,
             )
@@ -612,6 +622,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
                     num_experts,
                     hidden_size,
                     dtype=torch.bfloat16,
+                    device=device,
                 ),
                 requires_grad=False,
             )
@@ -722,6 +733,9 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
             )
 
     def process_weights_after_loading(self, layer):
+        from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
+        if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
+            return
         w13 = layer.w13_weight
         w2 = layer.w2_weight
         w13_scale = layer.w13_weight_scale

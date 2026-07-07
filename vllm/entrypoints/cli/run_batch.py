@@ -28,7 +28,7 @@ class RunBatchSubcommand(CLISubcommand):
         from vllm.entrypoints.openai.run_batch import main as run_batch_main
 
         logger.info(
-            "vLLM batch processing API version %s", importlib.metadata.version("vllm")
+            "vLLM batch processing API version %s", importlib.metadata.version("lvllm")
         )
         logger.info("args: %s", args)
 

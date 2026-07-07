@@ -14,7 +14,7 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "vllm"
+name = "lvllm"
 authors = [{name = "vLLM Team"}]
 license = "Apache-2.0"
 license-files = ["LICENSE"]
