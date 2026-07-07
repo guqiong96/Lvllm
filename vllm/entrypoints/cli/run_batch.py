@@ -7,7 +7,7 @@ import importlib.metadata
 import typing
 
 from vllm.entrypoints.cli.types import CLISubcommand
-from vllm.entrypoints.utils import VLLM_SUBCMD_PARSER_EPILOG
+from vllm.entrypoints.serve.utils.api_utils import VLLM_SUBCMD_PARSER_EPILOG
 from vllm.logger import init_logger
 
 if typing.TYPE_CHECKING:
@@ -28,7 +28,7 @@ class RunBatchSubcommand(CLISubcommand):
         from vllm.entrypoints.openai.run_batch import main as run_batch_main
 
         logger.info(
-            "vLLM batch processing API version %s", importlib.metadata.version("lvllm")
+            "vLLM batch processing API version %s", importlib.metadata.version("vllm")
         )
         logger.info("args: %s", args)
 
