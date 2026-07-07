@@ -340,10 +340,10 @@ def select_fp8_moe_backend(
             return _return_or_raise(
                 backend, config, weight_key, activation_key, activation_format
             )
-    else:
-        if not envs.VLLM_USE_DEEP_GEMM or not envs.VLLM_MOE_USE_DEEP_GEMM:
-            AVAILABLE_BACKENDS.remove(Fp8MoeBackend.DEEPGEMM)
-            AVAILABLE_BACKENDS.remove(Fp8MoeBackend.BATCHED_DEEPGEMM)
+    
+    if not envs.VLLM_USE_DEEP_GEMM or not envs.VLLM_MOE_USE_DEEP_GEMM:
+        AVAILABLE_BACKENDS.remove(Fp8MoeBackend.DEEPGEMM)
+        AVAILABLE_BACKENDS.remove(Fp8MoeBackend.BATCHED_DEEPGEMM)
         
         
 
