@@ -27,8 +27,9 @@ Lvllm使用最新的vLLM源码，重新设计实现了MOE模型混合推理模�
 ## 版本变更
  
 ```bash
+2026-07-08: lvllm-v2.3.2 - 新增 ModelOpt W4A16 NVFP4 量化类型支持
 2026-07-05: lvllm-v2.3.0 - 优化GPU预填充速度，CPU AVX512优化，取消LVLLM_GPU_RESIDENT_MOE_EXPERTS
-2026-06-05: lvllm-v2.2.0 - 升级lk_moe模块, 支持nvfp4, mxfp4量化类型，增加LVLLM_GPU_RESIDENT_MOE_EXPERTS, 取消LVLLM_MOE_USE_WEIGHT、LVLLM_MOE_QUANT_ON_GPU
+2026-06-05: lvllm-v2.2.0 - 升级lk_moe模块, 新增支持nvfp4, mxfp4量化类型，增加LVLLM_GPU_RESIDENT_MOE_EXPERTS, 取消LVLLM_MOE_USE_WEIGHT、LVLLM_MOE_QUANT_ON_GPU
 2026-04-06: lvllm-v2.1.0 - 增强使用LK_POWER_SAVING=1节能效果，支持FP8+BF16+AWQ4bit的混合MOE层推理
 2026-03-22: lvllm-v2.0.0 - FP8 MoE模型使用INT4专家量化时支持逐层加载，减少峰值内存占用，LVLLM_ENABLE_MOE_LAYERWISEISE_LOAD=1
 2026-03-19: lvllm-v1.9.10 - 修复已知问题，支持新的moe模型类型[没有gate_proj], 例如：NVIDIA-Nemotron-3-Super-120B-A12B-BF16
@@ -91,13 +92,13 @@ vLLM已验证的大部分原版MOE模型
 | bfloat16 | bfloat16/float16| 
 | float16 | bfloat16/float16| 
 | fp8模型 | fp8 | 
-| nvfp4模型 | nvfp4 | 
+| nvfp4模型 | NVFP4 and ModelOpt W4A16 NVFP4 | 
 | mxfp4模型 <sup>注1</sup>| mxfp4 | 
 | awq 4bit对称量化模型 <sup>注1</sup>| w4a16 | 
 
 注1：https://hf-mirror.com/cyankiwi 提供AWQ 4bit对称量化模型
 注2：deepseek v4 需使用专用版本：
-https://github.com/guqiong96/Lvllmds4/releases/tag/lvllmds4-v2.2.1
+https://github.com/guqiong96/Lvllmds4/releases
 
  
 
@@ -197,7 +198,8 @@ sudo dnf install numactl-devel        # Rocky Linux
 ### 3. 安装Lvllm
 
 ```bash 
-pip install https://github.com/guqiong96/Lvllm/releases/download/lvllm-v2.2.1/lvllm-2.2.1-cp312-cp312-manylinux_2_34_x86_64.whl
+pip install https://github.com/guqiong96/Lvllm/releases/download/lvllm-v2.3.2/lvllm-v2.3.2-cp312-cp312-manylinux_2_34_x86_64.whl
+# 最新版本查看https://github.com/guqiong96/Lvllm/releases
 ```
 
 ## 从源码编译安装Lvllm

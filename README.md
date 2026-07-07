@@ -27,6 +27,7 @@ Note 1: x86 CPUs with AVX2 or higher instruction set and Nvidia GPU sm80 or high
 ## Version Changes
 
 ```bash
+2026-07-08: lvllm-v2.3.2 - add ModelOpt W4A16 NVFP4 quantization types support
 2026-07-05: lvllm-v2.3.0 - Optimize GPU prefill speed, CPU AVX512 optimization, removed LVLLM_GPU_RESIDENT_MOE_EXPERTS
 2026-06-05: lvllm-v2.2.0 - Upgraded lk_moe module, added support for nvfp4, mxfp4 quantization types, added LVLLM_GPU_RESIDENT_MOE_EXPERTS, removed LVLLM_MOE_USE_WEIGHT, LVLLM_MOE_QUANT_ON_GPU
 2026-04-06: lvllm-v2.1.0 - Enhanced power saving effect with LK_POWER_SAVING=1, supports FP8+BF16+AWQ4bit hybrid MOE layer inference
@@ -87,13 +88,13 @@ Unlisted original MOE models from Qwen3, GLM, and MiniMax series are theoretical
 | bfloat16 | bfloat16/float16 |
 | float16 | bfloat16/float16 |
 | fp8 model | fp8 |
-| nvfp4 model | nvfp4 |
+| nvfp4 model | NVFP4 and ModelOpt W4A16 NVFP4 |
 | mxfp4 model <sup>Note 1</sup> | mxfp4 |
 | awq 4bit symmetric quantization model <sup>Note 1</sup> | w4a16 |
 
 Note 1: AWQ 4bit symmetric quantization models are available at https://hf-mirror.com/cyankiwi
 Note 2: deepseek v4 requires a dedicated version:
-https://github.com/guqiong96/Lvllmds4/releases/tag/lvllmds4-v2.2.1
+https://github.com/guqiong96/Lvllmds4/releases
 
 ## Run Command Reference
 
@@ -184,7 +185,8 @@ sudo dnf install numactl-devel        # Rocky Linux
 ### 3. Install LvLLM
 
 ```bash
-pip install https://github.com/guqiong96/Lvllm/releases/download/lvllm-v2.2.1/lvllm-2.2.1-cp312-cp312-manylinux_2_34_x86_64.whl
+pip install https://github.com/guqiong96/Lvllm/releases/download/lvllm-v2.3.2/lvllm-v2.3.2-cp312-cp312-manylinux_2_34_x86_64.whl
+# check the latest version at: https://github.com/guqiong96/Lvllm/releases
 ```
 
 ## Compile and Install Lvllm

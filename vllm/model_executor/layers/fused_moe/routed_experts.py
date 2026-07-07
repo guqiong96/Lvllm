@@ -1221,13 +1221,14 @@ class RoutedExperts(PluggableLayer):
         from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe.compressed_tensors_moe_w4a4_nvfp4 import CompressedTensorsW4A4Nvfp4MoEMethod
         from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe.compressed_tensors_moe_w4a4_mxfp4 import CompressedTensorsW4A4Mxfp4MoEMethod
         from vllm.model_executor.layers.quantization.modelopt import ModelOptNvFp4FusedMoE
+        from vllm.model_executor.layers.quantization.modelopt import ModelOptMxFp8FusedMoE
         from vllm.model_executor.layers.quantization.mxfp4 import Mxfp4MoEMethod
         if (isinstance(self.quant_method, CompressedTensorsWNA16MarlinMoEMethod) or isinstance(self.quant_method, CompressedTensorsWNA16MoEMethod)):
     
             self._process_wna16(self.quant_method.strategy)
             return True 
             
-        if isinstance(self.quant_method, Fp8MoEMethod):
+        if isinstance(self.quant_method, Fp8MoEMethod) or isinstance(self.quant_method, ModelOptMxFp8FusedMoE):
             self._process_fp8(self.quant_method.block_quant)
             return True
             
@@ -1240,7 +1241,8 @@ class RoutedExperts(PluggableLayer):
             return True
 
         if isinstance(self.quant_method, CompressedTensorsW4A4Nvfp4MoEMethod) or isinstance(self.quant_method, ModelOptNvFp4FusedMoE):
-            self._process_nvfp4()
+            need_reciprocal_global_scale = isinstance(self.quant_method, CompressedTensorsW4A4Nvfp4MoEMethod)
+            self._process_nvfp4(need_reciprocal_global_scale)
             return True
             
         if isinstance(self.quant_method, CompressedTensorsW4A4Mxfp4MoEMethod) or isinstance(self.quant_method, Mxfp4MoEMethod):
@@ -1277,7 +1279,8 @@ class RoutedExperts(PluggableLayer):
                 "w13_weight_packed", "w2_weight_packed", 
                 "w13_weight_scale", "w2_weight_scale", 
                 "w13_weight_scale_inv", "w2_weight_scale_inv",
-                "w13_weight_global_scale", "w2_weight_global_scale"]
+                "w13_weight_global_scale", "w2_weight_global_scale",
+                "w13_weight_global_scale_2", "w2_weight_global_scale_2"]
         for weight in weights:
             if hasattr(self, weight):
                 delattr(self, weight)
@@ -1460,21 +1463,22 @@ class RoutedExperts(PluggableLayer):
         
         
     
-    def _process_nvfp4(self):  
+    def _process_nvfp4(self, need_reciprocal_global_scale=False):  
         
-        w13_weight = self.w13_weight_packed
-        w2_weight = self.w2_weight_packed
+        w13_weight = self.w13_weight_packed if hasattr(self, "w13_weight_packed") else self.w13_weight
+        w2_weight = self.w2_weight_packed if hasattr(self, "w2_weight_packed") else self.w2_weight
          
         w13_weight_scale = self.w13_weight_scale
         w2_weight_scale = self.w2_weight_scale
-        w13_weight_global_scale = self.w13_weight_global_scale
-        w2_weight_global_scale = self.w2_weight_global_scale
+        w13_weight_global_scale = self.w13_weight_global_scale if hasattr(self, "w13_weight_global_scale") else self.w13_weight_scale_2
+        w2_weight_global_scale = self.w2_weight_global_scale if hasattr(self, "w2_weight_global_scale") else self.w2_weight_scale_2
          
          
         groupN, groupK = self._get_quant_params(w13_weight, w13_weight_scale, 2)
         
-        w13_weight_global_scale = 1.0 / w13_weight_global_scale
-        w2_weight_global_scale = 1.0 / w2_weight_global_scale
+        if need_reciprocal_global_scale:
+            w13_weight_global_scale = 1.0 / w13_weight_global_scale
+            w2_weight_global_scale = 1.0 / w2_weight_global_scale
          
         w13_weight_ptr = w13_weight.contiguous().data_ptr()
         w2_weight_ptr = w2_weight.contiguous().data_ptr()
