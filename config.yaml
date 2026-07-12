@@ -1,4 +1,4 @@
-model: "/home/guqiong/Models/Qwen3.6-35B-A3B-W4A16-NVFP4"
+model: "/home/guqiong/Models/Qwen3.6-35B-A3B-FP8"
 host: "0.0.0.0"
 port: 8070
 tensor-parallel-size: 2
@@ -6,11 +6,11 @@ max-model-len: 66000
 gpu-memory-utilization: 0.95
 trust-remote-code: true
 tokenizer-mode: "auto"
-served-model-name: "Qwen3.6-35B-A3B-W4A16-NVFP4"
+served-model-name: "Qwen3.6-35B-A3B-FP8"
 compilation_config.cudagraph_mode: "FULL_DECODE_ONLY"
 enable_prefix_caching: true
 enable-chunked-prefill: true
-max_num_batched_tokens: 16384
+max_num_batched_tokens: 36000
 dtype: "bfloat16"
 max_num_seqs: 2
 compilation_config.mode: "VLLM_COMPILE"
@@ -18,7 +18,7 @@ enable-auto-tool-choice: true
 # mamba-ssm-cache-dtype: "float16"
 # reasoning-parser: "super_v3"
 # kv_cache_dtype: "bfloat16"  
-# speculative-config: '{"method":"qwen3_next_mtp","num_speculative_tokens":3}'
+# speculative-config: '{"method":"qwen3_next_mtp","num_speculative_tokens":7}'
 # tool-call-parser: "minimax_m2"
 # reasoning-parser: "minimax_m2_append_think"
 # tool-call-parser: glm47
@@ -34,3 +34,6 @@ tool-call-parser: "qwen3_coder"
 # reasoning-parser: "nemotron_v3"
 # reasoning-parser: "gemma4"
 # tool-call-parser: "gemma4"
+# block-size: 128
+# tool-call-parser: minimax_m3 
+# reasoning-parser: minimax_m3 
