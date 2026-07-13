@@ -58,9 +58,12 @@ class ModelArchConfigConvertorBase:
                 if qk_rope_head_dim and qk_nope_head_dim:
                     return qk_rope_head_dim + qk_nope_head_dim
 
-        # NOTE: Some configs may set head_dim=None in the config
-        if getattr(self.hf_text_config, "head_dim", None) is not None:
-            return self.hf_text_config.head_dim
+        # NOTE: Some config classes may set head_dim=None or materialize a missing
+        # head_dim as 0 (for example, DeepseekVLV2TextConfig).
+        if (
+            head_dim := getattr(self.hf_text_config, "head_dim", None)
+        ) is not None and head_dim > 0:
+            return head_dim
 
         # NOTE: Some models (such as PLaMo2.1) use `hidden_size_per_head`
         if getattr(self.hf_text_config, "hidden_size_per_head", None) is not None:
@@ -268,6 +271,7 @@ class ModelArchConfigConvertorBase:
             "pangu_ultra_moe",
             "pangu_ultra_moe_mtp",
             "bailing_hybrid",
+            "bailing_hybrid_mtp",
         ):
             # check is deepseek_v4 model
             if hasattr(self.hf_text_config, "compress_ratios"):
@@ -307,6 +311,12 @@ class ModelArchConfigConvertorBase:
             return False
         return self.hf_config.model_type in MM_PREFIX_LM_MODELS
 
+    def rswa_window(self) -> int | None:
+        value = getattr(self.hf_config, "rswa_window", None)
+        if value is None:
+            return None
+        return int(value)
+
     def derive_max_model_len_and_key(self) -> tuple[float, str | None]:
         derived_max_model_len = float("inf")
         possible_keys = [
@@ -336,7 +346,7 @@ class ModelArchConfigConvertorBase:
                     max_len_key = key
                 derived_max_model_len = min(derived_max_model_len, max_len)
 
-        # For Command-R / Cohere, Cohere2 / Aya Vision models
+        # For Command-R / Cohere, Cohere2 models
         if tmp_max_len := getattr(self.hf_text_config, "model_max_length", None):
             max_len_key = "model_max_length"
             derived_max_model_len = tmp_max_len
@@ -357,6 +367,7 @@ class ModelArchConfigConvertorBase:
             quantization_config=self.get_quantization_config(),
             is_deepseek_mla=self.is_deepseek_mla(),
             is_mm_prefix_lm=self.is_mm_prefix_lm(),
+            rswa_window=self.rswa_window(),
             derived_max_model_len_and_key=self.derive_max_model_len_and_key(),
         )
 
@@ -529,6 +540,11 @@ class Qwen3NextMTPModelArchConfigConvertor(ModelArchConfigConvertorBase):
         return getattr(self.hf_text_config, "num_nextn_predict_layers", 0)
 
 
+class BailingHybridMTPModelArchConfigConvertor(ModelArchConfigConvertorBase):
+    def get_num_hidden_layers(self) -> int:
+        return getattr(self.hf_text_config, "num_nextn_predict_layers", 0)
+
+
 class Qwen3_5MTPModelArchConfigConvertor(ModelArchConfigConvertorBase):
     def get_num_hidden_layers(self) -> int:
         return getattr(self.hf_text_config, "mtp_num_hidden_layers", 0)
@@ -623,6 +639,7 @@ class MossAudioModelArchConfigConvertor(ModelArchConfigConvertorBase):
 
 # hf_config.model_type -> convertor class
 MODEL_ARCH_CONFIG_CONVERTORS = {
+    "bailing_hybrid_mtp": BailingHybridMTPModelArchConfigConvertor,
     "cohere_asr": CohereAsrModelArchConfigConvertor,
     "dbrx": DbrxModelArchConfigConvertor,
     "deepseek_mtp": DeepSeekMTPModelArchConfigConvertor,
