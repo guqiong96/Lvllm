@@ -1444,8 +1444,10 @@ class RoutedExperts(PluggableLayer):
         self.lk_moe_config.groupN = groupN
         self.lk_moe_config.groupK = groupK
         self.lk_moe_config.activation_type = self.activation_type
-        self.lk_moe_config.swiglu_alpha = self.swiglu_alpha
-        self.lk_moe_config.swiglu_limit = self.swiglu_limit
+        if self.swiglu_alpha is not None:
+            self.lk_moe_config.swiglu_alpha = self.swiglu_alpha 
+        if self.swiglu_limit is not None:
+            self.lk_moe_config.swiglu_limit = self.swiglu_limit
 
         # no global scale
         self.lk_moe = lk_moe.MOE_WNA16(
@@ -1512,8 +1514,10 @@ class RoutedExperts(PluggableLayer):
         self.lk_moe_config.groupN = groupN
         self.lk_moe_config.groupK = groupK
         self.lk_moe_config.activation_type = self.activation_type
-        self.lk_moe_config.swiglu_alpha = self.swiglu_alpha
-        self.lk_moe_config.swiglu_limit = self.swiglu_limit
+        if self.swiglu_alpha is not None:
+            self.lk_moe_config.swiglu_alpha = self.swiglu_alpha 
+        if self.swiglu_limit is not None:
+            self.lk_moe_config.swiglu_limit = self.swiglu_limit
 
         # no global scale
         self.lk_moe = lk_moe.MOE_FP8(
@@ -1550,8 +1554,10 @@ class RoutedExperts(PluggableLayer):
         self.lk_moe_config.group_min_len = 10
         self.lk_moe_config.group_max_len = self.max_num_group_batch_size
         self.lk_moe_config.activation_type = self.activation_type
-        self.lk_moe_config.swiglu_alpha = self.swiglu_alpha
-        self.lk_moe_config.swiglu_limit = self.swiglu_limit
+        if self.swiglu_alpha is not None:
+            self.lk_moe_config.swiglu_alpha = self.swiglu_alpha 
+        if self.swiglu_limit is not None:
+            self.lk_moe_config.swiglu_limit = self.swiglu_limit
         
         # no scale
         self.lk_moe = lk_moe.MOE_BF16(
@@ -1609,8 +1615,10 @@ class RoutedExperts(PluggableLayer):
         self.lk_moe_config.groupN = groupN
         self.lk_moe_config.groupK = groupK
         self.lk_moe_config.activation_type = self.activation_type
-        self.lk_moe_config.swiglu_alpha = self.swiglu_alpha
-        self.lk_moe_config.swiglu_limit = self.swiglu_limit
+        if self.swiglu_alpha is not None:
+            self.lk_moe_config.swiglu_alpha = self.swiglu_alpha 
+        if self.swiglu_limit is not None:
+            self.lk_moe_config.swiglu_limit = self.swiglu_limit
         
          
         self.lk_moe = lk_moe.MOE_NVFP4(
@@ -1658,8 +1666,10 @@ class RoutedExperts(PluggableLayer):
         self.lk_moe_config.groupN = groupN
         self.lk_moe_config.groupK = groupK
         self.lk_moe_config.activation_type = self.activation_type
-        self.lk_moe_config.swiglu_alpha = self.swiglu_alpha
-        self.lk_moe_config.swiglu_limit = self.swiglu_limit
+        if self.swiglu_alpha is not None:
+            self.lk_moe_config.swiglu_alpha = self.swiglu_alpha 
+        if self.swiglu_limit is not None:
+            self.lk_moe_config.swiglu_limit = self.swiglu_limit
 
         # no global scale
         self.lk_moe = lk_moe.MOE_MXFP4(
