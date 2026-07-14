@@ -421,7 +421,7 @@ jiter==0.15.0
     # via
     #   anthropic
     #   openai
-jiwer==3.0.5
+jiwer==4.0.0
     # via -r requirements/test/cuda.in
 jmespath==1.0.1
     # via
