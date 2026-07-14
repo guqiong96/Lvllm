@@ -759,7 +759,7 @@ peft==0.18.1
     # via -r requirements/test/cuda.in
 perceptron==0.1.4
     # via -r requirements/test/cuda.in
-perf-analyzer==0.1.0
+perf-analyzer==2.60.0
     # via genai-perf
 pillow==10.4.0
     # via
