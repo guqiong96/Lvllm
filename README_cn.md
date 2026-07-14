@@ -2,6 +2,8 @@
 
 LvLLM是vllm的特别扩展，充分利用CPU和GPU计算资源，高效的GPU并行+NUMA并行架构，适用于MOE模型混合推理。
 
+> **核心引擎：** 实际的混合推理功能——包括 CPU-GPU 协同计算、NUMA 感知调度、专家权重管理以及量化内核执行——完全由高度优化的 MOE 混合推理引擎 **[lk_moe](https://pypi.org/project/lk-moe/)** 提供。在 LvLLM（用于 vLLM）和 [Lsglang](https://github.com/guqiong96/Lsglang)（用于 sglang）中，每个 MOE 层可灵活选择原始 GPU 计算路径或调用 lk_moe 进行混合推理。针对 DeepSeek V4（SM120 架构），还提供了特化版本 [Lvllmds4](https://github.com/guqiong96/Lvllmds4)。
+
 ## 系统特性
 
 - **GPU + NUMA 双并行**: 支持CPU-GPU混合解码、CPU-GPU混合预填充、GPU预填充三种计算方式
@@ -198,7 +200,7 @@ sudo dnf install numactl-devel        # Rocky Linux
 ### 3. 安装Lvllm
 
 ```bash 
-pip install https://github.com/guqiong96/Lvllm/releases/download/lvllm-v2.3.2/lvllm-v2.3.2-cp312-cp312-manylinux_2_34_x86_64.whl
+pip install https://github.com/guqiong96/Lvllm/releases/download/lvllm-v2.3.4/lvllm-v2.3.4-cp312-cp312-manylinux_2_34_x86_64.whl
 # 最新版本查看https://github.com/guqiong96/Lvllm/releases
 ```
 
@@ -209,7 +211,10 @@ git clone https://github.com/guqiong96/Lvllm.git
 cd Lvllm
 pip install setuptools_scm setuptools_rust
 pip install torchaudio triton torchvision torch==2.11.0
-VLLM_VERSION_OVERRIDE="2.2.1" CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
+VLLM_VERSION_OVERRIDE="2.3.4" CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
+
+## if you want to build for MiniMax-M3, you need to set the following variable
+VLLM_USE_RUST_FRONTEND=1
 ```
  
 ## 优化

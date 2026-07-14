@@ -2,6 +2,8 @@
 
 LvLLM is a special extension of vLLM that fully utilizes CPU and GPU computing resources. It features an efficient GPU parallel + NUMA parallel architecture, suitable for MOE model hybrid inference.
 
+> **Core Engine:** The actual hybrid inference functionality—including CPU-GPU collaborative computation, NUMA-aware scheduling, expert weight management, and quantization kernel execution—is powered entirely by **[lk_moe](https://pypi.org/project/lk-moe/)**, a highly optimized MOE hybrid inference engine. Within LvLLM (for vLLM) and [Lsglang](https://github.com/guqiong96/Lsglang) (for sglang), each MOE layer can flexibly choose between the original GPU computation path or invoke lk_moe for hybrid inference. For DeepSeek V4 (SM120 architecture), a specialized version [Lvllmds4](https://github.com/guqiong96/Lvllmds4) is also available.
+
 ## System Features
 
 - **GPU + NUMA Dual Parallel**: Supports three computing modes: CPU-GPU hybrid decoding, CPU-GPU hybrid prefill, and GPU prefill
@@ -185,7 +187,7 @@ sudo dnf install numactl-devel        # Rocky Linux
 ### 3. Install LvLLM
 
 ```bash
-pip install https://github.com/guqiong96/Lvllm/releases/download/lvllm-v2.3.2/lvllm-v2.3.2-cp312-cp312-manylinux_2_34_x86_64.whl
+pip install https://github.com/guqiong96/Lvllm/releases/download/lvllm-v2.3.4/lvllm-v2.3.4-cp312-cp312-manylinux_2_34_x86_64.whl
 # check the latest version at: https://github.com/guqiong96/Lvllm/releases
 ```
 
@@ -196,7 +198,10 @@ git clone https://github.com/guqiong96/Lvllm.git
 cd Lvllm
 pip install setuptools_scm setuptools_rust
 pip install torchaudio triton torchvision torch==2.11.0
-VLLM_VERSION_OVERRIDE="2.2.1" CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
+VLLM_VERSION_OVERRIDE="2.3.4" CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
+
+## if you want to build for MiniMax-M3, you need to set the following variable
+VLLM_USE_RUST_FRONTEND=1
 ```
 
 ## Optimization

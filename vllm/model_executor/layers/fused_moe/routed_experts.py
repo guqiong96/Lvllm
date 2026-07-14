@@ -126,7 +126,7 @@ class RoutedExperts(PluggableLayer):
         from vllm.config import get_current_vllm_config
         vllm_config = get_current_vllm_config()
         if vllm_config.model_config is not None:
-            self.check_nan_in_output = (vllm_config.model_config.architecture in ["MiniMaxM2ForCausalLM", "Step3p5ForCausalLM"])
+            self.check_nan_in_output = (vllm_config.model_config.architecture in ["MiniMaxM3SparseForConditionalGeneration", "MiniMaxM2ForCausalLM", "Step3p5ForCausalLM"])
         else:
             self.check_nan_in_output = False
         
@@ -151,6 +151,16 @@ class RoutedExperts(PluggableLayer):
             )
         self.max_num_batched_tokens = vllm_config.scheduler_config.max_num_batched_tokens
         self.max_num_group_batch_size = self.get_max_num_group_batch_size()
+         
+        from vllm.model_executor.layers.fused_moe.config import MoEActivation
+        
+        moe_activation = self.moe_config.activation
+        self.activation_type = 0  # silu
+        if moe_activation in (MoEActivation.SWIGLUOAI, MoEActivation.SWIGLUOAI_UNINTERLEAVE):
+            self.activation_type = 1  # swigluoai
+        elif not self.has_gate_proj:
+            self.activation_type = 2  # relu2
+            
 
         self.quant_method = self._get_quant_method(
             self.layer_name,
@@ -1433,6 +1443,9 @@ class RoutedExperts(PluggableLayer):
         self.lk_moe_config.group_max_len = self.max_num_group_batch_size
         self.lk_moe_config.groupN = groupN
         self.lk_moe_config.groupK = groupK
+        self.lk_moe_config.activation_type = self.activation_type
+        self.lk_moe_config.swiglu_alpha = self.swiglu_alpha
+        self.lk_moe_config.swiglu_limit = self.swiglu_limit
 
         # no global scale
         self.lk_moe = lk_moe.MOE_WNA16(
@@ -1498,6 +1511,9 @@ class RoutedExperts(PluggableLayer):
         self.lk_moe_config.group_max_len = self.max_num_group_batch_size
         self.lk_moe_config.groupN = groupN
         self.lk_moe_config.groupK = groupK
+        self.lk_moe_config.activation_type = self.activation_type
+        self.lk_moe_config.swiglu_alpha = self.swiglu_alpha
+        self.lk_moe_config.swiglu_limit = self.swiglu_limit
 
         # no global scale
         self.lk_moe = lk_moe.MOE_FP8(
@@ -1533,6 +1549,9 @@ class RoutedExperts(PluggableLayer):
         self.lk_moe_config.stride = 32
         self.lk_moe_config.group_min_len = 10
         self.lk_moe_config.group_max_len = self.max_num_group_batch_size
+        self.lk_moe_config.activation_type = self.activation_type
+        self.lk_moe_config.swiglu_alpha = self.swiglu_alpha
+        self.lk_moe_config.swiglu_limit = self.swiglu_limit
         
         # no scale
         self.lk_moe = lk_moe.MOE_BF16(
@@ -1589,6 +1608,10 @@ class RoutedExperts(PluggableLayer):
         self.lk_moe_config.group_max_len = self.max_num_group_batch_size
         self.lk_moe_config.groupN = groupN
         self.lk_moe_config.groupK = groupK
+        self.lk_moe_config.activation_type = self.activation_type
+        self.lk_moe_config.swiglu_alpha = self.swiglu_alpha
+        self.lk_moe_config.swiglu_limit = self.swiglu_limit
+        
          
         self.lk_moe = lk_moe.MOE_NVFP4(
             self.lk_moe_config,
@@ -1634,6 +1657,9 @@ class RoutedExperts(PluggableLayer):
         self.lk_moe_config.group_max_len = self.max_num_group_batch_size
         self.lk_moe_config.groupN = groupN
         self.lk_moe_config.groupK = groupK
+        self.lk_moe_config.activation_type = self.activation_type
+        self.lk_moe_config.swiglu_alpha = self.swiglu_alpha
+        self.lk_moe_config.swiglu_limit = self.swiglu_limit
 
         # no global scale
         self.lk_moe = lk_moe.MOE_MXFP4(
