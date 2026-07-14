@@ -212,9 +212,6 @@ cd Lvllm
 pip install setuptools_scm setuptools_rust
 pip install torchaudio triton torchvision torch==2.11.0
 VLLM_VERSION_OVERRIDE="2.3.4" CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
-
-## if you want to build for MiniMax-M3, you need to set the following variable
-VLLM_USE_RUST_FRONTEND=1
 ```
  
 ## 优化
