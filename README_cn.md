@@ -15,7 +15,7 @@ LvLLM是vllm的特别扩展，充分利用CPU和GPU计算资源，高效的GPU�
 
 Lvllm使用最新的vLLM源码，重新设计实现了MOE模型混合推理模块，保持了对vLLM的100%完全兼容<sup>注1</sup>。
 
-注1：x86带有AVX2以上指令集的CPU和Nvidia GPU sm80以上架构
+注1：x86带有AVX2以上指令集的CPU和Nvidia GPU sm75以上架构
 
 ## 使用说明 [[English]](./README.md)
 - [版本变更](#版本变更)
@@ -29,6 +29,7 @@ Lvllm使用最新的vLLM源码，重新设计实现了MOE模型混合推理模�
 ## 版本变更
  
 ```bash
+2026-07-17: lvllm-v2.3.6 - 新增 dtype float16 支持 for SM75 GPU Prefill
 2026-07-08: lvllm-v2.3.2 - 新增 ModelOpt W4A16 NVFP4 量化类型支持
 2026-07-05: lvllm-v2.3.0 - 优化GPU预填充速度，CPU AVX512优化，取消LVLLM_GPU_RESIDENT_MOE_EXPERTS
 2026-06-05: lvllm-v2.2.0 - 升级lk_moe模块, 新增支持nvfp4, mxfp4量化类型，增加LVLLM_GPU_RESIDENT_MOE_EXPERTS, 取消LVLLM_MOE_USE_WEIGHT、LVLLM_MOE_QUANT_ON_GPU

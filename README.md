@@ -15,7 +15,7 @@ LvLLM is a special extension of vLLM that fully utilizes CPU and GPU computing r
 
 LvLLM uses the latest vLLM source code and has redesigned the MOE model hybrid inference module, maintaining 100% full compatibility with vLLM<sup>Note 1</sup>.
 
-Note 1: x86 CPUs with AVX2 or higher instruction set and Nvidia GPU sm80 or higher architecture
+Note 1: x86 CPUs with AVX2 or higher instruction set and Nvidia GPU sm75 or higher architecture
 
 ## Usage Guide [[中文]](./README_cn.md)
 - [Version Changes](#version-changes)
@@ -29,6 +29,7 @@ Note 1: x86 CPUs with AVX2 or higher instruction set and Nvidia GPU sm80 or high
 ## Version Changes
 
 ```bash
+2026-07-17: lvllm-v2.3.6 - add dtype float16 support for SM75 GPU Prefill
 2026-07-08: lvllm-v2.3.2 - add ModelOpt W4A16 NVFP4 quantization types support
 2026-07-05: lvllm-v2.3.0 - Optimize GPU prefill speed, CPU AVX512 optimization, removed LVLLM_GPU_RESIDENT_MOE_EXPERTS
 2026-06-05: lvllm-v2.2.0 - Upgraded lk_moe module, added support for nvfp4, mxfp4 quantization types, added LVLLM_GPU_RESIDENT_MOE_EXPERTS, removed LVLLM_MOE_USE_WEIGHT, LVLLM_MOE_QUANT_ON_GPU
