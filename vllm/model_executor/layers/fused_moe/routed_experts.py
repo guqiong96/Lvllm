@@ -1385,11 +1385,19 @@ class RoutedExperts(PluggableLayer):
             return self.ep_size, self.ep_rank, torch.cuda.current_device()
         return self.tp_size, self.tp_rank, torch.cuda.current_device()
     
-    def _get_quant_params(self, w13_weight, w13_weight_scale, pack_ratio):
+    def _get_quant_params(self, w13_weight, w13_weight_scale, w2_weight, w2_weight_scale, pack_ratio):
         unpack_factor = 1 if pack_ratio == 1 else 2  # FP8=1, 4bit=2
         
-        groupN = w13_weight.shape[1] // w13_weight_scale.shape[1]
-        groupK = (w13_weight.shape[2] * unpack_factor) // w13_weight_scale.shape[2]
+        groupN_w13 = w13_weight.shape[1] // w13_weight_scale.shape[1]
+        groupK_w13 = (w13_weight.shape[2] * unpack_factor) // w13_weight_scale.shape[2]
+        
+        groupN_w2 = w2_weight.shape[1] // w2_weight_scale.shape[1]
+        groupK_w2 = (w2_weight.shape[2] * unpack_factor) // w2_weight_scale.shape[2]
+        
+         
+        groupN = max(groupN_w13, groupN_w2)
+        groupK = max(groupK_w13, groupK_w2)
+        
         return groupN, groupK
                    
      
@@ -1416,7 +1424,7 @@ class RoutedExperts(PluggableLayer):
  
         weights_per_container = packed_factor // num_bits  # 2 
         
-        groupN, groupK = self._get_quant_params(w13_weight, w13_scale, weights_per_container)
+        groupN, groupK = self._get_quant_params(w13_weight, w13_scale, w2_weight, w2_scale, weights_per_container)
         
         w13_weight_ptr = w13_weight.data_ptr()
         w2_weight_ptr = w2_weight.data_ptr()
@@ -1487,7 +1495,7 @@ class RoutedExperts(PluggableLayer):
             w2_weight_scale = self.w2_weight_scale
         
         
-        groupN, groupK = self._get_quant_params(w13_weight, w13_weight_scale, 1)
+        groupN, groupK = self._get_quant_params(w13_weight, w13_weight_scale, w2_weight, w2_weight_scale, 1)
 
         w13_weight_ptr = w13_weight.contiguous().data_ptr()
         w2_weight_ptr = w2_weight.contiguous().data_ptr()
@@ -1583,7 +1591,7 @@ class RoutedExperts(PluggableLayer):
         w2_weight_global_scale = self.w2_weight_global_scale if hasattr(self, "w2_weight_global_scale") else self.w2_weight_scale_2
          
          
-        groupN, groupK = self._get_quant_params(w13_weight, w13_weight_scale, 2)
+        groupN, groupK = self._get_quant_params(w13_weight, w13_weight_scale, w2_weight, w2_weight_scale, 2)
         
         if need_reciprocal_global_scale:
             w13_weight_global_scale = 1.0 / w13_weight_global_scale
@@ -1639,7 +1647,7 @@ class RoutedExperts(PluggableLayer):
         w13_weight_scale = self.w13_weight_scale
         w2_weight_scale = self.w2_weight_scale 
          
-        groupN, groupK = self._get_quant_params(w13_weight, w13_weight_scale, 2)
+        groupN, groupK = self._get_quant_params(w13_weight, w13_weight_scale, w2_weight, w2_weight_scale, 2)
 
         w13_weight_ptr = w13_weight.contiguous().data_ptr()
         w2_weight_ptr = w2_weight.contiguous().data_ptr()
