@@ -65,6 +65,7 @@ vLLM已验证的大部分原版MOE模型
 |---------|------|
 | gemma-4-26B-A4B-it | ✅ 已测试通过 |
 | NVIDIA-Nemotron-3-Super-120B-A12B-BF16 | ✅ 已测试通过 |
+| Ornith-1.0-35B-FP8 | ✅ 已测试通过 |
 | Qwen3.6-35B-A3B | ✅ 已测试通过 |
 | Qwen3.5-35B-A3B | ✅ 已测试通过 |
 | Qwen3.5-122B-A10B | ✅ 已测试通过 |
@@ -73,6 +74,7 @@ vLLM已验证的大部分原版MOE模型
 | Qwen3-Next-80B-A3B-Instruct | ✅ 已测试通过 |
 | Qwen3-Coder-30B-A3B-Instruct | ✅ 已测试通过 |
 | Qwen3-VL-30B-A3B-Instruct | ✅ 已测试通过 | 
+| MiniMax-M3 | ✅ 已测试通过 |
 | MiniMax-M2.7 | ✅ 已测试通过 |
 | MiniMax-M2.5 | ✅ 已测试通过 |
 | MiniMax-M2.1 | ✅ 已测试通过 |

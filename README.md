@@ -64,6 +64,7 @@ Most original MOE models verified by vLLM
 |------------|--------|
 | gemma-4-26B-A4B-it | ✅ Tested |
 | NVIDIA-Nemotron-3-Super-120B-A12B-BF16 | ✅ Tested |
+| Ornith-1.0-35B-FP8 | ✅ Tested |
 | Qwen3.6-35B-A3B | ✅ Tested |
 | Qwen3.5-35B-A3B | ✅ Tested |
 | Qwen3.5-122B-A10B | ✅ Tested |
@@ -72,6 +73,7 @@ Most original MOE models verified by vLLM
 | Qwen3-Next-80B-A3B-Instruct | ✅ Tested |
 | Qwen3-Coder-30B-A3B-Instruct | ✅ Tested |
 | Qwen3-VL-30B-A3B-Instruct | ✅ Tested |
+| MiniMax-M3 | ✅ Tested |
 | MiniMax-M2.7 | ✅ Tested |
 | MiniMax-M2.5 | ✅ Tested |
 | MiniMax-M2.1 | ✅ Tested |
