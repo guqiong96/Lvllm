@@ -31,4 +31,4 @@ tokenspeed-mla==0.1.2; platform_system == "Linux"
 # Humming kernels for quantization gemm
 humming-kernels[cu13]==0.1.10
 
-lk_moe==2.3.0
+lk_moe==2.3.1
