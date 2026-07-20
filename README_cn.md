@@ -2,7 +2,7 @@
 
 LvLLM是vllm的特别扩展，充分利用CPU和GPU计算资源，高效的GPU并行+NUMA并行架构，适用于MOE模型混合推理。
 
-> **核心引擎：** 实际的混合推理功能——包括 CPU-GPU 协同计算、NUMA 感知调度、专家权重管理以及量化内核执行——完全由高度优化的 MOE 混合推理引擎 **[lk_moe](https://pypi.org/project/lk-moe/)** 提供。在 LvLLM（用于 vLLM）和 [Lsglang](https://github.com/guqiong96/Lsglang)（用于 sglang）中，每个 MOE 层可灵活选择原始 GPU 计算路径或调用 lk_moe 进行混合推理。针对 DeepSeek V4（SM120 架构），还提供了特化版本 [Lvllmds4](https://github.com/guqiong96/Lvllmds4)。
+> **核心引擎：** 实际的混合推理功能——包括 CPU-GPU 协同计算、NUMA 感知调度、专家权重管理以及量化内核执行——完全由高度优化的 MOE 混合推理引擎 **[lk_moe](https://pypi.org/project/lk-moe/)** 提供。在 LvLLM（用于 vLLM）和 [Lsglang](https://github.com/guqiong96/Lsglang)（用于 sglang）中，每个 MOE 层可灵活选择原始 GPU 计算路径或调用 lk_moe 进行混合推理。针对 DeepSeek V4，还提供了特化版本 [Lvllmds4](https://github.com/guqiong96/Lvllmds4)（SM120+）和 [Lvllmds4-x](https://github.com/guqiong96/Lvllmds4-x)（SM80+）。
 
 ## 系统特性
 
@@ -104,6 +104,7 @@ vLLM已验证的大部分原版MOE模型
 注1：https://hf-mirror.com/cyankiwi 提供AWQ 4bit对称量化模型
 注2：deepseek v4 需使用专用版本：
 https://github.com/guqiong96/Lvllmds4/releases
+https://github.com/guqiong96/Lvllmds4-x/releases
 
  
 

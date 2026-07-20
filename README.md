@@ -2,7 +2,7 @@
 
 LvLLM is a special extension of vLLM that fully utilizes CPU and GPU computing resources. It features an efficient GPU parallel + NUMA parallel architecture, suitable for MOE model hybrid inference.
 
-> **Core Engine:** The actual hybrid inference functionality—including CPU-GPU collaborative computation, NUMA-aware scheduling, expert weight management, and quantization kernel execution—is powered entirely by **[lk_moe](https://pypi.org/project/lk-moe/)**, a highly optimized MOE hybrid inference engine. Within LvLLM (for vLLM) and [Lsglang](https://github.com/guqiong96/Lsglang) (for sglang), each MOE layer can flexibly choose between the original GPU computation path or invoke lk_moe for hybrid inference. For DeepSeek V4 (SM120 architecture), a specialized version [Lvllmds4](https://github.com/guqiong96/Lvllmds4) is also available.
+> **Core Engine:** The actual hybrid inference functionality—including CPU-GPU collaborative computation, NUMA-aware scheduling, expert weight management, and quantization kernel execution—is powered entirely by **[lk_moe](https://pypi.org/project/lk-moe/)**, a highly optimized MOE hybrid inference engine. Within LvLLM (for vLLM) and [Lsglang](https://github.com/guqiong96/Lsglang) (for sglang), each MOE layer can flexibly choose between the original GPU computation path or invoke lk_moe for hybrid inference. For DeepSeek V4, specialized versions are also available: [Lvllmds4](https://github.com/guqiong96/Lvllmds4) (SM120+) and [Lvllmds4-x](https://github.com/guqiong96/Lvllmds4-x) (SM80+).
 
 ## System Features
 
@@ -100,6 +100,7 @@ Unlisted original MOE models from Qwen3, GLM, and MiniMax series are theoretical
 Note 1: AWQ 4bit symmetric quantization models are available at https://hf-mirror.com/cyankiwi
 Note 2: deepseek v4 requires a dedicated version:
 https://github.com/guqiong96/Lvllmds4/releases
+https://github.com/guqiong96/Lvllmds4-x/releases
 
 ## Run Command Reference
 
