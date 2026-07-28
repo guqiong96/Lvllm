@@ -917,7 +917,7 @@ pytest-forked==1.6.0
     # via -r requirements/test/cuda.in
 pytest-mock==3.14.0
     # via genai-perf
-pytest-rerunfailures==14.0
+pytest-rerunfailures==16.4
     # via -r requirements/test/cuda.in
 pytest-shard==0.1.2
     # via -r requirements/test/cuda.in
