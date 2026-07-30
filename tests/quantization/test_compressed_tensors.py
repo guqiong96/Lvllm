@@ -960,3 +960,69 @@ def test_compressed_tensors_mxfp4(vllm_runner):
         llm.apply_model(check_model)
         output = llm.generate_greedy("Hello my name is", max_tokens=4)
         assert output
+
+
+def test_compressed_tensors_mxfp4_cpu_resident_experts(monkeypatch):
+    from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import (  # noqa: E501
+        compressed_tensors_moe_w4a4_mxfp4 as mxfp4_moe,
+    )
+
+    class CpuRoutedExperts(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.is_gpu_resident_layer = False
+
+    monkeypatch.setattr(mxfp4_moe, "RoutedExperts", CpuRoutedExperts)
+    monkeypatch.setattr(mxfp4_moe.current_platform, "is_cuda_alike", lambda: True)
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: 0)
+
+    method = object.__new__(mxfp4_moe.CompressedTensorsW4A4Mxfp4MoEMethod)
+    method.group_size = 32
+    layer = CpuRoutedExperts()
+    method.create_weights(
+        layer,
+        num_experts=2,
+        hidden_size=64,
+        intermediate_size_per_partition=64,
+        params_dtype=torch.bfloat16,
+    )
+
+    parameter_names = (
+        "w13_weight_packed",
+        "w2_weight_packed",
+        "w13_weight_scale",
+        "w2_weight_scale",
+    )
+    assert all(getattr(layer, name).device.type == "cpu" for name in parameter_names)
+
+    method.process_weights_after_loading(layer)
+    assert hasattr(layer, "w13_weight_packed")
+    assert hasattr(layer, "w2_weight_packed")
+    assert not hasattr(layer, "w13_weight")
+    assert not hasattr(layer, "w2_weight")
+
+
+@pytest.mark.parametrize("use_cutlass_mxfp4", [False, True])
+def test_compressed_tensors_mxfp4_forwards_swiglu_params(use_cutlass_mxfp4):
+    from vllm.model_executor.layers.fused_moe.oracle.mxfp4 import (
+        Mxfp4MoeBackend,
+    )
+    from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe.compressed_tensors_moe_w4a4_mxfp4 import (  # noqa: E501
+        CompressedTensorsW4A4Mxfp4MoEMethod,
+    )
+
+    method = object.__new__(CompressedTensorsW4A4Mxfp4MoEMethod)
+    method.use_cutlass_mxfp4 = use_cutlass_mxfp4
+    method.mxfp4_backend = Mxfp4MoeBackend.MARLIN
+    method.moe = Mock(swiglu_alpha=1.702, swiglu_beta=1.0, swiglu_limit=7.0)
+    layer = Mock(
+        w13_weight_scale=torch.ones(1),
+        w2_weight_scale=torch.ones(1),
+    )
+
+    config = method.get_fused_moe_quant_config(layer)
+
+    assert config is not None
+    assert config.gemm1_alpha == 1.702
+    assert config.gemm1_beta == 1.0
+    assert config.gemm1_clamp_limit == 7.0
