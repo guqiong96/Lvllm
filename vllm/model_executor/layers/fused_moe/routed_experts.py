@@ -1692,8 +1692,16 @@ class RoutedExperts(PluggableLayer):
  
     
     def _process_mxfp4(self):
-        w13_weight = self.w13_weight
-        w2_weight = self.w2_weight 
+        w13_weight = (
+            self.w13_weight_packed
+            if hasattr(self, "w13_weight_packed")
+            else self.w13_weight
+        )
+        w2_weight = (
+            self.w2_weight_packed
+            if hasattr(self, "w2_weight_packed")
+            else self.w2_weight
+        )
         w13_weight_scale = self.w13_weight_scale
         w2_weight_scale = self.w2_weight_scale 
          

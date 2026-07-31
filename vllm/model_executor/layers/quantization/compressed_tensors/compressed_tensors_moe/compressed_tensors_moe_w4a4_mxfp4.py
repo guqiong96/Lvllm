@@ -69,6 +69,12 @@ class CompressedTensorsW4A4Mxfp4MoEMethod(CompressedTensorsMoEMethod):
         params_dtype: torch.dtype,
         **extra_weight_attrs,
     ):
+        device = (
+            torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
+        )
+        if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
+            device = "cpu"
+
         layer.num_experts = num_experts
         layer.params_dtype = params_dtype
 
@@ -80,6 +86,7 @@ class CompressedTensorsW4A4Mxfp4MoEMethod(CompressedTensorsMoEMethod):
                 hidden_size // 2,
                 requires_grad=False,
                 dtype=torch.uint8,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -93,6 +100,7 @@ class CompressedTensorsW4A4Mxfp4MoEMethod(CompressedTensorsMoEMethod):
                 # 2 fp4 items are packed in the input dimension
                 intermediate_size_per_partition // 2,
                 dtype=torch.uint8,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -106,6 +114,7 @@ class CompressedTensorsW4A4Mxfp4MoEMethod(CompressedTensorsMoEMethod):
                 # 2 fp4 items are packed in the input dimension
                 hidden_size // self.group_size,
                 dtype=torch.uint8,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -122,6 +131,7 @@ class CompressedTensorsW4A4Mxfp4MoEMethod(CompressedTensorsMoEMethod):
                 # 2 fp4 items are packed in the input dimension
                 intermediate_size_per_partition // self.group_size,
                 dtype=torch.uint8,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -133,20 +143,30 @@ class CompressedTensorsW4A4Mxfp4MoEMethod(CompressedTensorsMoEMethod):
     ) -> FusedMoEQuantConfig | None:
         if self.use_cutlass_mxfp4:
             # W4A4: both weights and activations quantized to MXFP4
-            return mxfp4_moe_quant_config(
+            config = mxfp4_moe_quant_config(
                 w1_scale=layer.w13_weight_scale,
                 w2_scale=layer.w2_weight_scale,
             )
+            config.gemm1_alpha = self.moe.swiglu_alpha
+            config.gemm1_beta = self.moe.swiglu_beta
+            config.gemm1_clamp_limit = self.moe.swiglu_limit
+            return config
         else:
             # W4A16: weight-only via Marlin
             return make_mxfp4_moe_quant_config(
                 mxfp4_backend=self.mxfp4_backend,
                 w1_scale=layer.w13_weight_scale,
                 w2_scale=layer.w2_weight_scale,
+                gemm1_alpha=self.moe.swiglu_alpha,
+                gemm1_beta=self.moe.swiglu_beta,
+                swiglu_limit=self.moe.swiglu_limit,
                 layer=layer,
             )
 
     def process_weights_after_loading(self, layer: RoutedExperts) -> None:
+        if not layer.is_gpu_resident_layer:
+            return
+
         layer.w13_weight = torch.nn.Parameter(
             layer.w13_weight_packed.data, requires_grad=False
         )
