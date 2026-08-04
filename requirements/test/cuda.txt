@@ -911,7 +911,7 @@ pytest==9.1.0
     #   schemathesis
 pytest-asyncio==1.4.0
     # via -r requirements/test/cuda.in
-pytest-cov==6.3.0
+pytest-cov==7.1.0
     # via -r requirements/test/cuda.in
 pytest-forked==1.6.0
     # via -r requirements/test/cuda.in
