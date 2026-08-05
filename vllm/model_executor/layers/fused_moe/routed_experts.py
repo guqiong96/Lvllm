@@ -1768,8 +1768,6 @@ class RoutedExperts(PluggableLayer):
         else:
             batch_size = vllm_config.scheduler_config.max_num_seqs
         
-        batch_size = min(batch_size, 32)
-        
         return batch_size
          
     def _initialize_cuda_graph_buffers(self): 
