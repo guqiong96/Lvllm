@@ -18,6 +18,7 @@ LvLLM uses the latest vLLM source code and has redesigned the MOE model hybrid i
 Note 1: x86 CPUs with AVX2 or higher instruction set and Nvidia GPU sm75 or higher architecture
 
 ## Usage Guide [[中文]](./README_cn.md)
+- [Performance Benchmark](#performance-benchmark)
 - [Version Changes](#version-changes)
 - [Supported Models](#supported-models)
 - [Supported Quantization Formats](#supported-quantization-formats)
@@ -25,6 +26,14 @@ Note 1: x86 CPUs with AVX2 or higher instruction set and Nvidia GPU sm75 or high
 - [Configuration Parameters](#configuration-parameters)
 - [Installation Steps](#installation-steps)
 - [Optimization](#optimization)
+
+
+## Performance Benchmark
+Open GPU Prefill, max_num_batched_tokens=8192 (Row 1), max_num_batched_tokens=32768 (Row 2)
+| Model | Version | CPU | Memory | GPU | Prefill | Decode | Speculative Decoding |
+|-------|---------|-----|--------|-----|---------|--------|---------|
+| deepseek-ai/DeepSeek-V4-Flash-0731 | Lvllmds4-x-v2.3.9 | EPYC 7642 *2 | 16 channels ddr4 3200 | 3090 * 2 | 1060 t/s [input 32768]| 26 t/s [input 32768]| 35~47 t/s |
+| deepseek-ai/DeepSeek-V4-Flash-0731 | Lvllmds4-v2.3.9 | EPYC 9684x *2 | 24 channels ddr5 4800 | pro 6000 * 1 | 3100 t/s [input 131072]| 75 t/s [input 131072]| 100~115 t/s |
 
 ## Version Changes
 
