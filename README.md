@@ -87,6 +87,7 @@ Most original MOE models verified by vLLM
 | MiniMax-M2.7 | ✅ Tested |
 | MiniMax-M2.5 | ✅ Tested |
 | MiniMax-M2.1 | ✅ Tested |
+| GLM-5.2 nvfp4 | ✅ 已测试通过[sm120] |
 | GLM-4.7 | ✅ Tested |
 | GLM-4.7-Flash | ✅ Tested |
 | GLM-4.6V | ✅ Tested |
@@ -143,6 +144,8 @@ vllm serve \
     --tool-call-parser qwen3_coder \
     --reasoning-parser qwen3
 ```
+
+
 
 ## Configuration Parameters
 
@@ -259,11 +262,11 @@ Typically: 2, 4, or 8 nodes, up to 32 nodes supported. More nodes = better perfo
 
 ### Thread Count Settings
 ```bash
-# Thread count <= (cores - x) / tensor parallel size (TP size), where x is threads reserved for other tasks, minimum 4 threads
-# 96 cores, 2 GPUs: 44 threads per GPU, 88 total threads, 8 threads reserved for other tasks
-LK_THREADS=44
-# Total threads exceeding physical core count may cause performance issues
-# Although the system auto-adjusts thread count, manual setting is recommended for testing
+# Hyper-Threading enabled: total physical cores ÷ number of GPUs
+# Hyper-Threading disabled: (total physical cores - 2) ÷ number of GPUs
+# 96 cores, 2 GPUs → 48 threads per GPU
+LK_THREADS=48
+# Total threads exceeding physical core count may cause performance issues    
 ```
 
 ### Output Performance
