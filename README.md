@@ -153,8 +153,8 @@ vllm serve \
 |---------------------|------|---------|-------------|-------|
 | `LVLLM_MOE_NUMA_ENABLED` | Core Parameter | `0` | Enable hybrid inference: `1`-enable, `0`-disable | Set to `0` to disable hybrid inference, behavior matches vLLM |
 | `LK_THREAD_BINDING` | Performance Parameter | `CPU_CORE` | Thread binding strategy: `CPU_CORE`-bind to CPU cores, `NUMA_NODE`-bind to NUMA nodes | Default binds to CPU cores, try NUMA_NODE if performance issues occur |
-| `LK_THREADS` | Performance Parameter | Auto-calculated | Thread count: physical cores - 4 | For multi-GPU multi-process: (physical cores - 4) / number of processes |
-| `OMP_NUM_THREADS` | Performance Parameter | System logical cores | OpenMP threads: set same as `LK_THREADS` | |
+| `LK_THREADS` | Performance Parameter | - | Thread count: (total physical cores) ÷ number of GPUs | Hyper-Threading disabled: (total physical cores - 2) ÷ number of GPUs |
+| `OMP_NUM_THREADS` | Performance Parameter | - | OpenMP threads: set same as `LK_THREADS` | |
 | `LVLLM_GPU_RESIDENT_MOE_LAYERS` | GPU Prefill Parameter | None | MOE expert layers resident on GPU: `0`-layer 0, `0-1`-layers 0 to 1, `0,9`-layers 0 and 9 | After reserving KV Cache VRAM, allocating multiple layers improves performance and reduces corresponding memory usage |
 | `LVLLM_GPU_PREFETCH_WINDOW` | GPU Prefill Parameter | None | Prefetch window size `1`: prefetch 1 layer of MOE experts | Generally 1-2 layers is sufficient |
 | `LVLLM_GPU_PREFILL_MIN_BATCH_SIZE` | GPU Prefill Parameter | None | Minimum input length for GPU prefill `4096`: GPU prefill starts when input length reaches this value | Should not be set too small, set to 0 to disable GPU prefill |
