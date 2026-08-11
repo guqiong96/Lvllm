@@ -96,8 +96,7 @@ vLLM已验证的大部分原版MOE模型
 
 未列出的Qwen3系列、GLM系列、MiniMax系列的原版MOE模型理论上支持，待实际测试。
 
- 
- 
+
 
 ## 支持的量化格式
 
@@ -109,11 +108,13 @@ vLLM已验证的大部分原版MOE模型
 | nvfp4模型 | NVFP4 and ModelOpt W4A16 NVFP4 | 
 | mxfp4模型 <sup>注1</sup>| mxfp4 | 
 | awq 4bit对称量化模型 <sup>注1</sup>| w4a16 | 
-
+```bash
 注1：https://hf-mirror.com/cyankiwi 提供AWQ 4bit对称量化模型
-注2：deepseek v4 需使用专用版本：
-https://github.com/guqiong96/Lvllmds4/releases
-https://github.com/guqiong96/Lvllmds4-x/releases
+注2：DeepSeek V4 SM80、SM86、SM89、SM120需使用专用版本：
+https://github.com/guqiong96/Lvllmds4/releases SM80+
+https://github.com/guqiong96/Lvllmds4-x/releases SM120
+
+```
 
  
 
@@ -123,13 +124,12 @@ https://github.com/guqiong96/Lvllmds4-x/releases
 ```bash
 LVLLM_MOE_NUMA_ENABLED=1 \
 LK_THREAD_BINDING=CPU_CORE \
-LK_THREADS=44 \
-OMP_NUM_THREADS=44 \
+LK_THREADS=48 \
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=2048 \
 LVLLM_GPU_PREFETCH_WINDOW=1 \
 LVLLM_GPU_RESIDENT_MOE_LAYERS=0-1,33-34 \
 LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
-LVLLM_ENABLE_MOE_LAYERWISE_LOAD=1 \
+FLASHINFER_DISABLE_VERSION_CHECK=1 \
 vllm serve \
     --model /home/guqiong/Models/Qwen3.6-35B-A3B \
     --host 0.0.0.0 \
@@ -161,7 +161,6 @@ vllm serve \
 | `LVLLM_MOE_NUMA_ENABLED` | 核心参数 | `0` | 是否启用混合推理: `1`-启用，`0`-禁用 | 设置为`0`禁用混合推理，行为与vLLM相同 |
 | `LK_THREAD_BINDING` | 性能参数 | `CPU_CORE` | 线程绑定策略: `CPU_CORE`-按CPU核心绑定，`NUMA_NODE`-按NUMA节点绑定 | 默认按CPU核心绑定, 遇到性能问题时可尝试按NUMA节点绑定 |
 | `LK_THREADS` | 性能参数 | - | 线程数量:（总物理核心数） ÷ 显卡数量 | 未开启超线程：（总物理核心数-2） ÷ 显卡数量 |
-| `OMP_NUM_THREADS` | 性能参数 | - | OpenMP线程数: 设置为`LK_THREADS`相同 |   | 
 | `LVLLM_GPU_RESIDENT_MOE_LAYERS` | GPU预填充参数 | 无 | 常驻GPU的MOE专家层`0`: 第0层，`0-1`: 第0层到第1层，`0,9`: 第0层和第9层 | 留足KV Cache显存后，分配多层可增加性能，并减少对应的内存占用 |
 | `LVLLM_GPU_PREFETCH_WINDOW` | GPU预填充参数 | 无 | 预取窗口大小`1`: 预取1层MOE专家 |  一般预取1到2层即可 |
 | `LVLLM_GPU_PREFILL_MIN_BATCH_SIZE` | GPU预填充参数 | 无 | 使用GPU预填充的最小输入长度`4096`：输入长度达到该值后，启动GPU预填充 | 设置值不宜过小，设置为0则关闭GPU预填充功能 |
@@ -213,7 +212,7 @@ sudo dnf install numactl-devel        # Rocky Linux
 ### 3. 安装Lvllm
 
 ```bash 
-pip install https://github.com/guqiong96/Lvllm/releases/download/lvllm-v2.3.8/lvllm-2.3.8-cp312-cp312-manylinux_2_34_x86_64.whl
+pip install https://github.com/guqiong96/Lvllm/releases/download/lvllm-v2.3.9/lvllm-2.3.9-cp312-cp312-manylinux_2_34_x86_64.whl
 # 最新版本查看https://github.com/guqiong96/Lvllm/releases
 ```
 
@@ -223,8 +222,8 @@ pip install https://github.com/guqiong96/Lvllm/releases/download/lvllm-v2.3.8/lv
 git clone https://github.com/guqiong96/Lvllm.git
 cd Lvllm
 pip install setuptools_scm setuptools_rust
-pip install torchaudio triton torchvision torch==2.11.0
-VLLM_VERSION_OVERRIDE="2.3.4" CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
+pip install torchaudio triton torchvision torch==2.13.0
+VLLM_VERSION_OVERRIDE="2.3.9" CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
 ```
  
 ## 优化

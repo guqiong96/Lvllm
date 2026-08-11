@@ -21,7 +21,7 @@ from vllm.model_executor.layers.attention.attention import (
     Attention,
     set_default_quant_scales,
 )
-from vllm.model_executor.layers.fused_moe import FusedMoE
+from vllm.model_executor.layers.fused_moe import FusedMoEFactory
 from vllm.model_executor.layers.quantization.fp8 import (
     Fp8Config,
     Fp8KVCacheMethod,
@@ -93,9 +93,6 @@ def test_online_quantization(
     use_rocm_aiter: bool,
     monkeypatch,
 ) -> None:
-    if kv_cache_dtype == "fp8" and current_platform.is_device_capability_family(90):
-        pytest.skip("FA3 currently rejects FP8 KV cache output dtype on SM90")
-
     if use_rocm_aiter:
         monkeypatch.setenv("VLLM_ROCM_USE_AITER", "1")
 
@@ -105,9 +102,15 @@ def test_online_quantization(
     if force_marlin:
         monkeypatch.setenv("VLLM_TEST_FORCE_FP8_MARLIN", "1")
 
+    model_dtype = "auto"
+    if kv_cache_dtype == "fp8" and current_platform.is_device_capability_family(90):
+        # FA3 requires BF16 output when the query input is FP8.
+        model_dtype = "bfloat16"
+
     with vllm_runner(
         "facebook/opt-125m",
         quantization="fp8",
+        dtype=model_dtype,
         enforce_eager=True,
         kv_cache_dtype=kv_cache_dtype,
     ) as llm:
@@ -390,7 +393,7 @@ def test_fp8_reloading(
             method.use_marlin = use_marlin
 
         else:
-            layer = FusedMoE(
+            layer = FusedMoEFactory(
                 num_experts=1,
                 top_k=1,
                 hidden_size=1,

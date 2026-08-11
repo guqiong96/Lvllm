@@ -107,23 +107,24 @@ Unlisted original MOE models from Qwen3, GLM, and MiniMax series are theoretical
 | mxfp4 model <sup>Note 1</sup> | mxfp4 |
 | awq 4bit symmetric quantization model <sup>Note 1</sup> | w4a16 |
 
+```bash
 Note 1: AWQ 4bit symmetric quantization models are available at https://hf-mirror.com/cyankiwi
-Note 2: deepseek v4 requires a dedicated version:
-https://github.com/guqiong96/Lvllmds4/releases
-https://github.com/guqiong96/Lvllmds4-x/releases
+Note 2: DeepSeek V4 - SM80、SM86、SM89、SM120 requires a dedicated version:
+https://github.com/guqiong96/Lvllmds4/releases SM80+
+https://github.com/guqiong96/Lvllmds4-x/releases SM120
+```
 
 ## Run Command Reference
 
 ```bash
 LVLLM_MOE_NUMA_ENABLED=1 \
 LK_THREAD_BINDING=CPU_CORE \
-LK_THREADS=44 \
-OMP_NUM_THREADS=44 \
+LK_THREADS=48 \
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=2048 \
 LVLLM_GPU_PREFETCH_WINDOW=1 \
 LVLLM_GPU_RESIDENT_MOE_LAYERS=0-1,33-34 \
 LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
-LVLLM_ENABLE_MOE_LAYERWISE_LOAD=1 \
+FLASHINFER_DISABLE_VERSION_CHECK \
 vllm serve \
     --model /home/guqiong/Models/Qwen3.6-35B-A3B \
     --host 0.0.0.0 \
@@ -154,7 +155,6 @@ vllm serve \
 | `LVLLM_MOE_NUMA_ENABLED` | Core Parameter | `0` | Enable hybrid inference: `1`-enable, `0`-disable | Set to `0` to disable hybrid inference, behavior matches vLLM |
 | `LK_THREAD_BINDING` | Performance Parameter | `CPU_CORE` | Thread binding strategy: `CPU_CORE`-bind to CPU cores, `NUMA_NODE`-bind to NUMA nodes | Default binds to CPU cores, try NUMA_NODE if performance issues occur |
 | `LK_THREADS` | Performance Parameter | - | Thread count: (total physical cores) ÷ number of GPUs | Hyper-Threading disabled: (total physical cores - 2) ÷ number of GPUs |
-| `OMP_NUM_THREADS` | Performance Parameter | - | OpenMP threads: set same as `LK_THREADS` | |
 | `LVLLM_GPU_RESIDENT_MOE_LAYERS` | GPU Prefill Parameter | None | MOE expert layers resident on GPU: `0`-layer 0, `0-1`-layers 0 to 1, `0,9`-layers 0 and 9 | After reserving KV Cache VRAM, allocating multiple layers improves performance and reduces corresponding memory usage |
 | `LVLLM_GPU_PREFETCH_WINDOW` | GPU Prefill Parameter | None | Prefetch window size `1`: prefetch 1 layer of MOE experts | Generally 1-2 layers is sufficient |
 | `LVLLM_GPU_PREFILL_MIN_BATCH_SIZE` | GPU Prefill Parameter | None | Minimum input length for GPU prefill `4096`: GPU prefill starts when input length reaches this value | Should not be set too small, set to 0 to disable GPU prefill |
@@ -203,7 +203,7 @@ sudo dnf install numactl-devel        # Rocky Linux
 ### 3. Install LvLLM
 
 ```bash
-pip install https://github.com/guqiong96/Lvllm/releases/download/lvllm-v2.3.8/lvllm-2.3.8-cp312-cp312-manylinux_2_34_x86_64.whl
+pip install https://github.com/guqiong96/Lvllm/releases/download/lvllm-v2.3.9/lvllm-2.3.9-cp312-cp312-manylinux_2_34_x86_64.whl
 # check the latest version at: https://github.com/guqiong96/Lvllm/releases
 ```
 
@@ -213,8 +213,8 @@ pip install https://github.com/guqiong96/Lvllm/releases/download/lvllm-v2.3.8/lv
 git clone https://github.com/guqiong96/Lvllm.git
 cd Lvllm
 pip install setuptools_scm setuptools_rust
-pip install torchaudio triton torchvision torch==2.11.0
-VLLM_VERSION_OVERRIDE="2.3.4" CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
+pip install torchaudio triton torchvision torch==2.13.0
+VLLM_VERSION_OVERRIDE="2.3.9" CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
 ```
 
 ## Optimization

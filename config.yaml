@@ -1,16 +1,16 @@
-model: "/home/guqiong/Models/Qwen3.6-35B-A3B-NVFP4"
+model: "/home/guqiong/Downloads/DeepSeek-V4-Flash-0731"
 host: "0.0.0.0"
 port: 8070
 tensor-parallel-size: 2
-max-model-len: 66000
-gpu-memory-utilization: 0.85
+max-model-len: 36000
+gpu-memory-utilization: 0.95
 trust-remote-code: true
 tokenizer-mode: "auto"
-served-model-name: "Qwen3.6-35B-A3B-NVFP4"
+served-model-name: "DeepSeek-V4-Flash-0731"
 compilation_config.cudagraph_mode: "FULL_DECODE_ONLY"
 enable_prefix_caching: true
 enable-chunked-prefill: true
-max_num_batched_tokens: 36000
+max_num_batched_tokens: 4096
 dtype: "bfloat16"
 max_num_seqs: 2
 compilation_config.mode: "VLLM_COMPILE"
@@ -29,17 +29,20 @@ enable-auto-tool-choice: true
 # disable-cascade-attn: true
 # reasoning-parser: "step3p5" 
 # tool-call-parser: "step3p5"  
-reasoning-parser: "qwen3"
-tool-call-parser: "qwen3_coder"
+# reasoning-parser: "qwen3"
+# tool-call-parser: "qwen3_coder"
 # reasoning-parser: "nemotron_v3"
 # reasoning-parser: "gemma4"
 # tool-call-parser: "gemma4"
 # tool-call-parser: minimax_m3 
 # reasoning-parser: minimax_m3 
 # block-size: 128
-# kv-cache-dtype: "fp8"  
-# tokenizer-mode: "deepseek_v4"     
-# tool-call-parser: "deepseek_v4"     
-# reasoning-parser: "deepseek_v4"
+kv-cache-dtype: "fp8_ds_mla"  
+tokenizer-mode: "deepseek_v4"     
+tool-call-parser: "deepseek_v4"     
+reasoning-parser: "deepseek_v4"
 # speculative-config: '{"num_speculative_tokens": 3,"method": "deepseek_mtp"}'
-# speculative-config: '{"method":"dspark","num_speculative_tokens":7,"draft_sample_method":"greedy"}'
+# speculative-config: '{"method":"dspark","num_speculative_tokens":5,"draft_sample_method":"probabilistic"}'
+default-chat-template-kwargs: '{"enable_thinking": true}'
+disable-custom-all-reduce: true
+attention-backend: FLASHINFER_MLA_SPARSE_DSV4
