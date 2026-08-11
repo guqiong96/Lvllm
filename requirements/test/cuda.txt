@@ -745,7 +745,7 @@ pandas==2.2.3
     #   statsmodels
 partial-json-parser==0.2.1.1.post7
     # via -r requirements/test/../common.txt
-pathspec==0.12.1
+pathspec==1.1.1
     # via black
 pathvalidate==3.2.1
     # via pytablewriter
