@@ -392,7 +392,7 @@ imagehash==4.3.2
     # via -r requirements/test/cuda.in
 imageio==2.37.0
     # via scikit-image
-importlib-metadata==8.7.0
+importlib-metadata==9.0.0
     # via opentelemetry-api
 inflect==5.6.2
     # via datamodel-code-generator
