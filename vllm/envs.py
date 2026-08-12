@@ -193,7 +193,7 @@ if TYPE_CHECKING:
         "skip",
         "full",
         "relax",
-    ] = "relax"
+    ] = "skip"
     VLLM_USE_FUSED_MOE_GROUPED_TOPK: bool = True
     VLLM_MOE_SKIP_PADDING: bool = True
     VLLM_KIMI_K3_SHARD_SP_SHARED_EXPERT: bool = False
@@ -1525,7 +1525,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
     #   shapes, but provides no guarantees.
     "VLLM_DEEP_GEMM_WARMUP": env_with_choices(
         "VLLM_DEEP_GEMM_WARMUP",
-        "relax",
+        "skip",
         [
             "skip",
             "full",

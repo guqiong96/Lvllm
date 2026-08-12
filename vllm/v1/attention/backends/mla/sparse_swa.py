@@ -477,6 +477,14 @@ class DeepseekSparseSWAMetadataBuilder(AttentionMetadataBuilder):
             dtype=torch.bool,
             device=self.device,
         )
+        
+        def _round_up_to_supported_topk(width: int) -> int:
+            """Round up to nearest FlashInfer-supported topk (128, 512, 1024)."""
+            supported = [128, 512, 1024]
+            for s in supported:
+                if width <= s:
+                    return s
+            return supported[-1]
 
         # DSpark draft: the block is non-causal (every query attends to the
         # trailing window of context PLUS all query tokens, including future ones),
@@ -485,7 +493,9 @@ class DeepseekSparseSWAMetadataBuilder(AttentionMetadataBuilder):
         # a multiple of 128.
         self.is_dspark = spec_config is not None and spec_config.use_dspark()
         self.noncausal_index_width = (
-            cdiv(self.window_size + self.num_speculative_tokens, 128) * 128
+            _round_up_to_supported_topk(
+                cdiv(self.window_size + self.num_speculative_tokens, 128) * 128
+            )
             if self.is_dspark
             else 0
         )

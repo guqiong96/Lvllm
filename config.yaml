@@ -42,7 +42,6 @@ tokenizer-mode: "deepseek_v4"
 tool-call-parser: "deepseek_v4"     
 reasoning-parser: "deepseek_v4"
 # speculative-config: '{"num_speculative_tokens": 3,"method": "deepseek_mtp"}'
-# speculative-config: '{"method":"dspark","num_speculative_tokens":5,"draft_sample_method":"probabilistic"}'
+speculative-config: '{"method":"dspark","num_speculative_tokens":5,"draft_sample_method":"probabilistic"}'
 default-chat-template-kwargs: '{"enable_thinking": true}'
 disable-custom-all-reduce: true
-attention-backend: FLASHINFER_MLA_SPARSE_DSV4

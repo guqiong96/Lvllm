@@ -369,12 +369,6 @@ def select_fp8_moe_backend(
             return _return_or_raise(
                 backend, config, weight_key, activation_key, activation_format
             )
-    
-    if not envs.VLLM_USE_DEEP_GEMM or not envs.VLLM_MOE_USE_DEEP_GEMM:
-        AVAILABLE_BACKENDS.remove(Fp8MoeBackend.DEEPGEMM)
-        AVAILABLE_BACKENDS.remove(Fp8MoeBackend.BATCHED_DEEPGEMM)
-        
-        
 
     # Handle explicit MARLIN FP8 configuration.
     if envs.VLLM_TEST_FORCE_FP8_MARLIN:
