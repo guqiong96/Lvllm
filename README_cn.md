@@ -94,6 +94,7 @@ vLLM已验证的大部分原版MOE模型
 | GLM-4.6V | ✅ 已测试通过 |
 | Kimi k2.6 | ✅ 已测试通过 |
 | Kimi k2.5 | ✅ 已测试通过 |
+| deepseek-ai/DeepSeek-V4-Flash-0731 | ✅ 已测试通过 [sm120]|
 
 未列出的Qwen3系列、GLM系列、MiniMax系列的原版MOE模型理论上支持，待实际测试。
 
@@ -111,9 +112,11 @@ vLLM已验证的大部分原版MOE模型
 | awq 4bit对称量化模型 <sup>注1</sup>| w4a16 | 
 ```bash
 注1：https://hf-mirror.com/cyankiwi 提供AWQ 4bit对称量化模型
-注2：DeepSeek V4 SM80、SM86、SM89、SM120需使用专用版本：
-https://github.com/guqiong96/Lvllmds4/releases SM80+
-https://github.com/guqiong96/Lvllmds4-x/releases SM120
+注2：DeepSeek V4 SM80、SM86、SM89需使用专用版本：
+https://github.com/guqiong96/Lvllmds4-x/releases SM80+
+
+另外有一个SM120版本：
+https://github.com/guqiong96/Lvllmds4/releases SM8120
 
 ```
 
@@ -213,8 +216,11 @@ sudo dnf install numactl-devel        # Rocky Linux
 ### 3. 安装Lvllm
 
 ```bash 
-pip install https://github.com/guqiong96/Lvllm/releases/download/lvllm-v2.3.9/lvllm-2.3.9-cp312-cp312-manylinux_2_34_x86_64.whl
+pip install https://github.com/guqiong96/Lvllm/releases/download/lvllm-v2.3.10/lvllm-2.3.10-cp312-cp312-manylinux_2_34_x86_64.whl
+
 # 最新版本查看https://github.com/guqiong96/Lvllm/releases
+
+pip install https://github.com/guqiong96/Lvllm/releases/download/lvllm-v2.3.10/flashinfer_cubin-0.6.16.post3-py3-none-any.whl
 ```
 
 ## 从源码编译安装Lvllm
@@ -224,7 +230,7 @@ git clone https://github.com/guqiong96/Lvllm.git
 cd Lvllm
 pip install setuptools_scm setuptools_rust
 pip install torchaudio triton torchvision torch==2.13.0
-VLLM_VERSION_OVERRIDE="2.3.9" CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
+VLLM_VERSION_OVERRIDE="2.3.10" CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
 ```
  
 ## 优化

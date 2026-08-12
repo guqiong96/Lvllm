@@ -93,6 +93,7 @@ Most original MOE models verified by vLLM
 | GLM-4.6V | ✅ Tested |
 | Kimi k2.6 | ✅ Tested |
 | Kimi k2.5 | ✅ Tested |
+| deepseek-ai/DeepSeek-V4-Flash-0731 | ✅ Tested [sm120]|
 
 Unlisted original MOE models from Qwen3, GLM, and MiniMax series are theoretically supported and pending actual testing.
 
@@ -109,9 +110,13 @@ Unlisted original MOE models from Qwen3, GLM, and MiniMax series are theoretical
 
 ```bash
 Note 1: AWQ 4bit symmetric quantization models are available at https://hf-mirror.com/cyankiwi
-Note 2: DeepSeek V4 - SM80、SM86、SM89、SM120 requires a dedicated version:
-https://github.com/guqiong96/Lvllmds4/releases SM80+
-https://github.com/guqiong96/Lvllmds4-x/releases SM120
+Note 2: DeepSeek V4 - SM80、SM86、SM89 requires a dedicated version:
+https://github.com/guqiong96/Lvllmds4-x/releases SM80+
+
+
+another a sm120 version:
+https://github.com/guqiong96/Lvllmds4/releases SM120
+
 ```
 
 ## Run Command Reference
@@ -201,10 +206,14 @@ sudo dnf install numactl-devel        # Rocky Linux
  
 
 ### 3. Install LvLLM
+ 
 
-```bash
-pip install https://github.com/guqiong96/Lvllm/releases/download/lvllm-v2.3.9/lvllm-2.3.9-cp312-cp312-manylinux_2_34_x86_64.whl
+```bash 
+pip install https://github.com/guqiong96/Lvllm/releases/download/lvllm-v2.3.10/lvllm-2.3.10-cp312-cp312-manylinux_2_34_x86_64.whl
+
 # check the latest version at: https://github.com/guqiong96/Lvllm/releases
+
+pip install https://github.com/guqiong96/Lvllm/releases/download/lvllm-v2.3.10/flashinfer_cubin-0.6.16.post3-py3-none-any.whl
 ```
 
 ## Compile and Install Lvllm
@@ -214,7 +223,7 @@ git clone https://github.com/guqiong96/Lvllm.git
 cd Lvllm
 pip install setuptools_scm setuptools_rust
 pip install torchaudio triton torchvision torch==2.13.0
-VLLM_VERSION_OVERRIDE="2.3.9" CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
+VLLM_VERSION_OVERRIDE="2.3.10" CMAKE_BUILD_TYPE=Release CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release" pip install -e . --no-build-isolation -vvv
 ```
 
 ## Optimization
