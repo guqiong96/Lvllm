@@ -43,7 +43,7 @@ Open GPU Prefill, max_num_batched_tokens=8192 (Row 1), max_num_batched_tokens=32
 2026-07-05: lvllm-v2.3.0 - 优化GPU预填充速度，CPU AVX512优化，取消LVLLM_GPU_RESIDENT_MOE_EXPERTS
 2026-06-05: lvllm-v2.2.0 - 升级lk_moe模块, 新增支持nvfp4, mxfp4量化类型，增加LVLLM_GPU_RESIDENT_MOE_EXPERTS, 取消LVLLM_MOE_USE_WEIGHT、LVLLM_MOE_QUANT_ON_GPU
 2026-04-06: lvllm-v2.1.0 - 增强使用LK_POWER_SAVING=1节能效果，支持FP8+BF16+AWQ4bit的混合MOE层推理
-2026-03-22: lvllm-v2.0.0 - FP8 MoE模型使用INT4专家量化时支持逐层加载，减少峰值内存占用，LVLLM_ENABLE_MOE_LAYERWISEISE_LOAD=1
+2026-03-22: lvllm-v2.0.0 - FP8 MoE模型使用INT4专家量化时支持逐层加载，减少峰值内存占用，LVLLM_ENABLE_MOE_LAYERWIS_LOAD=1
 2026-03-19: lvllm-v1.9.10 - 修复已知问题，支持新的moe模型类型[没有gate_proj], 例如：NVIDIA-Nemotron-3-Super-120B-A12B-BF16
 2026-03-11: lvllm-v1.9.2 - FP8、AWQ4bit模型开启GPU Prefill加速不再占用额外内存, FP8模型取消TO_DTYPE运行时类型转换、KEEP暂不支持开启GPU Prefill
 2026-03-05: lvllm-v1.9.0 - 优化GPU预填充和常规预填充，确保输出质量

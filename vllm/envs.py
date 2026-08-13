@@ -258,7 +258,7 @@ if TYPE_CHECKING:
     VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES: bool = True
     VLLM_OBJECT_STORAGE_SHM_BUFFER_NAME: str = "VLLM_OBJECT_STORAGE_SHM_BUFFER"
     LVLLM_MOE_NUMA_ENABLED: bool = False
-    LVLLM_ENABLE_MOE_LAYERWISEISE_LOAD: bool = False
+    LVLLM_ENABLE_MOE_LAYERWISE_LOAD: bool = False
     LVLLM_ENABLE_NUMA_INTERLEAVE: bool = False
     LVLLM_GPU_RESIDENT_MOE_LAYERS: str | None = None
     LVLLM_GPU_PREFILL_MIN_BATCH_SIZE: int = 0
@@ -1928,7 +1928,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # Whether to enable NUMA for MOE.
     "LVLLM_MOE_NUMA_ENABLED":
     lambda: bool(int(os.getenv("LVLLM_MOE_NUMA_ENABLED", "0"))),
-    "LVLLM_ENABLE_MOE_LAYERWISEISE_LOAD": lambda: bool(int(os.getenv("LVLLM_ENABLE_MOE_LAYERWISEISE_LOAD", "0"))),
+    "LVLLM_ENABLE_MOE_LAYERWISE_LOAD": lambda: bool(int(os.getenv("LVLLM_ENABLE_MOE_LAYERWISE_LOAD", "0"))),
     # Whether to enable NUMA interleaving for multiprocessing.
     "LVLLM_ENABLE_NUMA_INTERLEAVE": lambda: bool(
         int(os.getenv("LVLLM_ENABLE_NUMA_INTERLEAVE", "0"))
@@ -2235,7 +2235,7 @@ def compile_factors() -> dict[str, object]:
         "LOCAL_RANK",
         "CUDA_VISIBLE_DEVICES",
         "LVLLM_MOE_NUMA_ENABLED",
-        "LVLLM_ENABLE_MOE_LAYERWISEISE_LOAD",
+        "LVLLM_ENABLE_MOE_LAYERWISE_LOAD",
         "LVLLM_GPU_RESIDENT_MOE_LAYERS",
         "LVLLM_GPU_PREFILL_MIN_BATCH_SIZE",
         "LVLLM_GPU_PREFETCH_WINDOW",
@@ -2407,7 +2407,7 @@ def is_lk_moe_gpu_resident_layer(layer_name: str) -> bool:
     return layer_id in disabled_layers
 
 def enabled_layerwise_load() -> bool:
-    return environment_variables["LVLLM_ENABLE_MOE_LAYERWISEISE_LOAD"]() 
+    return environment_variables["LVLLM_ENABLE_MOE_LAYERWISE_LOAD"]() 
 
       
 import torch

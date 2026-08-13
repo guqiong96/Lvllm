@@ -88,7 +88,7 @@ Most original MOE models verified by vLLM
 | MiniMax-M2.7 | ✅ Tested |
 | MiniMax-M2.5 | ✅ Tested |
 | MiniMax-M2.1 | ✅ Tested |
-| GLM-5.2 nvfp4 | ✅ 已测试通过[sm120] |
+| GLM-5.2 nvfp4 | ✅ Tested[sm120] |
 | GLM-4.7 | ✅ Tested |
 | GLM-4.7-Flash | ✅ Tested |
 | GLM-4.6V | ✅ Tested |
