@@ -259,7 +259,7 @@ if TYPE_CHECKING:
     VLLM_OBJECT_STORAGE_SHM_BUFFER_NAME: str = "VLLM_OBJECT_STORAGE_SHM_BUFFER"
     LVLLM_MOE_NUMA_ENABLED: bool = False
     LVLLM_ENABLE_MOE_LAYERWISE_LOAD: bool = False
-    LVLLM_ENABLE_NUMA_INTERLEAVE: bool = False
+    LVLLM_ENABLE_NUMA_INTERLEAVE: bool = True
     LVLLM_GPU_RESIDENT_MOE_LAYERS: str | None = None
     LVLLM_GPU_PREFILL_MIN_BATCH_SIZE: int = 0
     LVLLM_GPU_PREFETCH_WINDOW: int = 1
@@ -1931,7 +1931,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
     "LVLLM_ENABLE_MOE_LAYERWISE_LOAD": lambda: bool(int(os.getenv("LVLLM_ENABLE_MOE_LAYERWISE_LOAD", "0"))),
     # Whether to enable NUMA interleaving for multiprocessing.
     "LVLLM_ENABLE_NUMA_INTERLEAVE": lambda: bool(
-        int(os.getenv("LVLLM_ENABLE_NUMA_INTERLEAVE", "0"))
+        int(os.getenv("LVLLM_ENABLE_NUMA_INTERLEAVE", "1"))
     ),
     "LVLLM_GPU_RESIDENT_MOE_LAYERS": lambda: os.environ.get("LVLLM_GPU_RESIDENT_MOE_LAYERS", None),
     # Whether to enable GPU expert computation.

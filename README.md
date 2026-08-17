@@ -165,7 +165,7 @@ vllm serve \
 | `LVLLM_GPU_PREFETCH_WINDOW` | GPU Prefill Parameter | None | Prefetch window size `1`: prefetch 1 layer of MOE experts | Generally 1-2 layers is sufficient |
 | `LVLLM_GPU_PREFILL_MIN_BATCH_SIZE` | GPU Prefill Parameter | None | Minimum input length for GPU prefill `4096`: GPU prefill starts when input length reaches this value | Should not be set too small, set to 0 to disable GPU prefill |
 | `LK_POWER_SAVING` | CPU Power Saving | 0 | `1`: enable CPU power saving mode, `0`: disable | Recommended: `0` |
-| `LVLLM_ENABLE_NUMA_INTERLEAVE` | Performance Parameter | 0 | `0`: fast model loading, `1`: slow loading to avoid OOM | Recommended: use `0` if memory is sufficient, `1` if memory is tight |
+| `LVLLM_ENABLE_NUMA_INTERLEAVE` | Performance Parameter | 1 | `1`: avoid OOM | Recommended: `1` for large MoE models |
 
 | Parameter | Example Value | Description |
 |-----------|--------------|-------------|

@@ -345,12 +345,6 @@ def _get_cpu_binding(
 def _get_numactl_worker_args(
     parallel_config, local_rank: int, dp_local_rank: int | None = None
 ) -> str:
-    from vllm.envs import is_lk_moe_feature_enabled, is_numa_interleave_enabled
- 
-    if is_lk_moe_feature_enabled():
-        if is_numa_interleave_enabled():
-            return "--interleave=all"
-        return None
     """Compute the numactl args for a single TP/PP worker subprocess."""
     gpu_index = _get_gpu_index(parallel_config, local_rank, dp_local_rank)
     numa_node = _get_numa_node(parallel_config, gpu_index)
@@ -519,22 +513,33 @@ def configure_subprocess(
 ):
     """Temporarily replace the multiprocessing executable with a numactl wrapper."""
     parallel_config = vllm_config.parallel_config
-    if not parallel_config.numa_bind:
-        yield
-        return
-
-    if process_kind == "EngineCore":
-        numactl_args = _get_numactl_enginecore_args(
-            parallel_config, local_rank, dp_local_rank
-        )
-    elif process_kind == "worker":
-        numactl_args = _get_numactl_worker_args(
-            parallel_config, local_rank, dp_local_rank
+    from vllm.envs import is_lk_moe_feature_enabled, is_numa_interleave_enabled
+    
+    # Check if NUMA interleave override should take precedence
+    if is_lk_moe_feature_enabled() and is_numa_interleave_enabled():  
+        numactl_args = "--interleave=all"
+        logger.info(
+            "Enabling NUMA interleave override when LVLLM_MOE_NUMA_ENABLED=1 "
+            "and LVLLM_ENABLE_NUMA_INTERLEAVE=1"
         )
     else:
-        raise ValueError(
-            f"Unknown process_kind {process_kind!r}; expected 'worker' or 'EngineCore'."
-        )
+        # Original logic
+        if not parallel_config.numa_bind:
+            yield
+            return
+
+        if process_kind == "EngineCore":
+            numactl_args = _get_numactl_enginecore_args(
+                parallel_config, local_rank, dp_local_rank
+            )
+        elif process_kind == "worker":
+            numactl_args = _get_numactl_worker_args(
+                parallel_config, local_rank, dp_local_rank
+            )
+        else:
+            raise ValueError(
+                f"Unknown process_kind {process_kind!r}; expected 'worker' or 'EngineCore'."
+            )
 
     executable, debug_str = _get_numactl_executable()
     numactl_args = _resolve_numactl_args(numactl_args)

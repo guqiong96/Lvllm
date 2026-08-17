@@ -152,6 +152,7 @@ class RoutedExperts(PluggableLayer):
             )
         self.max_num_batched_tokens = vllm_config.scheduler_config.max_num_batched_tokens
         self.max_num_group_batch_size = self.get_max_num_group_batch_size()
+        self.use_gpu_prefill = is_lk_moe_use_gpu_prefill()
          
         from vllm.model_executor.layers.fused_moe.config import MoEActivation
         
@@ -1507,6 +1508,7 @@ class RoutedExperts(PluggableLayer):
             self.lk_moe_config.swiglu_alpha = self.swiglu_alpha 
         if self.swiglu_limit is not None:
             self.lk_moe_config.swiglu_limit = self.swiglu_limit
+        self.lk_moe_config.use_gpu_prefill = self.use_gpu_prefill
 
         # no global scale
         if self.params_dtype == torch.bfloat16:
@@ -1589,6 +1591,7 @@ class RoutedExperts(PluggableLayer):
             self.lk_moe_config.swiglu_alpha = self.swiglu_alpha 
         if self.swiglu_limit is not None:
             self.lk_moe_config.swiglu_limit = self.swiglu_limit
+        self.lk_moe_config.use_gpu_prefill = self.use_gpu_prefill
 
         # no global scale
         if self.params_dtype == torch.bfloat16:
@@ -1640,6 +1643,7 @@ class RoutedExperts(PluggableLayer):
             self.lk_moe_config.swiglu_alpha = self.swiglu_alpha 
         if self.swiglu_limit is not None:
             self.lk_moe_config.swiglu_limit = self.swiglu_limit
+        self.lk_moe_config.use_gpu_prefill = self.use_gpu_prefill
         
         # no scale
         if self.params_dtype == torch.bfloat16:
@@ -1713,6 +1717,7 @@ class RoutedExperts(PluggableLayer):
             self.lk_moe_config.swiglu_alpha = self.swiglu_alpha 
         if self.swiglu_limit is not None:
             self.lk_moe_config.swiglu_limit = self.swiglu_limit
+        self.lk_moe_config.use_gpu_prefill = self.use_gpu_prefill
         
          
         if self.params_dtype == torch.bfloat16:
@@ -1783,6 +1788,7 @@ class RoutedExperts(PluggableLayer):
             self.lk_moe_config.swiglu_alpha = self.swiglu_alpha 
         if self.swiglu_limit is not None:
             self.lk_moe_config.swiglu_limit = self.swiglu_limit
+        self.lk_moe_config.use_gpu_prefill = self.use_gpu_prefill
 
         # no global scale
         if self.params_dtype == torch.bfloat16:
