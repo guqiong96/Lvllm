@@ -210,7 +210,7 @@ sudo dnf install numactl-devel        # Rocky Linux
  
 
 ```bash 
-pip install https://github.com/guqiong96/Lvllm/releases/download/lvllm-v2.3.10/lvllm-2.3.10-cp312-cp312-manylinux_2_34_x86_64.whl
+pip install https://github.com/guqiong96/Lvllm/releases/download/lvllm-v2.3.11/lvllm-2.3.11-cp312-cp312-manylinux_2_34_x86_64.whl
 
 # check the latest version at: https://github.com/guqiong96/Lvllm/releases
 
