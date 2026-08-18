@@ -853,7 +853,7 @@ pybase64==1.4.3
     # via -r requirements/test/../common.txt
 pycountry==24.6.1
     # via pydantic-extra-types
-pycparser==2.22
+pycparser==3.0
     # via cffi
 pycryptodomex==3.22.0
     # via blobfile
