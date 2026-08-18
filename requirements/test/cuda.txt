@@ -103,7 +103,7 @@ cachetools==5.5.2
     #   google-auth
 cbor2==6.1.2
     # via -r requirements/test/../common.txt
-certifi==2024.8.30
+certifi==2026.7.22
     # via
     #   httpcore
     #   httpx
