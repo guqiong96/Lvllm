@@ -482,7 +482,7 @@ lm-format-enforcer==0.11.3
     #   -r requirements/test/../common.txt
 loguru==0.7.3
     # via compressed-tensors
-lxml==5.3.0
+lxml==6.1.2
     # via
     #   blobfile
     #   gpt-oss
