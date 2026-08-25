@@ -795,7 +795,7 @@ polars==1.29.0
     # via mteb
 pooch==1.8.2
     # via librosa
-portalocker==2.10.1
+portalocker==4.2.0
     # via sacrebleu
 pqdm==0.2.0
     # via -r requirements/test/cuda.in
