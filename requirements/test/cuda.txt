@@ -97,7 +97,7 @@ bounded-pool-executor==0.0.3
     # via pqdm
 buildkite-test-collector==0.1.9
     # via -r requirements/test/cuda.in
-cachetools==5.5.2
+cachetools==7.1.7
     # via
     #   -r requirements/test/../common.txt
     #   google-auth
