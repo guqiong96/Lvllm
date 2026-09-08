@@ -411,7 +411,7 @@ interegular==0.3.3
     # via lm-format-enforcer
 isodate==0.7.2
     # via azure-storage-blob
-isort==5.13.2
+isort==9.0.1
     # via datamodel-code-generator
 jinja2==3.1.6
     # via
