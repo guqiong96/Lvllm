@@ -575,6 +575,11 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
         params_dtype: torch.dtype,
         **extra_weight_attrs,
     ):
+        from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
+        from vllm.platforms import current_platform
+        device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
+        if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
+            device = "cpu"
         layer.input_dtype = self.input_dtype
         extra_weight_attrs.update(
             {
@@ -594,6 +599,7 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
                 hidden_size,
                 2 * intermediate_size_per_partition // self.quant_config.pack_factor,
                 dtype=torch.int32,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -606,6 +612,7 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
                 intermediate_size_per_partition,
                 hidden_size // self.quant_config.pack_factor,
                 dtype=torch.int32,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -625,6 +632,7 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
                 num_groups_w13,
                 intermediate_size_per_partition * 2,
                 dtype=params_dtype,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -632,7 +640,7 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
         set_weight_attrs(w13_scales, extra_weight_attrs)
 
         w2_scales = Parameter(
-            torch.empty(num_experts, num_groups_w2, hidden_size, dtype=params_dtype),
+            torch.empty(num_experts, num_groups_w2, hidden_size, dtype=params_dtype, device=device),
             requires_grad=False,
         )
         layer.register_parameter("w2_scales", w2_scales)
@@ -646,6 +654,7 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
                 num_groups_w13,
                 2 * intermediate_size_per_partition // self.quant_config.pack_factor,
                 dtype=torch.int32,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -658,6 +667,7 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
                 num_groups_w2,
                 hidden_size // self.quant_config.pack_factor,
                 dtype=torch.int32,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -668,6 +678,9 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
         layer.workspace = marlin_make_workspace_new(device, 4)
 
     def process_weights_after_loading(self, layer: RoutedExperts) -> None:
+        from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
+        if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
+            return
         converted = convert_to_wna16_moe_kernel_format(
             backend=self.wna16_moe_backend,
             layer=layer,
