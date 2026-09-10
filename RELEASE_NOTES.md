@@ -1,29 +1,31 @@
-# Release Notes — v0.29.0
+# Release Notes — 3116c5d
 
-**Base Version:** vllm v0.29.0 (upstream) + lk_moe
-**Release Type:** Feature integration release (Lvllm-v2.4.0)
+**Base Version:** vllm commit 3116c5d (upstream, incl. UVA PLE-offload + Engram TP) + lk_moe
+**Release Type:** Feature integration release (Lvllm)
 
 ## What's in this release
 
-This release syncs the branch onto upstream vllm `v0.29.0` and keeps the **lk_moe** hybrid-inference
-integration on top of it. Per the release policy the diff against upstream stays minimal — just the
-lk_moe layer plus necessary bug-fix patches.
+This release is rebuilt onto upstream vllm base commit `3116c5d` (which includes the official
+`[Qwen4Exp] Support UVA PLE-offload and Engram tensor parallelism` PR) and keeps the **lk_moe**
+hybrid-inference integration on top of it. Per the release policy the diff against upstream stays
+minimal — just the lk_moe layer plus necessary bug-fix patches.
 
 ## Summary of changes
 
-- Synced upstream vllm to `v0.29.0`.
+- Rebuilt onto upstream base commit `3116c5d` (UVA PLE-offload + Engram TP).
 - lk_moe CPU-GPU hybrid MoE inference (see `README.md`).
 - AutoAWQ MoE: handle CPU-resident layers (keep weights off the GPU device).
-- Added this `RELEASE_NOTES.md` and the portable lk_moe patch `patches/01_lk_moe__v0.29.0.patch`.
+- Added this `RELEASE_NOTES.md` and the portable lk_moe patch `patches/01_lk_moe__3116c5d.patch`.
 
 ## Applying the patch
 
-On a clean upstream `v0.29.0` checkout:
+On a clean upstream `3116c5d` checkout:
 
 ```bash
-git clone --branch v0.29.0 https://github.com/vllm-project/vllm.git
+git clone https://github.com/vllm-project/vllm.git
 cd vllm
-git apply ../Lvllm/patches/01_lk_moe__v0.29.0.patch
+git checkout 3116c5d
+git apply ../Lvllm/patches/01_lk_moe__3116c5d.patch
 ```
 
 ## Additional support branches
