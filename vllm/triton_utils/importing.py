@@ -35,7 +35,7 @@ if HAS_TRITON:
         ]
 
         # Check Triton CPU
-        if "cpu" in version("vllm"):
+        if "cpu" in version("lvllm"):
             if "cpu" in backends:
                 HAS_TRITON = True
                 # Suppress following warnings on CPU-only platforms

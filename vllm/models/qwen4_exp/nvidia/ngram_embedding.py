@@ -46,6 +46,8 @@ from vllm.utils.torch_utils import get_accelerator_view_from_cpu_tensor
 from ..common.ple import PLEVocabParallelEmbedding
 from .ops.ple import ple_ngram_ids
 
+from vllm.utils.math_utils import next_power_of_2
+
 logger = init_logger(__name__)
 
 
@@ -416,7 +418,7 @@ class Qwen4ExpPLEPinnedHostEmbedding(Qwen4ExpPLEEmbedding):
             data_parallel_rank=data_parallel_rank,
         )
         self._uva_weight = get_accelerator_view_from_cpu_tensor(self.weight)
-        self._block_d = triton.next_power_of_2(self.embedding_dim)
+        self._block_d = next_power_of_2(self.embedding_dim)
         self._prefetch_stream = torch.cuda.Stream(device=self._uva_weight.device)
         self._prefetch_buffer = torch.empty(
             max_total_tokens * self.etp_data_parallel_size,
