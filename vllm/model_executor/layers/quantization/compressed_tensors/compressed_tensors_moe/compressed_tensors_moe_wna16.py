@@ -228,6 +228,11 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
         params_dtype: torch.dtype,
         **extra_weight_attrs,
     ):
+        from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
+        from vllm.platforms import current_platform
+        device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
+        if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
+            device = "cpu"
         # Will transpose the loaded weight along the
         # intermediate and hidden dim sizes. Will
         # shard for TP along the transposed dims
@@ -244,6 +249,7 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
                     intermediate_size_per_partition,
                 ),
                 dtype=torch.int32,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -259,6 +265,7 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
                     intermediate_size_per_partition,
                 ),
                 dtype=torch.int32,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -355,6 +362,7 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
                         num_groups_w13=num_groups_w13,
                     ),
                     dtype=torch.int32,
+                    device=device,
                 ),
                 requires_grad=False,
             )
@@ -371,6 +379,7 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
                         num_groups_w2=num_groups_w2,
                     ),
                     dtype=torch.int32,
+                    device=device,
                 ),
                 requires_grad=False,
             )
@@ -378,12 +387,12 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
             set_weight_attrs(w2_zp, extra_weight_attrs)
 
         w2_weight_shape = torch.nn.Parameter(
-            torch.empty(num_experts, 2), requires_grad=False
+            torch.empty(num_experts, 2, device=device), requires_grad=False
         )
         layer.register_parameter("w2_weight_shape", w2_weight_shape)
         set_weight_attrs(w2_weight_shape, extra_weight_attrs)
         w13_weight_shape = torch.nn.Parameter(
-            torch.empty(num_experts, 2), requires_grad=False
+            torch.empty(num_experts, 2, device=device), requires_grad=False
         )
 
         layer.register_parameter("w13_weight_shape", w13_weight_shape)
@@ -406,6 +415,9 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
         )
 
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
+        from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
+        if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
+            return
         # Process weights using the shared oracle infrastructure
         converted = convert_to_wna16_moe_kernel_format(
             backend=self.wna16_backend,

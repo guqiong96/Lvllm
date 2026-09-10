@@ -564,6 +564,10 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         params_dtype: torch.dtype,
         **extra_weight_attrs,
     ):
+        from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
+        device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
+        if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
+            device = "cpu"
         layer.num_experts = num_experts
         layer.orig_dtype = params_dtype
         layer.weight_block_size = None
@@ -601,6 +605,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                 self.moe.w13_num_shards * intermediate_size_per_partition,
                 hidden_size,
                 dtype=params_dtype,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -613,6 +618,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                 hidden_size,
                 intermediate_size_per_partition,
                 dtype=params_dtype,
+                device=device,
             ),
             requires_grad=False,
         )
@@ -626,13 +632,14 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                     num_experts,
                     self.moe.w13_num_shards * intermediate_size_per_partition,
                     dtype=layer.orig_dtype,
+                    device=device,
                 ),
                 requires_grad=False,
             )
             layer.register_parameter("w13_bias", w13_bias)
             set_weight_attrs(w13_bias, extra_weight_attrs)
             w2_bias = torch.nn.Parameter(
-                torch.zeros(num_experts, hidden_size, dtype=layer.orig_dtype),
+                torch.zeros(num_experts, hidden_size, dtype=layer.orig_dtype, device=device),
                 requires_grad=False,
             )
             layer.register_parameter("w2_bias", w2_bias)
@@ -642,9 +649,9 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         if not self.block_quant:
             # For per-tensor quant, the scales are per expert and weight.
             w13_scale_data = torch.ones(
-                num_experts, self.moe.w13_num_shards, dtype=torch.float32
+                num_experts, self.moe.w13_num_shards, dtype=torch.float32, device=device
             )
-            w2_scale_data = torch.ones(num_experts, dtype=torch.float32)
+            w2_scale_data = torch.ones(num_experts, dtype=torch.float32, device=device)
         else:
             # For block quant, the scales are per block (typically 128x128).
             w13_scale_data = torch.ones(
@@ -653,12 +660,14 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                 * ((intermediate_size_per_partition + block_n - 1) // block_n),
                 (hidden_size + block_k - 1) // block_k,
                 dtype=torch.float32,
+                device=device,
             )
             w2_scale_data = torch.ones(
                 num_experts,
                 (hidden_size + block_n - 1) // block_n,
                 (intermediate_size_per_partition + block_k - 1) // block_k,
                 dtype=torch.float32,
+                device=device,
             )
         w13_weight_scale = torch.nn.Parameter(w13_scale_data, requires_grad=False)
         w2_weight_scale = torch.nn.Parameter(w2_scale_data, requires_grad=False)
@@ -740,6 +749,9 @@ class Fp8MoEMethod(FusedMoEMethodBase):
         )
 
     def process_weights_after_loading(self, layer: RoutedExperts) -> None:
+        from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
+        if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
+            return
         if is_weights_pre_processed():
             # Weights are already in kernel format; rebuild the kernel only.
             self._init_moe_kernel(layer)

@@ -104,11 +104,14 @@ def process_weights_after_loading(
     methods skip tensor transforms and must declare
     ``supports_pre_processed_weights``, otherwise this raises ``RuntimeError``.
     """
+    from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
     # Reclaim memory when an explicit lm_head has been
     # loaded, but it is identical to the input embeddings.
     maybe_retie_word_embeddings(model, model_config)
 
     for name, module in model.named_modules():
+        if isinstance(module, RoutedExperts) and not getattr(module, "process_lk_moe_already_called", False):
+            module.process_weights_after_loading()
         quant_method = getattr(module, "quant_method", None)
         if isinstance(quant_method, QuantizeMethodBase):
             if (
@@ -143,6 +146,9 @@ def process_weights_after_loading(
             # Repacking transients above can leave large amounts of memory in
             # the caching allocator, which starves the OS on UMA devices.
             release_device_memory_under_pressure(target_device)
+        if isinstance(module, RoutedExperts) and not getattr(module, "process_lk_moe_already_called", False):
+            module.clean_weights_after_loading() 
+            setattr(module, "process_lk_moe_already_called", True)
 
     # Initialize post-load attention weights for any attention layer and MM
     # encoder. NOTE: Happens after other modules so we can easily decompress
@@ -175,6 +181,10 @@ def process_weights_after_loading(
 
 @contextmanager
 def device_loading_context(module: torch.nn.Module, target_device: torch.device):
+    from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
+    if isinstance(module, RoutedExperts) and not module.is_gpu_resident_layer: 
+        yield module
+        return
     if target_device.type == "cpu":
         # If target is CPU, no need to move anything
         yield module
@@ -196,6 +206,8 @@ def device_loading_context(module: torch.nn.Module, target_device: torch.device)
         yield module
 
     finally:
+        if isinstance(module, RoutedExperts) and not module.is_gpu_resident_layer:  
+            return
         use_pin_memory = (
             is_pin_memory_available()
             and not envs.VLLM_WEIGHT_OFFLOADING_DISABLE_PIN_MEMORY
