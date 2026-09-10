@@ -1102,7 +1102,8 @@ COPY requirements/test/cuda.txt requirements/test/cuda.txt
 COPY requirements/dev.txt requirements/dev.txt
 COPY use_existing_torch.py use_existing_torch.py
 COPY --from=base /workspace/torch_lib_versions.txt torch_lib_versions.txt
-RUN --mount=type=cache,target=/opt/uv/cache \
+# Source-built wheels in this cache must match the Ubuntu 22.04 ABI.
+RUN --mount=type=cache,id=uv-v027-ubuntu2204,target=/opt/uv/cache \
     CUDA_MAJOR="${CUDA_VERSION%%.*}"; \
     if [ "$CUDA_MAJOR" -ge 12 ]; then \
         if [ "${PYTORCH_NIGHTLY}" = "1" ]; then \
