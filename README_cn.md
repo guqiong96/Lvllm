@@ -12,7 +12,7 @@ lk_moe 提供"混合路径"，LvLLM 是 lk_moe 集成到 vllm 的具体案例。
 
 ---
 
-## 一、为什么要用 lk_moe？
+## 为什么要用 lk_moe？
 
 lk_moe 让 MOE 模型的占用横跨**显存 + 内存**，并在 NUMA 感知下把专家计算调度到 **CPU + GPU**：
 
@@ -31,7 +31,7 @@ lk_moe 让 MOE 模型的占用横跨**显存 + 内存**，并在 NUMA 感知下�
 
 ---
 
-## 二、如何集成 lk_moe
+## 如何集成 lk_moe
 
 lk_moe 通过 `pip install lk_moe` 安装，它对外暴露少量 C++ 内核类（`MOE_WNA16`、
 `MOE_FP8`、`MOE_MXFP4`、`LKEmbedding` 等），由 `MOEConfigV2` 配置驱动。引擎内部处理专家权重放置
@@ -63,9 +63,9 @@ vllm 侧的集成工作**只是把每个 MOE 层路由到 lk_moe**（哪些层�
 
 ### 集成案例 — LvLLM（vllm）逐文件
 
-整个 lk_moe 集成被整理为**一个可移植补丁**：[`patches/01_lk_moe__v0.29.0.patch`](./patches/01_lk_moe__v0.29.0.patch)
-—— 即上游 `v0.29.0` 与当前 lk_moe 分支的全部代码差异（不包含 README/RELEASE_NOTES 文档）。
-在干净的 `v0.29.0` checkout 上执行 `git apply patches/01_lk_moe__v0.29.0.patch` 即可。
+整个 lk_moe 集成被整理为**一个可移植补丁**：[`patches/01_lk_moe__3116c5d.patch`](./patches/01_lk_moe__3116c5d.patch)
+—— 即上游 base commit `3116c5d` 与当前 lk_moe 分支的全部代码差异（不包含 README/RELEASE_NOTES 文档）。
+在干净的 `3116c5d` checkout 上执行 `git apply patches/01_lk_moe__3116c5d.patch` 即可。
 
 | 文件 | 作用 |
 |---|---|
@@ -97,7 +97,7 @@ DeepSeek-V4 专用分支：[Lvllmds4](https://github.com/guqiong96/Lvllmds4)（S
 ### 版本变更
 
 ```bash
-2026-09-09: Lvllm-v2.4.0 - 同步上游 vllm 至 v0.29.0，lk_moe 集成（README/RELEASE_NOTES/patch）
+2026-09-10: Lvllm - 基于上游 base commit 3116c5d 重建（UVA PLE-offload + Engram TP），lk_moe 集成（README/RELEASE_NOTES/patch）
 2026-07-17: lvllm-v2.3.6 - 新增 dtype float16 支持 for SM75 GPU Prefill
 2026-07-08: lvllm-v2.3.2 - 新增 ModelOpt W4A16 NVFP4 量化类型支持
 2026-07-05: lvllm-v2.3.0 - 优化GPU预填充速度，CPU AVX512优化，取消LVLLM_GPU_RESIDENT_MOE_EXPERTS
@@ -284,18 +284,19 @@ auditwheel repair dist/lvllm*-2.4.0-cp312-cp312-linux_x86_64.whl -w dist/ \
 
 ## 四、如何生成 lk_moe 补丁
 
-可移植补丁 `patches/01_lk_moe__v0.29.0.patch` 通过对比当前代码树与上游 tag 生成（使用本地
-`v0.29.0` tag，无需联网）。**注意：补丁只包含 lk_moe 集成的代码改动，不包含
+可移植补丁 `patches/01_lk_moe__3116c5d.patch` 通过对比当前代码树与上游 base commit 生成（使用本地
+`3116c5d` commit，无需联网）。**注意：补丁只包含 lk_moe 集成的代码改动，不包含
 README.md / README_cn.md / RELEASE_NOTES.md 等文档。**
 
 ```bash
-git diff v0.29.0 -- . ':!README.md' ':!README_cn.md' ':!RELEASE_NOTES.md' > patches/01_lk_moe__v0.29.0.patch
+git diff 3116c5d -- . ':!README.md' ':!README_cn.md' ':!RELEASE_NOTES.md' > patches/01_lk_moe__3116c5d.patch
 ```
 
-在干净的上游 `v0.29.0` checkout 上应用：
+在干净的上游 `3116c5d` checkout 上应用：
 
 ```bash
-git clone --branch v0.29.0 https://github.com/vllm-project/vllm.git
+git clone https://github.com/vllm-project/vllm.git
 cd vllm
-git apply ../Lvllm/patches/01_lk_moe__v0.29.0.patch
+git checkout 3116c5d
+git apply ../Lvllm/patches/01_lk_moe__3116c5d.patch
 ```

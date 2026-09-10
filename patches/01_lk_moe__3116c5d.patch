@@ -1,0 +1,3924 @@
+diff --git a/benchmarks/llm-performance-test.html b/benchmarks/llm-performance-test.html
+new file mode 100644
+index 0000000000..6615b44595
+--- /dev/null
++++ b/benchmarks/llm-performance-test.html
+@@ -0,0 +1,1833 @@
++<!DOCTYPE html>
++<html lang="zh-CN">
++
++<head>
++    <meta charset="UTF-8">
++    <meta name="viewport" content="width=device-width, initial-scale=1.0">
++    <title>Local LLM Inference Performance Testing Tool</title>
++    <style>
++        html,
++        body {
++            padding: 0;
++            box-sizing: border-box;
++
++            background-color: #ffffff;
++
++            font-family: "Microsoft YaHei", "微软雅黑", sans-serif;
++            font-size: 15px;
++        }
++
++        *,
++        *::before,
++        *::after {
++            box-sizing: inherit;
++        }
++
++        input,
++        button,
++        textarea,
++        select {
++            font-family: inherit;
++        }
++
++        .page-container {
++            display: flex;
++            flex-direction: column;
++            gap: 20px;
++        }
++
++        .page-header {
++            display: flex;
++            flex-direction: column;
++            justify-content: center;
++            align-items: center;
++        }
++
++        .page-title {
++            color: #000;
++
++            font-size: 36px;
++            font-weight: bold;
++        }
++
++        .page-desc {
++            color: #555;
++
++            font-size: 24px;
++        }
++
++        .page-content {
++            display: flex;
++            gap: 15px;
++        }
++
++        .left-panel,
++        .center-panel,
++        .right-panel {
++            box-sizing: border-box;
++            padding: 10px;
++
++            display: flex;
++            flex-direction: column;
++            gap: 10px;
++
++            border-radius: 8px;
++            box-shadow: 0 0 2px 2px rgba(0, 0, 0, 0.1);
++        }
++
++        .left-panel {
++            min-width: 470px;
++            max-width: 470px;
++
++            flex: 1;
++        }
++
++        .center-panel {
++            min-width: 1000px;
++            max-width: 1000px;
++
++            flex: 2;
++        }
++
++        .right-panel {
++            min-width: 1020px;
++            max-width: 1020px;
++
++            flex: 2;
++        }
++
++        .input-header {
++            padding: 8px 0;
++
++            border-radius: 4px;
++            background-color: #e6f7ff;
++
++            font-size: 16px;
++            font-weight: bold;
++        }
++
++        .input-field {
++            padding: 5px 0;
++
++            display: flex;
++            align-items: center;
++        }
++
++        .input-field label {
++            padding: 4px 8px 4px 0;
++
++            white-space: nowrap;
++            font-size: 15px;
++        }
++
++        .input-field input[type="text"],
++        .input-field input[type="password"],
++        .input-field input[type="number"] {
++            box-sizing: border-box;
++            padding: 5px;
++
++            flex: 1;
++
++            border: 1px solid #ddd;
++            border-radius: 4px;
++
++            font-size: 14px;
++        }
++
++        #lengthTip {
++            padding: 4px 0;
++
++            color: #888;
++
++            font-size: 14px;
++        }
++
++        .start-button,
++        .stop-button {
++            width: 100%;
++            padding: 14px 20px;
++
++            border: none;
++            border-radius: 5px;
++            color: #fff;
++
++            font-size: 20px;
++
++            cursor: pointer;
++            transition: background-color 0.3s ease;
++        }
++
++        .start-button {
++            background-color: #28a745;
++        }
++
++        .start-button:hover {
++            background-color: #1e7e34;
++        }
++
++        .stop-button {
++            background-color: #dc3545;
++        }
++
++        .stop-button:hover {
++            background-color: #c82333;
++        }
++
++        .center-buttons {
++            display: flex;
++            gap: 10px;
++        }
++
++        .center-buttons button {
++            min-width: 120px;
++            padding: 10px 15px;
++
++            flex-grow: 1;
++
++            border: none;
++            border-radius: 5px;
++            background-color: #007bff;
++            color: #fff;
++
++            font-size: 15px;
++
++            cursor: pointer;
++            transition: background-color 0.3s ease;
++        }
++
++        .center-buttons button:hover {
++            background-color: #0056b3;
++        }
++
++        .summary-display {
++            padding: 15px;
++
++            border: 1px solid #ddd;
++            border-bottom: 1.5px solid #e0e0e0;
++            border-radius: 8px 8px 0 0;
++            color: #000;
++
++            font-size: 15px;
++            font-weight: 500;
++        }
++
++        .table-container {
++            overflow-x: auto;
++
++            flex-grow: 1;
++        }
++
++        .result-table {
++            width: 100%;
++            min-width: 500px;
++
++            border-collapse: collapse;
++        }
++
++        .result-table th {
++            padding: 8px;
++
++            border: 1px solid #ddd;
++
++            font-size: 15px;
++            text-align: center;
++        }
++
++        .result-table td {
++            padding: 8px;
++
++            border: 1px solid #ddd;
++
++            font-size: 15px;
++            text-align: right;
++        }
++
++        .result-table th:last-child,
++        .result-table td:last-child {
++            min-width: 92px;
++
++            text-align: center;
++        }
++
++        .author-display {
++            padding: 15px 0;
++
++            color: #888;
++
++            font-size: 15px;
++            text-align: center;
++        }
++
++        .author-display a {
++            color: #007bff;
++
++            text-decoration: none;
++        }
++
++        .chart-canvas {
++            width: 1000px !important;
++            height: 500px !important;
++        }
++
++        .detail-button {
++            padding: 4px 8px;
++
++            font-size: 12px;
++
++            cursor: pointer;
++        }
++
++        .detail-overlay {
++            width: 100vw;
++            height: 100vh;
++
++            position: fixed;
++            top: 0;
++            left: 0;
++            z-index: 1000;
++            display: flex;
++            justify-content: center;
++            align-items: center;
++
++            background-color: rgba(0, 0, 0, 0.2);
++        }
++
++        .detail-dialog {
++            min-width: 800px;
++            max-width: 80%;
++            max-height: 80%;
++            overflow: auto;
++            padding: 20px;
++
++            display: flex;
++            flex-direction: column;
++            gap: 10px;
++
++            border-radius: 8px;
++            background-color: #fff;
++            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
++        }
++
++        .detail-header {
++            padding: 0 0 10px 0;
++
++            display: flex;
++            justify-content: space-between;
++            align-items: center;
++        }
++
++        .detail-title {
++            color: #000;
++
++            font-size: 20px;
++            font-weight: bold;
++        }
++
++        .detail-close-button {
++            padding: 10px 20px;
++
++            border-radius: 4px;
++            border: none;
++            background-color: #dc3545;
++            color: #fff;
++
++            font-size: 15px;
++
++            cursor: pointer;
++            transition: background-color 0.3s ease;
++        }
++
++        .detail-close-button:hover {
++            background-color: #c82333;
++        }
++
++        .detail-row {
++            display: flex;
++            flex-wrap: wrap;
++            gap: 24px;
++            align-items: center;
++        }
++
++        .detail-field {
++            display: flex;
++            align-items: center;
++            gap: 8px;
++        }
++
++        .detail-field-label {
++            padding: 6px 0;
++
++            color: #000;
++
++            font-size: 15px;
++            font-weight: bold;
++        }
++
++        .detail-field-content {
++            padding: 0 10px;
++
++            background-color: #e9ecef;
++            color: #000;
++
++            font-size: 15px;
++        }
++
++        .detail-block-label {
++            padding: 6px 0;
++
++            color: #000;
++
++            font-size: 15px;
++            font-weight: bold;
++        }
++
++        .detail-block-content {
++            padding: 10px 15px;
++
++            border-left: 4px solid;
++            border-right: 4px solid;
++            border-radius: 6px;
++            background-color: #e9ecef;
++            color: #000;
++
++            font-family: 'Courier New', monospace;
++            font-size: 16px;
++            line-height: 1.2;
++            white-space: pre-wrap;
++        }
++
++        .system-prompt-block {
++            border-left-color: #ffc107;
++            border-right-color: #ffc107;
++        }
++
++        .user-prompt-block {
++            border-left-color: #007bff;
++            border-right-color: #007bff;
++        }
++
++        .output-block {
++            border-left-color: #28a745;
++            border-right-color: #28a745;
++        }
++
++        .alert-overlay {
++            width: 100vw;
++            height: 100vh;
++
++            position: fixed;
++            top: 0;
++            left: 0;
++            z-index: 2000;
++            display: flex;
++            align-items: center;
++            justify-content: center;
++
++            background-color: rgba(0, 0, 0, 0.3);
++        }
++
++        .alert-dialog {
++            min-width: 400px;
++            max-width: 40%;
++            max-height: 40%;
++            overflow: auto;
++            padding: 20px;
++
++            display: flex;
++            flex-direction: column;
++            gap: 10px;
++
++            border-radius: 8px;
++            background-color: #fff;
++            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.18);
++
++            text-align: center;
++        }
++
++        .alert-header {
++            padding: 0 0 10px 0;
++
++            border-bottom: 1px solid #e0e0e0;
++        }
++
++        .alert-title {
++            color: #000;
++
++            font-size: 20px;
++            font-weight: bold;
++        }
++
++        .alert-content {
++            padding: 10px 0;
++
++            background-color: #f8f9fa;
++            color: #000;
++
++            font-size: 15px;
++            line-height: 1.2;
++            white-space: pre-wrap;
++        }
++
++        .alert-confirm-button {
++            padding: 10px 20px;
++
++            border-radius: 4px;
++            border: none;
++            background-color: #007bff;
++            color: #fff;
++
++            font-size: 15px;
++
++            cursor: pointer;
++            transition: background-color 0.3s ease;
++        }
++
++        .alert-confirm-button:hover {
++            background-color: #0056b3;
++        }
++    </style>
++</head>
++
++<body>
++    <div class="page-container">
++        <div class="page-header">
++            <h1 class="page-title">Local LLM Inference Performance Testing Tool</h1>
++            <div class="page-desc">
++                Used to test the reasoning speed of local large language models with different input lengths, supporting result visualization and export.
++            </div>
++        </div>
++        <div class="page-content">
++            <div class="left-panel">
++                <!-- Server Information -->
++                <div>
++                    <div class="input-header">Server Information</div>
++                    <div class="input-field">
++                        <label for="processor">Processor: </label>
++                        <input type="text" id="processor" value="AMD EPYC 7642 * 2 NPS4 8 NUMA NODE">
++                    </div>
++                    <div class="input-field">
++                        <label for="mainboard">Motherboard: </label>
++                        <input type="text" id="mainboard" value="T1DEEP">
++                    </div>
++                    <div class="input-field">
++                        <label for="memory">Memory: </label>
++                        <input type="text" id="memory" value="DDR4 3200 1TB">
++                    </div>
++                    <div class="input-field">
++                        <label for="gpu">GPU：</label>
++                        <input type="text" id="gpu" value="NVIDIA RTX 5060Ti * 2">
++                    </div>
++                    <div class="input-field">
++                        <label for="system">Operating System: </label>
++                        <input type="text" id="system" value="Rocky Linux 9.5">
++                    </div>
++                </div>
++                <!-- Inference Engine Information -->
++                <div>
++                    <div class="input-header">Inference Engine Information</div>
++                    <div class="input-field">
++                        <label for="engineName">Engine Name: </label>
++                        <input type="text" id="engineName" value="Lvllm">
++                    </div>
++                    <div class="input-field">
++                        <label for="engineModelName">Model Information: </label>
++                        <input type="text" id="engineModelName" value="DeepSeek-V4-Flash-0731">
++                    </div>
++                </div>
++                <!-- Interface Information -->
++                <div>
++                    <div class="input-header">Interface Information</div>
++                    <div class="input-field">
++                        <label for="requestUrl">Request URL: </label>
++                        <input type="text" id="requestUrl" value="http://192.168.10.220:8070/v1/chat/completions">
++                    </div>
++                    <div class="input-field">
++                        <label for="modelName">Model Name: </label>
++                        <input type="text" id="modelName" value="DeepSeek-V4-Flash-0731">
++                    </div>
++                    <div class="input-field">
++                        <label for="apiKey">Request key: </label>
++                        <input type="password" id="apiKey" placeholder="If not required, please leave blank">
++                    </div>
++                </div>
++                <!-- Test information -->
++                <div>
++                    <div class="input-header">Test information</div>
++                    <div class="input-field">
++                        <label for="minInputLength">Minimum input length: </label>
++                        <input type="number" id="minInputLength" value="128">
++                    </div>
++                    <div class="input-field">
++                        <label for="maxInputLength">Maximum input length: </label>
++                        <input type="number" id="maxInputLength" value="32768">
++                    </div>
++                    <div class="input-field">
++                        <label for="step">Input length step size: </label>
++                        <input type="number" id="step" value="2">
++                    </div>
++                    <div class="input-field">
++                        <label for="maxOutputLength">Output length: </label>
++                        <input type="number" id="maxOutputLength" value="128">
++                    </div>
++                    <div class="input-field">
++                        <label for="structureLength">Model structure length: </label>
++                        <input type="number" id="structureLength" value="16" placeholder="It is recommended to fill in, common value is 4.">
++                    </div>
++                    <div id="lengthTip">
++                        Input length = System prompt length + User prompt length + Model structure length
++                    </div>
++                </div>
++            </div>
++            <div class="center-panel">
++                <!-- The upper middle part -->
++                <div>
++                    <button id="startButton" class="start-button">Start testing</button>
++                </div>
++                <div class="center-buttons">
++                    <button id="downloadChartButton">Download line chart</button>
++                    <button id="downloadCsvButton">Download CSV file</button>
++                    <button id="downloadMarkdownButton">Download Markdown file</button>
++                </div>
++                <!-- The middle lower part -->
++                <div class="table-container"> 
++                    <div id="summaryDisplay" class="summary-display"></div> <!-- Summary display area --> 
++                    <table id="resultTable" class="result-table"> <!-- Results table --> 
++                        <thead> 
++                            <tr> 
++                                <th>Input Length</th> <!-- Number of tokens in input text --> 
++                                <th>Prefill Time (ms)</th> <!-- Time taken for model to process input text (milliseconds) --> 
++                                <th>Prefill Speed (token/s)</th> <!-- Speed at which model processes input text (tokens per second) --> 
++                                <th>Output Length</th> <!-- Number of tokens in model-generated output text --> 
++                                <th>Output Time (ms)</th> <!-- Time taken for model to generate output text (milliseconds) --> 
++                                <th>Output Speed (token/s)</th> <!-- Speed at which model generates output text (tokens per second) --> 
++                                <th>Details</th> <!-- Link or button for detailed test results --> 
++                            </tr> 
++                        </thead> 
++                        <tbody> 
++                            <!-- Table content will be dynamically populated here --> 
++                        </tbody> 
++                    </table> 
++                </div> 
++                <div id="authorDisplay" class="author-display"> 
++                    This tool was developed by chaoshen999. Please visit <a href="https://github.com/chaoshen999" target="_blank">GitHub</a> and give it a ⭐ 
++                    to show your support! 
++                </div>
++            </div>
++            <div class="right-panel">
++                <div>
++                    <canvas id="prefillChart" class="chart-canvas"></canvas>
++                    <canvas id="outputChart" class="chart-canvas"></canvas>
++                </div>
++            </div>
++        </div>
++    </div>
++
++<script>
++        const words = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
++        let isTesting = false;
++        let testStartTime = null;
++        let testResults = [];
++        let abortController = null;
++
++        // Get DOM elements
++        const startButton = document.getElementById('startButton');
++        const downloadChartButton = document.getElementById('downloadChartButton');
++        const downloadCsvButton = document.getElementById('downloadCsvButton');
++        const downloadMarkdownButton = document.getElementById('downloadMarkdownButton');
++        const resultTableBody = document.querySelector('#resultTable tbody');
++        const prefillChartCanvas = document.getElementById('prefillChart');
++        const outputChartCanvas = document.getElementById('outputChart');
++        const summaryDisplayEl = document.getElementById('summaryDisplay');
++        const lengthTipEl = document.getElementById('lengthTip');
++
++        startButton.addEventListener('click', () => {
++            if (isTesting) {
++                stopTest();
++            } else {
++                startTest();
++            }
++        });
++
++        downloadChartButton.addEventListener('click', downloadChart);
++        downloadCsvButton.addEventListener('click', downloadCsv);
++        downloadMarkdownButton.addEventListener('click', downloadMarkdown);
++
++        // Update summary display area
++        updateSummaryDisplay();
++
++        // Real-time update of summary display area
++        ['processor', 'mainboard', 'memory', 'gpu', 'system', 'engineName', 'engineModelName'].forEach(id => {
++            const el = document.getElementById(id);
++            if (el) {
++                el.addEventListener('input', updateSummaryDisplay);
++            }
++        });
++
++        console.log("This tool is developed by chaoshen999. Welcome to https://github.com/chaoshen999 to give a ⭐ support!");
++
++        /**
++         * Start performance test
++         */
++        async function startTest() {
++            // console.log('Start testing.');
++
++            startButton.textContent = 'Stop Test';
++            startButton.classList.add('stop-button');
++            resultTableBody.innerHTML = '';
++            clearChart();
++
++            isTesting = true;
++            testStartTime = new Date();
++            testResults = [];
++
++            // Get input values
++            const requestUrl = document.getElementById('requestUrl').value;
++            const modelName = document.getElementById('modelName').value;
++            const apiKey = document.getElementById('apiKey').value;
++            const minInputLength = parseInt(document.getElementById('minInputLength').value);
++            const maxInputLength = parseInt(document.getElementById('maxInputLength').value);
++            const step = parseInt(document.getElementById('step').value);
++            const maxOutputLength = parseInt(document.getElementById('maxOutputLength').value);
++            const structureLengthInput = document.getElementById('structureLength');
++            const structureLength = structureLengthInput.value === '' ? 0 : parseInt(structureLengthInput.value);
++
++            // Validate input values
++            if (!requestUrl || !modelName || isNaN(minInputLength) || isNaN(maxInputLength) || isNaN(step) || isNaN(maxOutputLength) || isNaN(structureLength)) {
++                showAlert('Please fill in the interface information and test information.');
++                stopTest();
++                return;
++            }
++            if (minInputLength <= 0 || maxInputLength < minInputLength || step <= 0 || maxOutputLength <= 0 || structureLength < 0) {
++                showAlert('Please fill in reasonable test information.');
++                stopTest();
++                return;
++            }
++
++            if (minInputLength < 20) {
++                showAlert('The minimum input length needs to be greater than or equal to 20.');
++                stopTest();
++                return;
++            }
++
++            if (maxOutputLength < 3) {
++                showAlert('The output length needs to be greater than or equal to 3.');
++                stopTest();
++                return;
++            }
++
++            // Establish HTTP link before starting test
++            try {
++                const systemPrompt = generateSystemPrompt();
++                const userPrompt = generateUserPrompt(10);
++                const headers = {
++                    'Content-Type': 'application/json'
++                };
++                if (apiKey) {
++                    headers['Authorization'] = `Bearer ${apiKey}`;
++                }
++                const requestBody = JSON.stringify({
++                    model: modelName,
++                    messages: [
++                        { role: 'system', content: systemPrompt },
++                        { role: 'user', content: userPrompt }
++                    ],
++                    max_tokens: 3,
++                    temperature: 0.1,
++                    top_p: 0.1,
++                    stream: true
++                });
++                const response = await fetch(requestUrl, {
++                    method: 'POST',
++                    headers: headers,
++                    body: requestBody
++                });
++                if (response.body && response.body.getReader) {
++                    const reader = response.body.getReader();
++                    while (true) {
++                        const { done } = await reader.read();
++                        if (done) break;
++                    }
++                }
++                await new Promise(resolve => setTimeout(resolve, 1000));
++            } catch (e) {
++                // Ignore error
++            }
++
++            // Batch testing
++            for (let inputLength = minInputLength; inputLength <= maxInputLength; inputLength *= step) {
++                console.log('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>');
++                console.log(logTime(), 'Input length:', inputLength);
++
++                if (!isTesting) {
++                    return;
++                }
++
++                let testRowData = {};
++                let serverCompletionTokens = 0;
++                let streamTokens = 0;
++                let output = '';
++
++                let requestTime = undefined;
++                let responseTime = undefined;
++                let firstTokenTime = undefined;
++                let outputFinishTime = undefined;
++
++                let prefillTime = undefined;
++                let prefillSpeed = undefined;
++                let outputLength = undefined;
++                let outputTime = undefined;
++                let outputSpeed = undefined;
++
++                // Generate system prompt
++                const systemPrompt = generateSystemPrompt();
++                const systemPromptLength = countTokensByRule(systemPrompt);
++                // console.log('System prompt content:', systemPrompt);
++                // console.log('System prompt length:', systemPromptLength);
++
++                // Generate user prompt
++                // User prompt length = input length - system prompt length - model structure length
++                const userPromptLength = inputLength - systemPromptLength - structureLength;
++                const userPrompt = generateUserPrompt(userPromptLength);
++                // console.log('User prompt content:', userPrompt);
++                // console.log('User prompt length:', userPromptLength);
++
++                try {
++                    // Request headers
++                    const headers = {
++                        'Content-Type': 'application/json'
++                    };
++                    if (apiKey) {
++                        headers['Authorization'] = `Bearer ${apiKey}`;
++                    }
++                    // Request body
++                    const requestBody = JSON.stringify({
++                        model: modelName,
++                        messages: [
++                            { role: 'system', content: systemPrompt },
++                            { role: 'user', content: userPrompt }
++                        ],
++                        max_tokens: maxOutputLength,
++                        temperature: 1,
++                        top_p: 0.1,
++                        stream: true
++                    });
++
++                    // Initialize AbortController
++                    abortController = new AbortController();
++                    const signal = abortController.signal;
++
++                    requestTime = performance.now();
++                    console.log(logTime(), 'Request sent time:', formatTime(requestTime));
++
++                    const response = await fetch(requestUrl, {
++                        method: 'POST',
++                        headers: headers,
++                        body: requestBody,
++                        signal: signal
++                    });
++
++                    if (!response.ok) {
++                        throw new Error(`HTTP request error, status code: ${response.status}`);
++                    }
++
++                    const reader = response.body.getReader();
++                    const decoder = new TextDecoder('utf-8');
++                    let buffer = '';
++
++                    while (true) {
++                        console.log('==================================================');
++
++                        const { done, value } = await reader.read();
++
++                        responseTime = performance.now();
++                        console.log(logTime(), 'Response received time:', formatTime(responseTime));
++                        console.log(logTime(), 'Stream status:', { done, hasValue: !!value, valueLength: value?.length });
++
++                        if (done) {
++                            console.log(logTime(), 'done');
++
++                            if (!outputFinishTime) {
++                                outputFinishTime = responseTime;
++                                console.log(logTime(), 'Output finish time:', formatTime(outputFinishTime));
++                            }
++                            break;
++                        }
++
++                        buffer += decoder.decode(value, { stream: true });
++                        const lines = buffer.split('\n');
++                        buffer = lines.pop();
++
++                        for (const line of lines) {
++                            console.log(logTime(), 'Stream content:', line);
++
++                            if (line.trim() === '') {
++                                continue;
++                            }
++                            if (!line.startsWith('data:')) {
++                                continue;
++                            }
++
++                            const data = line.substring(5).trim();
++                            if (data === '[DONE]') {
++                                console.log(logTime(), '[DONE]');
++
++                                outputFinishTime = responseTime;
++                                console.log(logTime(), 'Output finish time:', formatTime(outputFinishTime));
++                                break;
++                            }
++
++                            const json = JSON.parse(data);
++			    if (json.choices && json.choices[0] && json.choices[0].delta) {
++                                const delta = json.choices[0].delta;
++                                
++ 
++                                let contentChunk = null;
++                                
++ 
++                                if (delta.content) {
++                                    contentChunk = delta.content;
++                                } else if (delta.reasoning_content) {
++                                    contentChunk = delta.reasoning_content;
++                                } else if (delta.reasoning) {
++                                    contentChunk = delta.reasoning;
++                                }
++ 
++                                if (contentChunk) {
++                                    output += contentChunk;
++                                    streamTokens++;
++                                    
++                                    if (!firstTokenTime) {
++                                        firstTokenTime = responseTime;
++                                        console.log(logTime(), 'First token received time:', formatTime(firstTokenTime));
++                                    }
++                                }
++                            }	
++                      if (json.usage) {
++                                // console.log(logTime(), 'usage:', json.usage);
++
++                                if (json.usage.completion_tokens) {
++                                    serverCompletionTokens = json.usage.completion_tokens;
++                                }
++                            }
++                        }
++                    }
++
++                    // Prefill time: time from sending request to receiving first token
++                    prefillTime = firstTokenTime - requestTime;
++                    // Output time: time from receiving first token to output finish
++                    outputTime = outputFinishTime - firstTokenTime;
++
++                    // Get output length, prioritize server returned token count;
++                    //     then use stream token count (may be inaccurate as one stream may contain multiple tokens);
++                    //     finally count received output content to calculate token count
++                    outputLength = 0;
++                    if (serverCompletionTokens > 0) {
++                        outputLength = serverCompletionTokens;
++                    } else if (streamTokens > 0) {
++                        outputLength = streamTokens;
++                    } else {
++                        outputLength = countTokensByRule(output);
++                    }
++                    // console.log('Output content:', output);
++                    // console.log('Output length:', outputLength);
++
++                    // Calculate prefill speed and output speed, keep 2 decimal places
++                    prefillSpeed = prefillTime > 0 ? (inputLength / (prefillTime / 1000)).toFixed(2) : 'N/A';
++                    outputSpeed = outputTime > 0 ? (outputLength / (outputTime / 1000)).toFixed(2) : 'N/A';
++
++                    testRowData = {
++                        inputLength: inputLength,
++                        prefillTime: prefillTime.toFixed(2),
++                        prefillSpeed: prefillSpeed,
++                        outputLength: outputLength,
++                        outputTime: outputTime.toFixed(2),
++                        outputSpeed: outputSpeed,
++                        systemPrompt: systemPrompt,
++                        systemPromptLength: systemPromptLength,
++                        userPrompt: userPrompt,
++                        userPromptLength: userPromptLength,
++                        output: output,
++                        error: false
++                    };
++                } catch (error) {
++                    if (error.name === 'AbortError') {
++                        console.error(logTime(), error);
++
++                    } else {
++                        console.error(logTime(), error);
++
++                        // Provide more detailed error information based on error type
++                        let errorMessage = 'Unknown error';
++                        if (error.name === 'TypeError' && error.message.includes('fetch')) {
++                            errorMessage = 'Network connection failed, please check server address and network connection';
++                        } else if (error.message.includes('Failed to fetch')) {
++                            errorMessage = 'Unable to connect to server, please check if server is running';
++                        } else if (error.message.includes('Unexpected token')) {
++                            errorMessage = 'Server returned data format error';
++                        } else if (error.message.includes('timeout')) {
++                            errorMessage = 'Request timeout, please check server response time';
++                        }
++
++                        testRowData = {
++                            inputLength: inputLength,
++                            prefillTime: 0,
++                            prefillSpeed: 0,
++                            outputLength: 0,
++                            outputTime: 0,
++                            outputSpeed: 0,
++                            systemPrompt: systemPrompt || '',
++                            systemPromptLength: systemPromptLength || 0,
++                            userPrompt: userPrompt || '',
++                            userPromptLength: userPromptLength || 0,
++                            output: '',
++                            error: true,
++                            errorMessage: errorMessage
++                        };
++                    }
++                }
++
++                // Display data in table
++                const row = resultTableBody.insertRow();
++                row.insertCell().textContent = testRowData.inputLength;
++                row.insertCell().textContent = testRowData.error ? 'Error' : testRowData.prefillTime;
++                row.insertCell().textContent = testRowData.error ? 'Error' : testRowData.prefillSpeed;
++                row.insertCell().textContent = testRowData.error ? 'Error' : testRowData.outputLength;
++                row.insertCell().textContent = testRowData.error ? 'Error' : testRowData.outputTime;
++                row.insertCell().textContent = testRowData.error ? 'Error' : testRowData.outputSpeed;
++
++                // Add detail button
++                const detailCell = row.insertCell();
++                const detailButton = document.createElement('button');
++                detailButton.textContent = 'Details';
++                detailButton.className = 'detail-button';
++                detailButton.onclick = () => showDetail(
++                    testRowData.inputLength,
++                    testRowData.systemPrompt,
++                    testRowData.systemPromptLength,
++                    testRowData.userPrompt,
++                    testRowData.userPromptLength,
++                    testRowData.output,
++                    testRowData.outputLength
++                );
++                detailCell.appendChild(detailButton);
++
++                // Store result
++                testResults.push(testRowData);
++
++                // Redraw line chart after each request
++                drawChart();
++
++                // Wait 1000 ms after each request
++                await new Promise(resolve => setTimeout(resolve, 1000));
++            }
++
++            // Reset button status after batch testing completes
++            stopTest();
++        }
++
++        /**
++         * Stop performance test
++         */
++        function stopTest() {
++            // console.log('Stop testing.');
++
++            isTesting = false;
++            if (abortController) {
++                abortController.abort();
++                abortController = null;
++            }
++            startButton.textContent = 'Start Test';
++            startButton.classList.remove('stop-button');
++        }
++
++        function logTime() {
++            return `\x1b[34m[${new Date().toISOString()}]\x1b[0m`;
++        }
++
++        function formatTime(time) {
++            const fixed = time.toFixed(3);
++            const [intPart, fracPart] = fixed.split('.');
++            const intPartPadded = intPart.padStart(10, ' ');
++            return `${intPartPadded}.${fracPart}`;
++        }
++
++        /**
++         * Tokenize by rules, return token count
++         * @param {string} text - Text to tokenize
++         * @returns {number} token count
++         */
++        function countTokensByRule(text) {
++            // 1. Identify abbreviations with apostrophes
++            const specialApostropheWords = [
++                "'cause", "'em", "'kay", "'nother", "'round", "'scuse", "'sup", "'til"
++            ];
++
++            // 2. Identify abbreviations that count as 1 token
++            const oneTokenWords = [
++                "don't", "can't", "won't"
++            ];
++
++            // 3. Identify abbreviations that count as 2 tokens
++            const twoTokenWords = [
++                // 'm series
++                "I'm",
++                // 're series
++                "we're", "you're", "they're",
++                // 've series
++                "I've", "we've", "you've", "they've",
++                // 'd series
++                "I'd", "we'd", "you'd", "he'd", "she'd", "they'd",
++                // 'll series
++                "I'll", "we'll", "you'll", "he'll", "she'll", "they'll",
++                // n't series
++                "isn't", "aren't", "wasn't", "weren't", "doesn't", "didn't", "hasn't", "haven't", "shouldn't", "wouldn't", "couldn't",
++                // 's series
++                "it's", "he's", "she's", "that's", "there's", "who's"
++            ];
++
++            let tokens = [];
++            let t = text;
++
++            specialApostropheWords.forEach(word => {
++                let reg = new RegExp(word.replace("'", "\\'"), 'gi');
++                t = t.replace(reg, m => {
++                    tokens.push(m);
++                    return ' '.repeat(m.length);
++                });
++            });
++
++            oneTokenWords.forEach(word => {
++                let reg = new RegExp(word.replace("'", "\\'"), 'gi');
++                t = t.replace(reg, m => {
++                    tokens.push(m);
++                    return ' '.repeat(m.length);
++                });
++            });
++
++            twoTokenWords.forEach(word => {
++                let reg = new RegExp(word.replace("'", "\\'"), 'gi');
++                t = t.replace(reg, m => {
++                    const parts = m.split(/'/);
++                    tokens.push(parts[0]);
++                    tokens.push("'" + parts[1]);
++                    return ' '.repeat(m.length);
++                });
++            });
++
++            // 4. Use normal rules for remaining content
++            const enPunct = /[,.!?;:'"()\[\]{}]/;
++            const cnPunct = /[，。！？；：‘'""（）【】｛｝]/;
++
++            const isSeparator = (ch) => ch === ' ' || enPunct.test(ch) || cnPunct.test(ch) || ch === '\n' || ch === '\t' || ch === '\r';
++            const isDigit = (ch) => /[0-9]/.test(ch);
++
++            let buffer = '';
++            let i = 0;
++            while (i < t.length) {
++                const ch = t[i];
++
++                // If it's a separator
++                if (isSeparator(ch)) {
++                    // If there's buffer, add buffer to tokens first
++                    if (buffer.length > 0) {
++                        tokens.push(buffer);
++                        buffer = '';
++                    }
++                    // Separator itself counts as one token (except space, tab, carriage return)
++                    if (ch !== ' ' && ch !== '\t' && ch !== '\r') {
++                        tokens.push(ch);
++                    }
++                    i++;
++                    continue;
++                }
++
++                // If it's a digit
++                if (isDigit(ch)) {
++                    // If there's buffer, add buffer to tokens first
++                    if (buffer.length > 0) {
++                        tokens.push(buffer);
++                        buffer = '';
++                    }
++                    // Digit itself counts as one token
++                    tokens.push(ch);
++                    i++;
++                    continue;
++                }
++
++                // Other characters append to buffer
++                buffer += ch;
++                i++;
++            }
++
++            // Last word, add to tokens
++            if (buffer.length > 0) {
++                tokens.push(buffer);
++            }
++
++            // Filter out empty strings
++            tokens = tokens.filter(t => t && t.length > 0);
++            return tokens.length;
++        }
++
++        /**
++         * Generate system prompt
++         * @returns {string} system prompt content
++         */
++        function generateSystemPrompt() {
++            return 'You are a assistant.';
++        }
++
++        /**
++         * Generate user prompt
++         * @param {number} length - length
++         * @returns {string} user prompt content
++         */
++        function generateUserPrompt(length) {
++            const fixedPrompt = `\nRepeat the above content one hundred times.`;
++            const fixedPromptLength = countTokensByRule(fixedPrompt);
++
++            const needWordLength = length - fixedPromptLength;
++            let userPrompt = '';
++            for (let i = 0; i < needWordLength; i++) {
++                const randomWord = words[Math.floor(Math.random() * words.length)];
++                if (i > 0) {
++                    userPrompt += ' ';
++                }
++                userPrompt += randomWord;
++            }
++            userPrompt += fixedPrompt;
++            return userPrompt;
++        }
++
++        /**
++         * Draw line chart for performance test results
++         */
++        function drawChart() {
++            const inputLengths = testResults.map(r => r.inputLength);
++            const prefillSpeeds = testResults.map(r => r.prefillSpeed);
++            const outputSpeeds = testResults.map(r => r.outputSpeed);
++
++            drawLineChart(prefillChartCanvas, inputLengths, prefillSpeeds, 'Prefill Speed', 'Input Length', 'Prefill Speed (token/s)', '#4bc0c0');
++            drawLineChart(outputChartCanvas, inputLengths, outputSpeeds, 'Output Speed', 'Input Length', 'Output Speed (token/s)', '#ff6384');
++        }
++
++        /**
++         * Draw line chart using native canvas
++         * @param {HTMLCanvasElement} canvas - canvas
++         * @param {Array} xData - X-axis data
++         * @param {Array} yData - Y-axis data
++         * @param {string} title - chart title
++         * @param {string} xLabel - X-axis title
++         * @param {string} yLabel - Y-axis title
++         * @param {string} lineColor - line color
++         */
++        function drawLineChart(canvas, xData, yData, title, xLabel, yLabel, lineColor) {
++            // Fix canvas to 1000*500
++            canvas.width = 1000;
++            canvas.height = 500;
++
++            const cssWidth = 1000;
++            const cssHeight = 500;
++            const ctx = canvas.getContext('2d');
++            ctx.setTransform(1, 0, 0, 1, 0, 0);
++
++            // Spacing
++            const titleTop = 15; // Top margin for title
++            const chartTop = 80; // Top margin for line chart itself
++            const chartBottom = 50; // Bottom margin for line chart itself
++            const chartLeft = 100; // Left margin for line chart itself
++            const chartRight = 100; // Right margin for line chart itself
++            const xLabelOffset = 15; // X-axis title distance from line chart X-axis right end
++            const yLabelOffset = 15; // Y-axis title distance from line chart Y-axis top end
++
++            // Font sizes
++            const titleFont = 20; // Title font
++            const xTickFont = 16; // X-axis tick number font
++            const yTickFont = 15; // Y-axis tick number font
++            const xLabelFont = 16; // X-axis title font
++            const yLabelFont = 16; // Y-axis title font
++            const dataPointFont = 15; // Data point value font
++
++            // Ticks
++            const yTickCount = 5; // Y-axis tick count
++
++            // Chart area range
++            const chartWidth = cssWidth - chartLeft - chartRight;
++            const chartHeight = cssHeight - chartTop - chartBottom;
++
++            // Add 0 tick to X-axis, generate X-axis array
++            const chartXStart = chartLeft;
++            const chartXEnd = chartLeft + chartWidth;
++            const xTicks = [0, ...xData];
++            const xTickCount = xTicks.length;
++
++            function getX(i) {
++                return chartXStart + (chartWidth / (xTickCount - 1)) * i;
++            }
++
++            // Add 0 tick to Y-axis, generate Y-axis array
++            const chartYStart = chartTop + chartHeight;
++            const chartYEnd = chartTop;
++            let yMax = Math.max(...yData);
++            yMax = getNiceMaxValue(yMax);
++
++            const yTicks = [];
++            for (let i = 0; i < yTickCount; i++) {
++                yTicks.push((yMax / (yTickCount - 1)) * i);
++            }
++
++            // Get the closest integer magnitude greater than or equal to max (e.g., 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, etc.)
++            function getNiceMaxValue(max) {
++                if (max <= 0) {
++                    return 1
++                };
++
++                const exp = Math.floor(Math.log10(max));
++                const base = Math.pow(10, exp);
++                let niceMax = base;
++                if (max > base) {
++                    // Take 1, 2, 5, 10 times base
++                    if (max <= 2 * base) {
++                        niceMax = 2 * base;
++                    } else if (max <= 5 * base) {
++                        niceMax = 5 * base;
++                    } else {
++                        niceMax = 10 * base;
++                    }
++                }
++                return niceMax;
++            }
++
++            function getY(i) {
++                return chartYStart - (chartHeight / (yTickCount - 1)) * i;
++            }
++
++            function getYByValue(value) {
++                return chartYStart - (value / yMax) * chartHeight;
++            }
++
++            // Background
++            ctx.fillStyle = '#fff';
++            ctx.fillRect(0, 0, cssWidth, cssHeight);
++
++            // Title
++            ctx.font = `bold ${titleFont}px "Microsoft YaHei", "微软雅黑", sans-serif`;
++            ctx.fillStyle = '#000';
++            ctx.textAlign = 'center';
++            ctx.textBaseline = 'top';
++            ctx.fillText(title, cssWidth / 2, titleTop);
++
++            // Draw grid lines
++            ctx.strokeStyle = '#e0e0e0';
++            ctx.lineWidth = 1;
++            for (let i = 0; i < xTickCount; i++) {
++                const x = getX(i);
++                ctx.beginPath();
++                ctx.moveTo(x, chartYStart);
++                ctx.lineTo(x, chartYEnd);
++                ctx.stroke();
++            }
++            for (let i = 0; i < yTickCount; i++) {
++                const y = getY(i);
++                ctx.beginPath();
++                ctx.moveTo(chartXStart, y);
++                ctx.lineTo(chartXEnd, y);
++                ctx.stroke();
++            }
++
++            // Draw coordinate axes
++            ctx.strokeStyle = '#000';
++            ctx.lineWidth = 2;
++            // X-axis
++            ctx.beginPath();
++            ctx.moveTo(chartXStart, chartYStart);
++            ctx.lineTo(chartXEnd, chartYStart);
++            ctx.stroke();
++            // Y-axis
++            ctx.beginPath();
++            ctx.moveTo(chartXStart, chartYStart);
++            ctx.lineTo(chartXStart, chartYEnd);
++            ctx.stroke();
++
++            // Draw X-axis ticks and numbers
++            ctx.font = `${xTickFont}px "Microsoft YaHei", "微软雅黑", sans-serif`;
++            ctx.fillStyle = '#000';
++            ctx.textAlign = 'center';
++            ctx.textBaseline = 'top';
++            for (let i = 0; i < xTickCount; i++) {
++                const x = getX(i);
++                ctx.beginPath();
++                ctx.moveTo(x, chartYStart);
++                ctx.lineTo(x, chartYStart + 8);
++                ctx.stroke();
++                ctx.fillText(xTicks[i], x, chartYStart + 12);
++            }
++
++            // Draw Y-axis ticks and numbers
++            ctx.font = `${yTickFont}px "Microsoft YaHei", "微软雅黑", sans-serif`;
++            ctx.fillStyle = '#000';
++            ctx.textAlign = 'right';
++            ctx.textBaseline = 'middle';
++            for (let i = 0; i < yTickCount; i++) {
++                const y = getY(i);
++                ctx.beginPath();
++                ctx.moveTo(chartXStart - 8, y);
++                ctx.lineTo(chartXStart, y);
++                ctx.stroke();
++                ctx.fillText(yTicks[i].toFixed(2), chartXStart - 12, y);
++            }
++
++            // X-axis title, left boundary 15 px from line chart X-axis right end
++            ctx.font = `bold ${xLabelFont}px "Microsoft YaHei", "微软雅黑", sans-serif`;
++            ctx.fillStyle = '#000';
++            ctx.textAlign = 'left';
++            ctx.textBaseline = 'middle';
++            ctx.fillText(xLabel, chartXEnd + xLabelOffset, chartYStart);
++
++            // Y-axis title, bottom boundary 15 px from line chart Y-axis top end
++            ctx.font = `bold ${yLabelFont}px "Microsoft YaHei", "微软雅黑", sans-serif`;
++            ctx.fillStyle = '#000';
++            ctx.textAlign = 'center';
++            ctx.textBaseline = 'top';
++            ctx.fillText(yLabel, chartXStart, chartYEnd - yLabelOffset - yLabelFont);
++
++            // Draw line
++            ctx.strokeStyle = lineColor;
++            ctx.lineWidth = 3;
++            ctx.beginPath();
++            for (let i = 0; i < xData.length; i++) {
++                const x = getX(i + 1);
++                const y = getYByValue(yData[i]);
++                if (i === 0) {
++                    ctx.moveTo(x, y);
++                } else {
++                    ctx.lineTo(x, y);
++                }
++            }
++            ctx.stroke();
++
++            // Draw data points and values
++            for (let i = 0; i < xData.length; i++) {
++                const x = getX(i + 1);
++                const y = getYByValue(yData[i]);
++
++                // Shadow
++                ctx.save();
++                ctx.shadowColor = 'rgba(0,0,0,0.15)';
++                ctx.shadowBlur = 6;
++                ctx.fillStyle = '#fff';
++                ctx.beginPath();
++                ctx.arc(x, y, 6, 0, 2 * Math.PI);
++                ctx.fill();
++                ctx.restore();
++
++                // Outer circle
++                ctx.strokeStyle = lineColor;
++                ctx.lineWidth = 2;
++                ctx.beginPath();
++                ctx.arc(x, y, 6, 0, 2 * Math.PI);
++                ctx.stroke();
++
++                // Inner circle
++                ctx.fillStyle = lineColor;
++                ctx.beginPath();
++                ctx.arc(x, y, 3, 0, 2 * Math.PI);
++                ctx.fill();
++
++                // Value
++                ctx.font = `${dataPointFont}px "Microsoft YaHei", "微软雅黑", sans-serif`;
++                ctx.fillStyle = '#000';
++                ctx.textAlign = 'center';
++                ctx.textBaseline = 'bottom';
++                let value = yData[i];
++                let valueText = (typeof value === 'number')
++                    ? value.toFixed(2)
++                    : (typeof value === 'string' && !isNaN(Number(value)))
++                        ? Number(value).toFixed(2)
++                        : value;
++                ctx.fillText(valueText, x, y - 10);
++            }
++        }
++
++        /**
++         * Clear line chart
++         */
++        function clearChart() {
++            [prefillChartCanvas, outputChartCanvas].forEach(canvas => {
++                const ctx = canvas.getContext('2d');
++                ctx.clearRect(0, 0, canvas.width, canvas.height);
++            });
++        }
++
++        /**
++         * Download line chart
++         */
++        function downloadChart() {
++            if (!checkTestData('download')) return;
++
++            // Get title and summary information
++            const title = getTitle();
++            const summaryInfoText = getSummaryInfoText();
++            const testStartTimeText = getTestStartTimeText();
++
++            // Get two original canvases
++            const prefillCanvas = prefillChartCanvas;
++            const outputCanvas = outputChartCanvas;
++
++            // Calculate title and summary information area height
++            const titleFontSize = 36;
++            const titleLineHeight = 36;
++            const titlePadding = 24;
++
++            const infoFontSize = 15;
++            const infoLineHeight = 30;
++            const infoPadding = 20;
++
++            const titleHeight = titlePadding + titleLineHeight + titlePadding;
++            const infoHeight = infoPadding + summaryInfoText.length * infoLineHeight + infoPadding;
++            const timeHeight = testStartTimeText.length * infoLineHeight;
++            const headHeight = titleHeight + infoHeight + timeHeight;
++
++            // Calculate combined image width and height
++            const width = Math.max(prefillCanvas.width, outputCanvas.width);
++            const height = headHeight + prefillCanvas.height + outputCanvas.height;
++
++            // Create combined canvas
++            const combinedCanvas = document.createElement('canvas');
++            combinedCanvas.width = width;
++            combinedCanvas.height = height;
++            const ctx = combinedCanvas.getContext('2d');
++
++            // Fill white background
++            ctx.fillStyle = '#fff';
++            ctx.fillRect(0, 0, width, height);
++
++            // Draw title
++            ctx.font = `bold ${titleFontSize}px "Microsoft YaHei", "微软雅黑", sans-serif`;
++            ctx.fillStyle = '#000';
++            ctx.textAlign = 'center';
++            ctx.textBaseline = 'top';
++            ctx.fillText(title, width / 2, titlePadding);
++
++            // Draw summary information
++            ctx.font = `bold ${infoFontSize}px "Microsoft YaHei", "微软雅黑", sans-serif`;
++            ctx.fillStyle = '#000';
++            ctx.textAlign = 'left';
++            ctx.textBaseline = 'top';
++            let y = titleHeight + infoPadding;
++            summaryInfoText.forEach(line => {
++                ctx.fillText(line, infoPadding, y);
++                y += infoLineHeight;
++            });
++
++            // Draw test time information
++            testStartTimeText.forEach(line => {
++                ctx.fillText(line, infoPadding, y);
++                y += infoLineHeight;
++            });
++
++            // Draw two original canvases
++            ctx.drawImage(prefillCanvas, 0, headHeight);
++            ctx.drawImage(outputCanvas, 0, headHeight + prefillCanvas.height);
++
++            const imageDataUrl = combinedCanvas.toDataURL('image/png');
++            const baseName = getExportBaseName();
++            downloadFile(imageDataUrl, `${baseName}.png`, 'image/png');
++        }
++
++        /**
++         * Download CSV format file
++         */
++        function downloadCsv() {
++            if (!checkTestData('download')) return;
++
++            let csvContent = getTestReportHeader();
++
++            csvContent += '\n' + getCsvColumnHeader() + '\n';
++
++            testResults.forEach(row => {
++                csvContent += `${row.inputLength},${row.prefillTime},${row.prefillSpeed},${row.outputLength},${row.outputTime},${row.outputSpeed}\n`;
++            });
++
++            const baseName = getExportBaseName();
++            downloadFile(csvContent, `${baseName}.csv`, 'text/csv');
++        }
++
++        /**
++         * Download Markdown format file
++         */
++        function downloadMarkdown() {
++            if (!checkTestData('download')) return;
++
++            let markdownContent = getTestReportHeader();
++
++            markdownContent += '\n' + getMarkdownColumnHeader() + '\n';
++            markdownContent += '|---:|---:|---:|---:|---:|---:|\n';
++
++            testResults.forEach(row => {
++                markdownContent += `| ${row.inputLength} | ${row.prefillTime} | ${row.prefillSpeed} | ${row.outputLength} | ${row.outputTime} | ${row.outputSpeed} |\n`;
++            });
++
++            const baseName = getExportBaseName();
++            downloadFile(markdownContent, `${baseName}.md`, 'text/markdown');
++        }
++
++        // Check if there is test data
++        function checkTestData(operationName) {
++            if (testResults.length === 0) {
++                showAlert(`No data available to ${operationName}.`);
++                return false;
++            }
++            return true;
++        }
++
++        // Get header information
++        function getTestReportHeader() {
++            let header = getTitle() + '\n\n';
++
++            getSummaryInfoText().forEach(line => {
++                header += line + '\n';
++            });
++            getTestStartTimeText().forEach(line => {
++                header += line + '\n';
++            });
++
++            return header;
++        }
++
++        // Get title
++        function getTitle() {
++            return 'Local LLM Inference Performance';
++        }
++
++        // Get summary information
++        function getSummaryInfoText() {
++            const fields = ['processor', 'mainboard', 'memory', 'gpu', 'system', 'engineName', 'engineModelName'];
++
++            return fields.map(fieldId => {
++                const label = getFieldLabel(fieldId);
++                const value = getFieldValue(fieldId);
++                return `${label}${value}`;
++            });
++        }
++
++        // Get test time information
++        function getTestStartTimeText() {
++            const year = testStartTime.getFullYear();
++            const month = String(testStartTime.getMonth() + 1).padStart(2, '0');
++            const day = String(testStartTime.getDate()).padStart(2, '0');
++            const hours = String(testStartTime.getHours()).padStart(2, '0');
++            const minutes = String(testStartTime.getMinutes()).padStart(2, '0');
++            const seconds = String(testStartTime.getSeconds()).padStart(2, '0');
++            return [`Test time: ${year}-${month}-${day} ${hours}:${minutes}:${seconds}`];
++        }
++
++        // Get export file base name (GPU, engine name, model name, test start time)
++        function getExportBaseName() {
++            const gpu = getFieldValue('gpu', 'gpu');
++            const engineName = getFieldValue('engineName', 'engine');
++            const engineModelName = getFieldValue('engineModelName', 'model');
++
++            const safe = s => s.replace(/\s+/g, '_').replace(/[^\w\-\.]/g, '');
++
++            let timeText = '';
++            if (testStartTime) {
++                const year = testStartTime.getFullYear();
++                const month = String(testStartTime.getMonth() + 1).padStart(2, '0');
++                const day = String(testStartTime.getDate()).padStart(2, '0');
++                const hours = String(testStartTime.getHours()).padStart(2, '0');
++                const minutes = String(testStartTime.getMinutes()).padStart(2, '0');
++                const seconds = String(testStartTime.getSeconds()).padStart(2, '0');
++                timeText = `${year}${month}${day}_${hours}${minutes}${seconds}`;
++            }
++
++            return `${safe(gpu)},${safe(engineName)},${safe(engineModelName)},${timeText}`;
++        }
++
++        // Get CSV table column headers
++        function getCsvColumnHeader() {
++            return 'Input Length,Prefill Time (ms),Prefill Speed (token/s),Output Length,Output Time (ms),Output Speed (token/s)';
++        }
++
++        // Get Markdown table column headers
++        function getMarkdownColumnHeader() {
++            return '| Input Length | Prefill Time (ms) | Prefill Speed (token/s) | Output Length | Output Time (ms) | Output Speed (token/s) |';
++        }
++
++        // Update summary display area
++        function updateSummaryDisplay() {
++            const serverFields = ['processor', 'mainboard', 'memory', 'gpu', 'system'];
++            const engineFields = ['engineName', 'engineModelName'];
++
++            // Concatenate server information
++            const serverInfo = serverFields.map(fieldId => {
++                const label = getFieldLabel(fieldId);
++                const value = getFieldValue(fieldId);
++                return `${label}${value}`;
++            }).join(', ') + '.';
++
++            // Concatenate inference engine information
++            const engineInfo = engineFields.map(fieldId => {
++                const label = getFieldLabel(fieldId);
++                const value = getFieldValue(fieldId);
++                return `${label}${value}`;
++            }).join(', ') + '.';
++
++            summaryDisplayEl.innerHTML = `<div>${serverInfo}</div><div>${engineInfo}</div>`;
++        }
++
++        // Get form field label text
++        function getFieldLabel(fieldId) {
++            return document.querySelector(`label[for="${fieldId}"]`).textContent;
++        }
++
++        // Get form field value, return default value if empty
++        function getFieldValue(fieldId, defaultValue = 'None') {
++            return document.getElementById(fieldId).value || defaultValue;
++        }
++
++        // Generic file download function
++        function downloadFile(content, filename, mimeType) {
++            const link = document.createElement('a');
++
++            if (content.startsWith('data:')) {
++                link.href = content;
++            } else {
++                link.href = `data:${mimeType};charset=utf-8,` + encodeURIComponent(content);
++            }
++
++            link.download = filename;
++            document.body.appendChild(link);
++            link.click();
++            document.body.removeChild(link);
++        }
++
++        /**
++         * Show detail popup
++         * @param {number} inputLength - input length
++         * @param {string} systemPrompt - system prompt
++         * @param {number} systemPromptLength - system prompt length
++         * @param {string} userPrompt - user prompt
++         * @param {number} userPromptLength - user prompt length
++         * @param {string} output - received output content
++         * @param {number} outputLength - received output length
++         */
++        function showDetail(inputLength, systemPrompt, systemPromptLength, userPrompt, userPromptLength, output, outputLength) {
++            // Prevent background page scrolling
++            document.body.style.overflow = 'hidden';
++
++            const detailOverlay = document.createElement('div');
++            detailOverlay.className = 'detail-overlay';
++
++            const detailDialog = document.createElement('div');
++            detailDialog.className = 'detail-dialog';
++
++            detailDialog.innerHTML = `
++                <div class="detail-header">
++                    <div class="detail-title">Details</div>
++                    <button type="button" class="detail-close-button">Close</button>
++                </div>
++                <div class="detail-row">
++                  <div class="detail-field">
++                    <div class="detail-field-label">Input Length:</div>
++                    <span class="detail-field-content">${inputLength}</span>
++                  </div>
++                  <div class="detail-field">
++                    <div class="detail-field-label">System Prompt Length:</div>
++                    <span class="detail-field-content">${systemPromptLength}</span>
++                  </div>
++                  <div class="detail-field">
++                    <div class="detail-field-label">User Prompt Length:</div>
++                    <span class="detail-field-content">${userPromptLength}</span>
++                  </div>
++                  <div class="detail-field">
++                    <div class="detail-field-label">Received Output Length:</div>
++                    <span class="detail-field-content">${outputLength}</span>
++                  </div>
++                </div>
++                <div class="detail-block">
++                    <div class="detail-block-label">System Prompt:</div>
++                    <div class="detail-block-content system-prompt-block">${systemPrompt.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
++                </div>
++                <div class="detail-block">
++                    <div class="detail-block-label">User Prompt:</div>
++                    <div class="detail-block-content user-prompt-block">${userPrompt.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
++                </div>
++                <div class="detail-block">
++                    <div class="detail-block-label">Received Output Content:</div>
++                    <div class="detail-block-content output-block">${output.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
++                </div>
++            `;
++
++            detailOverlay.appendChild(detailDialog);
++            document.body.appendChild(detailOverlay);
++
++            // Click close button to close popup
++            const detailCloseBtn = detailDialog.querySelector('.detail-close-button');
++            detailCloseBtn.addEventListener('click', () => {
++                detailOverlay.remove();
++                document.body.style.overflow = '';
++            });
++
++            // Click background to close popup
++            detailOverlay.addEventListener('click', (e) => {
++                if (e.target === detailOverlay) {
++                    detailOverlay.remove();
++                    document.body.style.overflow = '';
++                }
++            });
++        }
++
++        /**
++         * Show custom alert popup
++         * @param {string} message - alert content
++         * @param {string} [title='Alert'] - popup title
++         */
++        function showAlert(message, title = 'Alert') {
++            if (document.querySelector('.alert-overlay')) {
++                return
++            };
++
++            // Prevent background page scrolling
++            document.body.style.overflow = 'hidden';
++
++            const alertOverlay = document.createElement('div');
++            alertOverlay.className = 'alert-overlay';
++
++            const alertDialog = document.createElement('div');
++            alertDialog.className = 'alert-dialog';
++
++            alertDialog.innerHTML = `
++                <div class="alert-header">
++                    <div class="alert-title">${title}</div>
++                </div>
++                <div class="alert-content">${message}</div>
++                <div>
++                    <button type="button" class="alert-confirm-button">OK</button>
++                </div>
++            `;
++
++            alertOverlay.appendChild(alertDialog);
++            document.body.appendChild(alertOverlay);
++
++            // Click OK button to close popup
++            const alertConfirmBtn = alertDialog.querySelector('.alert-confirm-button');
++            alertConfirmBtn.addEventListener('click', () => {
++                alertOverlay.remove();
++                document.body.style.overflow = '';
++            });
++
++            // Click background to close popup
++            alertOverlay.addEventListener('click', (e) => {
++                if (e.target === alertOverlay) {
++                    alertOverlay.remove();
++                    document.body.style.overflow = '';
++                }
++            });
++
++        }
++
++    </script>
++</body>
++
++</html>
+diff --git a/docker/Dockerfile b/docker/Dockerfile
+index 9f70c4b2b9..d2b5177599 100644
+--- a/docker/Dockerfile
++++ b/docker/Dockerfile
+@@ -1102,7 +1102,8 @@ COPY requirements/test/cuda.txt requirements/test/cuda.txt
+ COPY requirements/dev.txt requirements/dev.txt
+ COPY use_existing_torch.py use_existing_torch.py
+ COPY --from=base /workspace/torch_lib_versions.txt torch_lib_versions.txt
+-RUN --mount=type=cache,target=/opt/uv/cache \
++# Source-built wheels in this cache must match the Ubuntu 22.04 ABI.
++RUN --mount=type=cache,id=uv-v027-ubuntu2204,target=/opt/uv/cache \
+     CUDA_MAJOR="${CUDA_VERSION%%.*}"; \
+     if [ "$CUDA_MAJOR" -ge 12 ]; then \
+         if [ "${PYTORCH_NIGHTLY}" = "1" ]; then \
+diff --git a/pyproject.toml b/pyproject.toml
+index d689d50d8d..6223491630 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -14,7 +14,7 @@ requires = [
+ build-backend = "setuptools.build_meta"
+ 
+ [project]
+-name = "vllm"
++name = "lvllm"
+ authors = [{name = "vLLM Team"}]
+ license = "Apache-2.0"
+ license-files = ["LICENSE"]
+diff --git a/requirements/cuda.txt b/requirements/cuda.txt
+index ffcff13c82..a6b3890107 100644
+--- a/requirements/cuda.txt
++++ b/requirements/cuda.txt
+@@ -34,3 +34,5 @@ tokenspeed-mla==0.1.8; platform_system == "Linux"
+ 
+ # Humming kernels for quantization gemm
+ humming-kernels[cu13]==0.1.12
++
++lk_moe==2.4.2
+diff --git a/tests/evals/gsm8k/configs/Qwen3-30B-A3B-NVFP4.yaml b/tests/evals/gsm8k/configs/Qwen3-30B-A3B-NVFP4.yaml
+index f162aa8bfe..799a7694e9 100644
+--- a/tests/evals/gsm8k/configs/Qwen3-30B-A3B-NVFP4.yaml
++++ b/tests/evals/gsm8k/configs/Qwen3-30B-A3B-NVFP4.yaml
+@@ -2,4 +2,5 @@ model_name: "nvidia/Qwen3-30B-A3B-FP4"
+ accuracy_threshold: 0.89
+ num_questions: 1319
+ num_fewshot: 5
++startup_max_wait_seconds: 1200
+ server_args: "--enforce-eager --max-model-len 4096"
+diff --git a/tests/evals/gsm8k/configs/Qwen3-Next-80B-A3B-NVFP4-EP2.yaml b/tests/evals/gsm8k/configs/Qwen3-Next-80B-A3B-NVFP4-EP2.yaml
+index 7f2f096fd2..a26dfccda4 100644
+--- a/tests/evals/gsm8k/configs/Qwen3-Next-80B-A3B-NVFP4-EP2.yaml
++++ b/tests/evals/gsm8k/configs/Qwen3-Next-80B-A3B-NVFP4-EP2.yaml
+@@ -2,6 +2,7 @@ model_name: "nm-testing/Qwen3-Next-80B-A3B-Instruct-NVFP4"
+ accuracy_threshold: 0.75
+ num_questions: 1319
+ num_fewshot: 5
++startup_max_wait_seconds: 1200
+ server_args: >-
+   --enforce-eager
+   --max-model-len 4096
+diff --git a/tests/evals/gsm8k/configs/moe-refactor-dp-ep/Qwen3-30B-A3B-NvFp4-CT-fi-cutlass.yaml b/tests/evals/gsm8k/configs/moe-refactor-dp-ep/Qwen3-30B-A3B-NvFp4-CT-fi-cutlass.yaml
+index 90265a12af..c84bc9223f 100644
+--- a/tests/evals/gsm8k/configs/moe-refactor-dp-ep/Qwen3-30B-A3B-NvFp4-CT-fi-cutlass.yaml
++++ b/tests/evals/gsm8k/configs/moe-refactor-dp-ep/Qwen3-30B-A3B-NvFp4-CT-fi-cutlass.yaml
+@@ -2,4 +2,5 @@ model_name: "RedHatAI/Qwen3-30B-A3B-NVFP4"
+ accuracy_threshold: 0.88
+ num_questions: 1319
+ num_fewshot: 5
++startup_max_wait_seconds: 1200
+ server_args: "--enforce-eager --max-model-len 8192 --data-parallel-size 2 --enable-expert-parallel --moe-backend=flashinfer_cutlass"
+diff --git a/tests/evals/gsm8k/configs/moe-refactor-dp-ep/Qwen3-30B-A3B-NvFp4-ModelOpt-fi-trtllm.yaml b/tests/evals/gsm8k/configs/moe-refactor-dp-ep/Qwen3-30B-A3B-NvFp4-ModelOpt-fi-trtllm.yaml
+index 23d29e06f8..6277a7cc78 100644
+--- a/tests/evals/gsm8k/configs/moe-refactor-dp-ep/Qwen3-30B-A3B-NvFp4-ModelOpt-fi-trtllm.yaml
++++ b/tests/evals/gsm8k/configs/moe-refactor-dp-ep/Qwen3-30B-A3B-NvFp4-ModelOpt-fi-trtllm.yaml
+@@ -2,4 +2,5 @@ model_name: "nvidia/Qwen3-30B-A3B-NVFP4"
+ accuracy_threshold: 0.88
+ num_questions: 1319
+ num_fewshot: 5
++startup_max_wait_seconds: 1200
+ server_args: "--enforce-eager --max-model-len 8192 --data-parallel-size 2 --enable-expert-parallel --moe-backend=flashinfer_trtllm"
+diff --git a/tests/evals/gsm8k/configs/moe-refactor/Qwen3-30B-A3B-NvFp4-CT-fi-trtllm.yaml b/tests/evals/gsm8k/configs/moe-refactor/Qwen3-30B-A3B-NvFp4-CT-fi-trtllm.yaml
+index 094ec92f1e..1dfccafe0d 100644
+--- a/tests/evals/gsm8k/configs/moe-refactor/Qwen3-30B-A3B-NvFp4-CT-fi-trtllm.yaml
++++ b/tests/evals/gsm8k/configs/moe-refactor/Qwen3-30B-A3B-NvFp4-CT-fi-trtllm.yaml
+@@ -2,4 +2,5 @@ model_name: "RedHatAI/Qwen3-30B-A3B-NVFP4"
+ accuracy_threshold: 0.88
+ num_questions: 1319
+ num_fewshot: 5
++startup_max_wait_seconds: 1200
+ server_args: "--enforce-eager --max-model-len 8192 --tensor-parallel-size 2 --moe-backend=flashinfer_trtllm"
+diff --git a/tests/evals/gsm8k/configs/moe-refactor/Qwen3-30B-A3B-NvFp4-ModelOpt-fi-trtllm.yaml b/tests/evals/gsm8k/configs/moe-refactor/Qwen3-30B-A3B-NvFp4-ModelOpt-fi-trtllm.yaml
+index 491b3c82fa..8b4fbc0333 100644
+--- a/tests/evals/gsm8k/configs/moe-refactor/Qwen3-30B-A3B-NvFp4-ModelOpt-fi-trtllm.yaml
++++ b/tests/evals/gsm8k/configs/moe-refactor/Qwen3-30B-A3B-NvFp4-ModelOpt-fi-trtllm.yaml
+@@ -2,4 +2,5 @@ model_name: "nvidia/Qwen3-30B-A3B-NVFP4"
+ accuracy_threshold: 0.88
+ num_questions: 1319
+ num_fewshot: 5
++startup_max_wait_seconds: 1200
+ server_args: "--enforce-eager --max-model-len 8192 --tensor-parallel-size 2 --moe-backend=flashinfer_trtllm"
+diff --git a/tests/quantization/test_compressed_tensors.py b/tests/quantization/test_compressed_tensors.py
+index ef80287e5f..831c58c8cc 100644
+--- a/tests/quantization/test_compressed_tensors.py
++++ b/tests/quantization/test_compressed_tensors.py
+@@ -1022,3 +1022,69 @@ def test_compressed_tensors_mxfp4(vllm_runner):
+         llm.apply_model(check_model)
+         output = llm.generate_greedy("Hello my name is", max_tokens=4)
+         assert output
++
++
++def test_compressed_tensors_mxfp4_cpu_resident_experts(monkeypatch):
++    from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe import (  # noqa: E501
++        compressed_tensors_moe_w4a4_mxfp4 as mxfp4_moe,
++    )
++
++    class CpuRoutedExperts(torch.nn.Module):
++        def __init__(self):
++            super().__init__()
++            self.is_gpu_resident_layer = False
++
++    monkeypatch.setattr(mxfp4_moe, "RoutedExperts", CpuRoutedExperts)
++    monkeypatch.setattr(mxfp4_moe.current_platform, "is_cuda_alike", lambda: True)
++    monkeypatch.setattr(torch.cuda, "current_device", lambda: 0)
++
++    method = object.__new__(mxfp4_moe.CompressedTensorsW4A4Mxfp4MoEMethod)
++    method.group_size = 32
++    layer = CpuRoutedExperts()
++    method.create_weights(
++        layer,
++        num_experts=2,
++        hidden_size=64,
++        intermediate_size_per_partition=64,
++        params_dtype=torch.bfloat16,
++    )
++
++    parameter_names = (
++        "w13_weight_packed",
++        "w2_weight_packed",
++        "w13_weight_scale",
++        "w2_weight_scale",
++    )
++    assert all(getattr(layer, name).device.type == "cpu" for name in parameter_names)
++
++    method.process_weights_after_loading(layer)
++    assert hasattr(layer, "w13_weight_packed")
++    assert hasattr(layer, "w2_weight_packed")
++    assert not hasattr(layer, "w13_weight")
++    assert not hasattr(layer, "w2_weight")
++
++
++@pytest.mark.parametrize("use_cutlass_mxfp4", [False, True])
++def test_compressed_tensors_mxfp4_forwards_swiglu_params(use_cutlass_mxfp4):
++    from vllm.model_executor.layers.fused_moe.oracle.mxfp4 import (
++        Mxfp4MoeBackend,
++    )
++    from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe.compressed_tensors_moe_w4a4_mxfp4 import (  # noqa: E501
++        CompressedTensorsW4A4Mxfp4MoEMethod,
++    )
++
++    method = object.__new__(CompressedTensorsW4A4Mxfp4MoEMethod)
++    method.use_cutlass_mxfp4 = use_cutlass_mxfp4
++    method.mxfp4_backend = Mxfp4MoeBackend.MARLIN
++    method.moe = Mock(swiglu_alpha=1.702, swiglu_beta=1.0, swiglu_limit=7.0)
++    layer = Mock(
++        w13_weight_scale=torch.ones(1),
++        w2_weight_scale=torch.ones(1),
++    )
++
++    config = method.get_fused_moe_quant_config(layer)
++
++    assert config is not None
++    assert config.gemm1_alpha == 1.702
++    assert config.gemm1_beta == 1.0
++    assert config.gemm1_clamp_limit == 7.0
+diff --git a/vllm/entrypoints/cli/main.py b/vllm/entrypoints/cli/main.py
+index 3dc69dd3ad..0da6a3d99a 100644
+--- a/vllm/entrypoints/cli/main.py
++++ b/vllm/entrypoints/cli/main.py
+@@ -18,7 +18,7 @@ def main():
+     import vllm.entrypoints.cli.benchmark.main
+     import vllm.entrypoints.cli.collect_env
+     import vllm.entrypoints.cli.launch
+-    import vllm.entrypoints.cli.openai
++    import vllm.entrypoints.cli.openai_entrypoint
+     import vllm.entrypoints.cli.run_batch
+     import vllm.entrypoints.cli.serve
+     from vllm.entrypoints.serve.utils.api_utils import (
+@@ -28,7 +28,7 @@ def main():
+     from vllm.utils.argparse_utils import FlexibleArgumentParser
+ 
+     CMD_MODULES = [
+-        vllm.entrypoints.cli.openai,
++        vllm.entrypoints.cli.openai_entrypoint,
+         vllm.entrypoints.cli.serve,
+         vllm.entrypoints.cli.launch,
+         vllm.entrypoints.cli.benchmark.main,
+@@ -80,7 +80,7 @@ def main():
+             "-v",
+             "--version",
+             action="version",
+-            version=importlib.metadata.version("vllm"),
++            version=importlib.metadata.version("lvllm"),
+         )
+         subparsers = parser.add_subparsers(required=False, dest="subparser")
+         cmds = {}
+diff --git a/vllm/entrypoints/cli/openai.py b/vllm/entrypoints/cli/openai_entrypoint.py
+similarity index 100%
+rename from vllm/entrypoints/cli/openai.py
+rename to vllm/entrypoints/cli/openai_entrypoint.py
+diff --git a/vllm/entrypoints/cli/run_batch.py b/vllm/entrypoints/cli/run_batch.py
+index 5fa626a6a5..0ab3e9f5a7 100644
+--- a/vllm/entrypoints/cli/run_batch.py
++++ b/vllm/entrypoints/cli/run_batch.py
+@@ -28,7 +28,7 @@ class RunBatchSubcommand(CLISubcommand):
+         from vllm.entrypoints.launchers.run_batch import main as run_batch_main
+ 
+         logger.info(
+-            "vLLM batch processing API version %s", importlib.metadata.version("vllm")
++            "vLLM batch processing API version %s", importlib.metadata.version("lvllm")
+         )
+         logger.info("args: %s", args)
+ 
+diff --git a/vllm/envs.py b/vllm/envs.py
+index d429686d9c..f228168230 100755
+--- a/vllm/envs.py
++++ b/vllm/envs.py
+@@ -206,7 +206,7 @@ if TYPE_CHECKING:
+         "skip",
+         "full",
+         "relax",
+-    ] = "relax"
++    ] = "skip"
+     VLLM_USE_FUSED_MOE_GROUPED_TOPK: bool = True
+     VLLM_MOE_SKIP_PADDING: bool = True
+     VLLM_KIMI_K3_SHARD_SP_SHARED_EXPERT: bool = False
+@@ -279,6 +279,12 @@ if TYPE_CHECKING:
+     VLLM_NVTX_SCOPES_FOR_PROFILING: bool = False
+     VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES: bool = True
+     VLLM_OBJECT_STORAGE_SHM_BUFFER_NAME: str = "VLLM_OBJECT_STORAGE_SHM_BUFFER"
++    LVLLM_MOE_NUMA_ENABLED: bool = False
++    LVLLM_ENABLE_MOE_LAYERWISE_LOAD: bool = False
++    LVLLM_ENABLE_NUMA_INTERLEAVE: bool = True
++    LVLLM_GPU_RESIDENT_MOE_LAYERS: str | None = None
++    LVLLM_GPU_PREFILL_MIN_BATCH_SIZE: int = 0
++    LVLLM_GPU_PREFETCH_WINDOW: int = 1
+     VLLM_DEEPEP_BUFFER_SIZE_MB: int = 1024
+     VLLM_DEEPEP_HIGH_THROUGHPUT_FORCE_INTRA_NODE: bool = False
+     VLLM_DEEPEP_LOW_LATENCY_USE_MNNVL: bool = False
+@@ -1591,7 +1597,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
+     #   shapes, but provides no guarantees.
+     "VLLM_DEEP_GEMM_WARMUP": env_with_choices(
+         "VLLM_DEEP_GEMM_WARMUP",
+-        "relax",
++        "skip",
+         [
+             "skip",
+             "full",
+@@ -2031,6 +2037,23 @@ environment_variables: dict[str, Callable[[], Any]] = {
+     # Debug workspace allocations.
+     # logging of workspace resize operations.
+     "VLLM_DEBUG_WORKSPACE": lambda: bool(int(os.getenv("VLLM_DEBUG_WORKSPACE", "0"))),
++    # Whether to enable NUMA for MOE.
++    "LVLLM_MOE_NUMA_ENABLED":
++    lambda: bool(int(os.getenv("LVLLM_MOE_NUMA_ENABLED", "0"))),
++    "LVLLM_ENABLE_MOE_LAYERWISE_LOAD": lambda: bool(int(os.getenv("LVLLM_ENABLE_MOE_LAYERWISE_LOAD", "0"))),
++    # Whether to enable NUMA interleaving for multiprocessing.
++    "LVLLM_ENABLE_NUMA_INTERLEAVE": lambda: bool(
++        int(os.getenv("LVLLM_ENABLE_NUMA_INTERLEAVE", "1"))
++    ),
++    "LVLLM_GPU_RESIDENT_MOE_LAYERS": lambda: os.environ.get("LVLLM_GPU_RESIDENT_MOE_LAYERS", None),
++    # Whether to enable GPU expert computation.
++    "LVLLM_GPU_PREFILL_MIN_BATCH_SIZE": lambda: int(
++        os.getenv("LVLLM_GPU_PREFILL_MIN_BATCH_SIZE", "0")
++    ),
++    # Prefetch window size for GPU expert computation.
++    "LVLLM_GPU_PREFETCH_WINDOW": lambda: int(
++        os.getenv("LVLLM_GPU_PREFETCH_WINDOW", "3")
++    ),
+     # Disables parallel execution of shared_experts via separate cuda stream
+     "VLLM_DISABLE_SHARED_EXPERTS_STREAM": lambda: bool(
+         int(os.getenv("VLLM_DISABLE_SHARED_EXPERTS_STREAM", "0"))
+@@ -2380,6 +2403,12 @@ def compile_factors() -> dict[str, object]:
+         "VLLM_SKIP_MODEL_NAME_VALIDATION",
+         "LOCAL_RANK",
+         "CUDA_VISIBLE_DEVICES",
++        "LVLLM_MOE_NUMA_ENABLED",
++        "LVLLM_ENABLE_MOE_LAYERWISE_LOAD",
++        "LVLLM_GPU_RESIDENT_MOE_LAYERS",
++        "LVLLM_GPU_PREFILL_MIN_BATCH_SIZE",
++        "LVLLM_GPU_PREFETCH_WINDOW",
++        "LVLLM_ENABLE_NUMA_INTERLEAVE",
+         "NO_COLOR",
+     }
+ 
+@@ -2428,3 +2457,165 @@ def compile_factors() -> dict[str, object]:
+         factors[var] = normalize_value(os.getenv(var))
+ 
+     return factors
++
++def is_lk_moe_feature_enabled() -> bool:
++    return environment_variables["LVLLM_MOE_NUMA_ENABLED"]()
++
++def is_numa_interleave_enabled() -> bool:
++    return environment_variables["LVLLM_ENABLE_NUMA_INTERLEAVE"]()
++ 
++def is_lk_moe_use_gpu_prefill() -> bool:
++    return environment_variables["LVLLM_GPU_PREFILL_MIN_BATCH_SIZE"]() > 0
++
++def disable_lk_moe_gpu_prefill() -> int:
++    origin_value = environment_variables["LVLLM_GPU_PREFILL_MIN_BATCH_SIZE"]()
++    environment_variables["LVLLM_GPU_PREFILL_MIN_BATCH_SIZE"] = lambda: 0
++    return origin_value
++
++def enable_lk_moe_gpu_prefill(value: int) -> int:
++    environment_variables["LVLLM_GPU_PREFILL_MIN_BATCH_SIZE"] = lambda: value
++    return value
++
++_is_in_profile_run = True
++
++def is_in_profile_run(): 
++    return _is_in_profile_run
++
++def set_profile_run(status: bool): 
++    global _is_in_profile_run
++    _is_in_profile_run = status
++    
++def get_gpu_prefill_min_batch_size() -> int:
++    return environment_variables["LVLLM_GPU_PREFILL_MIN_BATCH_SIZE"]() 
++
++ 
++
++def get_gpu_prefetch_window() -> int:
++    return environment_variables["LVLLM_GPU_PREFETCH_WINDOW"]()
++ 
++
++def extract_layer_index(layer_name: str, num_attn_module: int = 1) -> int:
++    """
++    Extract the layer index from the module name.
++    Examples:
++    - "encoder.layers.0" -> 0
++    - "encoder.layers.1.self_attn" -> 1
++    - "2.self_attn" -> 2
++    - "model.encoder.layers.0.sub.1" -> ValueError if num_attn_module == 1
++    """
++    subnames = layer_name.split(".")
++    int_vals: list[int] = []
++    for subname in subnames:
++        try:
++            int_vals.append(int(subname))
++        except ValueError:
++            continue
++    if num_attn_module == 1 or "attn" not in layer_name:
++        assert len(int_vals) == 1, (
++            f"layer name {layer_name} should only contain one integer"
++        )
++
++        return int_vals[0]
++    else:
++        assert len(int_vals) <= 2, (
++            f"layer name {layer_name} should contain most two integers"
++        )
++        layer_index = (
++            int_vals[0] * num_attn_module + int_vals[1]
++            if len(int_vals) == 2
++            else int_vals[0]
++        )
++        return layer_index
++
++def is_lk_moe_mtp_layer(layer_name: str) -> bool:
++    return layer_name.startswith("mtp.")
++    
++def is_lk_moe_gpu_prefill_layer(layer_name: str) -> bool:
++    return is_lk_moe_use_gpu_prefill() and not is_lk_moe_gpu_resident_layer(layer_name) and not is_lk_moe_mtp_layer(layer_name)
++    
++def is_lk_moe_cpu_layer(layer_name: str)-> bool:
++
++    return is_lk_moe_feature_enabled() and not is_lk_moe_gpu_resident_layer(layer_name) and not is_lk_moe_gpu_prefill_layer(layer_name) and not is_lk_moe_mtp_layer(layer_name)
++    
++def is_lk_moe_gpu_resident_layer(layer_name: str) -> bool:
++    
++    if not is_lk_moe_feature_enabled():
++        return True
++    
++    if is_lk_moe_mtp_layer(layer_name):
++        return True
++    
++    layer_id = extract_layer_index(layer_name)
++    
++  
++    disabled_layers_env = environment_variables.get("LVLLM_GPU_RESIDENT_MOE_LAYERS", "")()
++    if not disabled_layers_env:
++        return False   
++    
++    disabled_layers_env = disabled_layers_env.strip()
++    
++    disabled_layers = set()
++    for part in disabled_layers_env.split(','):
++        part = part.strip()
++        if not part:
++            continue
++        
++        if '-' in part:
++            try:
++                start, end = map(int, part.split('-')) 
++                if start <= end:
++                    disabled_layers.update(range(start, end + 1))
++            except ValueError: 
++                continue
++        else:
++            try:
++                disabled_layers.add(int(part))
++            except ValueError: 
++                continue
++     
++    return layer_id in disabled_layers
++
++def enabled_layerwise_load() -> bool:
++    return environment_variables["LVLLM_ENABLE_MOE_LAYERWISE_LOAD"]() 
++
++      
++import torch
++
++def check_tensor_stats(tensor, name, threshold=1e6):
++    
++    if torch.cuda.is_current_stream_capturing():
++        return 
++    with torch.no_grad(): 
++        info = {
++            'name': name,
++            'dtype': str(tensor.dtype),
++            'shape': tensor.shape,
++            'device': tensor.device,
++        }
++         
++        if tensor.is_floating_point():
++            try:
++                info.update({
++                    'mean': float(tensor.mean()),
++                    'std': float(tensor.std()),
++                    'min': float(tensor.min()),
++                    'max': float(tensor.max()),
++                    'has_nan': bool(tensor.isnan().any()),
++                    'has_inf': bool(tensor.isinf().any()),
++                })
++            except Exception as e:
++                info['error'] = f"Failed to compute stats: {e}"
++         
++        elif tensor.dtype in [torch.int8, torch.int16, torch.int32, torch.int64,
++                              torch.uint8, torch.bool]:
++            info.update({
++                'min': int(tensor.min()),
++                'max': int(tensor.max()),
++            })
++         
++        if tensor.is_floating_point() and 'max' in info:
++            if abs(info['max']) > threshold:
++                info['warning'] = f"Extreme value: {info['max']:.2e}"
++        
++        
++        return info
+diff --git a/vllm/model_executor/layers/fused_moe/config.py b/vllm/model_executor/layers/fused_moe/config.py
+index 8736b1393d..d4b9c2a60a 100644
+--- a/vllm/model_executor/layers/fused_moe/config.py
++++ b/vllm/model_executor/layers/fused_moe/config.py
+@@ -335,6 +335,14 @@ class FusedMoEQuantConfig:
+     def w1_scale(self) -> torch.Tensor | None:
+         assert self._w1.scale is None or isinstance(self._w1.scale, torch.Tensor)
+         return self._w1.scale
++    
++    @w1_scale.setter
++    def w1_scale(self, value: torch.Tensor | None):
++        self._w1.scale = value
++    
++    @w1_scale.deleter
++    def w1_scale(self):
++        self._w1.scale = None
+ 
+     @property
+     def w1_zp(self) -> torch.Tensor | None:
+@@ -357,6 +365,14 @@ class FusedMoEQuantConfig:
+     def w2_scale(self) -> torch.Tensor | None:
+         assert self._w2.scale is None or isinstance(self._w2.scale, torch.Tensor)
+         return self._w2.scale
++    
++    @w2_scale.setter
++    def w2_scale(self, value: torch.Tensor | None):
++        self._w2.scale = value
++        
++    @w2_scale.deleter
++    def w2_scale(self):
++        self._w2.scale = None
+ 
+     @property
+     def w2_zp(self) -> torch.Tensor | None:
+diff --git a/vllm/model_executor/layers/fused_moe/routed_experts.py b/vllm/model_executor/layers/fused_moe/routed_experts.py
+index 5d284bcc80..ce20e2a945 100644
+--- a/vllm/model_executor/layers/fused_moe/routed_experts.py
++++ b/vllm/model_executor/layers/fused_moe/routed_experts.py
+@@ -34,6 +34,14 @@ if TYPE_CHECKING:
+ 
+ logger = init_logger(__name__)
+ 
++from vllm.utils.platform_utils import is_pin_memory_available
++from vllm.envs import is_lk_moe_feature_enabled, is_lk_moe_cpu_layer, is_lk_moe_gpu_resident_layer, is_lk_moe_gpu_prefill_layer, get_gpu_prefetch_window, get_gpu_prefill_min_batch_size, is_lk_moe_use_gpu_prefill, is_in_profile_run
++if is_lk_moe_feature_enabled():
++    import  lk_moe  
++    logger.info("lk_moe module is available, lk::MOE implementation will be used")
++else:
++    logger.error("Failed to import lk_moe module or LVLLM_MOE_NUMA_ENABLED is not set to 1, lk::MOE implementation will not be available")
++
+ 
+ class FusedMoeWeightScaleSupported(Enum):
+     TENSOR = "tensor"
+@@ -119,6 +127,46 @@ class RoutedExperts(PluggableLayer):
+         self.apply_router_weight_on_input = apply_router_weight_on_input
+         # End random parameters
+         self._loaded_expert_biases: set[str] = set()
++        
++        from vllm.config import get_current_vllm_config
++        vllm_config = get_current_vllm_config()
++        if vllm_config.model_config is not None:
++            self.check_nan_in_output = (vllm_config.model_config.architecture in ["MiniMaxM3SparseForConditionalGeneration", "MiniMaxM2ForCausalLM", "Step3p5ForCausalLM"])
++        else:
++            self.check_nan_in_output = False
++        
++        self.has_gate_proj = self.moe_config.is_act_and_mul
++        self.tp_size = self.moe_config.moe_parallel_config.tp_size
++        self.tp_rank = self.moe_config.tp_rank
++        from vllm.distributed import get_ep_group
++        self.ep_group = get_ep_group()
++        self.ep_size = self.ep_group.world_size
++        self.ep_rank = self.ep_group.rank_in_group
++        
++        self.max_num_seqs = self._get_max_num_seqs(vllm_config)
++        
++        self.is_gpu_resident_layer = is_lk_moe_gpu_resident_layer(self.layer_name) 
++        self.is_gpu_prefill_layer = is_lk_moe_gpu_prefill_layer(self.layer_name)
++        self.is_cpu_layer = is_lk_moe_cpu_layer(self.layer_name)
++        if get_gpu_prefill_min_batch_size() > vllm_config.scheduler_config.max_num_batched_tokens:
++            logger.error(
++                f"gpu_prefill_min_batch_size ({get_gpu_prefill_min_batch_size()}) "
++                f"must be less than or equal to max_num_batched_tokens "
++                f"({vllm_config.scheduler_config.max_num_batched_tokens})"
++            )
++        self.max_num_batched_tokens = vllm_config.scheduler_config.max_num_batched_tokens
++        self.max_num_group_batch_size = self.get_max_num_group_batch_size()
++        self.use_gpu_prefill = is_lk_moe_use_gpu_prefill()
++         
++        from vllm.model_executor.layers.fused_moe.config import MoEActivation
++        
++        moe_activation = self.moe_config.activation
++        self.activation_type = 0  # silu
++        if moe_activation in (MoEActivation.SWIGLUOAI, MoEActivation.SWIGLUOAI_UNINTERLEAVE):
++            self.activation_type = 1  # swigluoai
++        elif not self.has_gate_proj:
++            self.activation_type = 2  # relu2
++            
+ 
+         self.quant_method = self._get_quant_method(
+             self.layer_name,
+@@ -1246,6 +1294,582 @@ class RoutedExperts(PluggableLayer):
+     ) -> torch.Tensor:
+         raise AssertionError("Call forward_modular or forward_monolithic instead.")
+ 
+-
++    def get_max_num_group_batch_size(self) -> int: 
++        
++        if is_lk_moe_use_gpu_prefill():
++            group_batch_size = min(self.max_num_batched_tokens, get_gpu_prefill_min_batch_size()) + 128
++        else:
++            group_batch_size = min(4096, self.max_num_batched_tokens) + 128
++         
++        return group_batch_size
++    
++    def global_to_local_expert_ids(self, topk_ids): 
++        expert_map = self._expert_map.to(topk_ids.device)
++        max_idx = len(self._expert_map) - 1
++         
++        clamped = torch.clamp(topk_ids, 0, max_idx)
++        result = expert_map[clamped]
++         
++        mask = topk_ids < 0
++        result[mask] = -1
++        
++        return result
++    
++    def should_use_gpu_prefill(self, hidden_states: torch.Tensor) -> bool:
++        from vllm.forward_context import (
++            ForwardContext,
++            get_forward_context,
++            is_forward_context_available,
++        )
++        from vllm.config import CUDAGraphMode
++        forward_context = get_forward_context()
++        if (hasattr(forward_context, 'cudagraph_runtime_mode') and 
++            forward_context.cudagraph_runtime_mode != CUDAGraphMode.NONE):
++            return False
++        if torch.cuda.is_current_stream_capturing():
++            return False
++        return self.is_gpu_prefill_layer and hidden_states.size(0) >= get_gpu_prefill_min_batch_size()     
++    
++    def _zero_tensor(self, tensor: torch.Tensor):
++        if tensor is not None:
++            tensor.data = torch.empty(0, dtype=tensor.dtype, device=tensor.device)
++            
++    def _do_process_weights_after_loading(self) -> bool:
++        from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe.compressed_tensors_moe_wna16 import CompressedTensorsWNA16MoEMethod 
++        from vllm.model_executor.layers.quantization.fp8 import Fp8MoEMethod
++        from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe.compressed_tensors_moe_w8a8_fp8 import CompressedTensorsW8A8Fp8MoEMethod
++        from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe.compressed_tensors_moe_w4a4_nvfp4 import CompressedTensorsW4A4Nvfp4MoEMethod
++        from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe.compressed_tensors_moe_w4a4_mxfp4 import CompressedTensorsW4A4Mxfp4MoEMethod
++        from vllm.model_executor.layers.quantization.modelopt import ModelOptNvFp4FusedMoE
++        from vllm.model_executor.layers.quantization.modelopt import ModelOptMxFp8FusedMoE
++        from vllm.model_executor.layers.quantization.mxfp4 import Mxfp4MoEMethod
++        if ( isinstance(self.quant_method, CompressedTensorsWNA16MoEMethod)):
++    
++            self._process_wna16(self.quant_method.strategy)
++            return True 
++            
++        if isinstance(self.quant_method, Fp8MoEMethod) or isinstance(self.quant_method, ModelOptMxFp8FusedMoE):
++            self._process_fp8(self.quant_method.block_quant)
++            return True
++            
++        if isinstance(self.quant_method, CompressedTensorsW8A8Fp8MoEMethod):
++            self._process_fp8(False)
++            return True
++            
++        if isinstance(self.quant_method, UnquantizedFusedMoEMethod): 
++            self._process_bf6_fp16()
++            return True
++
++        if isinstance(self.quant_method, CompressedTensorsW4A4Nvfp4MoEMethod) or isinstance(self.quant_method, ModelOptNvFp4FusedMoE):
++            need_reciprocal_global_scale = isinstance(self.quant_method, CompressedTensorsW4A4Nvfp4MoEMethod)
++            self._process_nvfp4(need_reciprocal_global_scale)
++            return True
++            
++        if isinstance(self.quant_method, CompressedTensorsW4A4Mxfp4MoEMethod) or isinstance(self.quant_method, Mxfp4MoEMethod):
++            self._process_mxfp4()
++            return True
++        
++    
++    def process_weights_after_loading(self):
++        if self.is_gpu_resident_layer:
++            logger.info(f"Initialized lk_moe with {self.local_num_experts} experts for layer {self.layer_name} [" + 
++            ("CPU" if not self.is_gpu_resident_layer else "GPU") + "]")
++            return
++
++        torch.cuda.synchronize()
++        try:
++            with torch.no_grad(): 
++                if not self._do_process_weights_after_loading(): 
++                    logger.error("weight not found in layer, quant_method: %s", self.quant_method) 
++                    return
++                
++                self._initialize_cuda_graph_buffers()
++                logger.info(f"Initialized lk_moe with {self.local_num_experts} experts for layer {self.layer_name} [" + 
++                ("CPU" if not self.is_gpu_resident_layer else "GPU") + "]")
++        except Exception as e:
++            logger.error(f"Failed to initialize lk_moe: {e}") 
++            self.lk_moe = None
++            self.lk_moe_config = None
++            
++    def clean_weights_after_loading(self): 
++        if self.is_gpu_resident_layer:
++            return
++        self._ensure_moe_quant_config_init()
++        weights = ["w13_weight", "w2_weight", 
++                "w13_weight_packed", "w2_weight_packed", 
++                "w13_weight_scale", "w2_weight_scale", 
++                "w13_weight_scale_inv", "w2_weight_scale_inv",
++                "w13_weight_global_scale", "w2_weight_global_scale",
++                "w13_weight_global_scale_2", "w2_weight_global_scale_2"]
++        for weight in weights:
++            if hasattr(self, weight):
++                delattr(self, weight)
++                 
++    
++    def _get_processes_info(self) -> tuple[int, int, int]: 
++        if self.use_ep:
++            return self.ep_size, self.ep_rank, torch.cuda.current_device()
++        return self.tp_size, self.tp_rank, torch.cuda.current_device()
++    
++    def _get_quant_params(self, w13_weight, w13_weight_scale, w2_weight, w2_weight_scale, pack_ratio):
++        unpack_factor = 1 if pack_ratio == 1 else 2  # FP8=1, 4bit=2
++        
++        groupN_w13 = w13_weight.shape[1] // w13_weight_scale.shape[1]
++        groupK_w13 = (w13_weight.shape[2] * unpack_factor) // w13_weight_scale.shape[2]
++        
++        groupN_w2 = w2_weight.shape[1] // w2_weight_scale.shape[1]
++        groupK_w2 = (w2_weight.shape[2] * unpack_factor) // w2_weight_scale.shape[2]
++        
++         
++        groupN = max(groupN_w13, groupN_w2)
++        groupK = max(groupK_w13, groupK_w2)
++        
++        return groupN, groupK
++                   
++     
++    def _process_wna16(self, strategy: str): 
++        from vllm.model_executor.layers.fused_moe.oracle.int_wna16 import WNA16MoEBackend
++        is_transposed = False if (hasattr(self.quant_method, "wna16_backend") and self.quant_method.wna16_backend  == WNA16MoEBackend.FLASHINFER_TRTLLM) else True
++         
++        if(is_transposed):
++            w13_weight = self.w13_weight_packed.cpu().transpose(1, 2).contiguous().view(torch.uint8) 
++            w2_weight = self.w2_weight_packed.cpu().transpose(1, 2).contiguous().view(torch.uint8) 
++            w13_scale = self.w13_weight_scale.cpu().transpose(1, 2).contiguous()
++            w2_scale = self.w2_weight_scale.cpu().transpose(1, 2).contiguous() 
++        else:
++            w13_weight = self.w13_weight_packed.cpu().contiguous().view(torch.uint8) 
++            w2_weight = self.w2_weight_packed.cpu().contiguous().view(torch.uint8) 
++            w13_scale = self.w13_weight_scale.cpu().contiguous()
++            w2_scale = self.w2_weight_scale.cpu().contiguous() 
++    
++        
++        group_size = self.quant_method.group_size        # 32
++        num_bits = self.quant_method.num_bits            # 4
++        packed_factor = self.quant_method.packed_factor  # 8 （bit)
++         
++ 
++        weights_per_container = packed_factor // num_bits  # 2 
++        
++        groupN, groupK = self._get_quant_params(w13_weight, w13_scale, w2_weight, w2_scale, weights_per_container)
++        
++        w13_weight_ptr = w13_weight.data_ptr()
++        w2_weight_ptr = w2_weight.data_ptr()
++       
++        w13_weight_scale_ptr = w13_scale.data_ptr()
++        w2_weight_scale_ptr = w2_scale.data_ptr()
++        
++        num_processes, process_id, gpu_id = self._get_processes_info()
++        
++        # V2: MOEConfigV2 + MOE_WNA16
++        self.lk_moe_config = lk_moe.MOEConfigV2()
++        self.lk_moe_config.num_processes = num_processes
++        self.lk_moe_config.process_id = process_id
++        self.lk_moe_config.gpu_id = gpu_id
++        self.lk_moe_config.has_gate_proj = self.has_gate_proj
++        self.lk_moe_config.expert_num = self.local_num_experts
++        self.lk_moe_config.top_k = self.top_k
++        self.lk_moe_config.hidden_size = self.hidden_size
++        self.lk_moe_config.intermediate_size = self.intermediate_size_per_partition
++        self.lk_moe_config.max_batch_size = self.max_num_batched_tokens
++        self.lk_moe_config.max_num_seqs = self.max_num_seqs
++        self.lk_moe_config.stride = 32
++        self.lk_moe_config.group_min_len = 10
++        self.lk_moe_config.group_max_len = self.max_num_group_batch_size
++        self.lk_moe_config.groupN = groupN
++        self.lk_moe_config.groupK = groupK
++        self.lk_moe_config.activation_type = self.activation_type
++        if self.swiglu_alpha is not None:
++            self.lk_moe_config.swiglu_alpha = self.swiglu_alpha 
++        if self.swiglu_limit is not None:
++            self.lk_moe_config.swiglu_limit = self.swiglu_limit
++        self.lk_moe_config.use_gpu_prefill = self.use_gpu_prefill
++
++        # no global scale
++        if self.params_dtype == torch.bfloat16:
++            self.lk_moe = lk_moe.MOE_WNA16(
++                self.lk_moe_config,
++                w13_weight_ptr,
++                w2_weight_ptr,
++                w13_weight_scale_ptr,
++                w2_weight_scale_ptr,
++                0,
++                0,
++            )
++        else:
++            self.lk_moe = lk_moe.MOE_WNA16_FP16(
++                self.lk_moe_config,
++                w13_weight_ptr,
++                w2_weight_ptr,
++                w13_weight_scale_ptr,
++                w2_weight_scale_ptr,
++                0,
++                0,
++            )
++            
++         
++            
++    
++    
++    def _process_awq(self): 
++        
++        w13_qweight = self.w13_qweight
++        w2_qweight = self.w2_qweight
++        w13_scales = self.w13_scales
++        w2_scales = self.w2_scales
++        w13_qzeros = self.w13_qzeros
++        w2_qzeros = self.w2_qzeros
++        raise ValueError("AWQ Weights are not supported for lk moe ...") 
++         
++ 
++    def _process_fp8(self, block_quant: bool):
++        w13_weight = self.w13_weight
++        w2_weight = self.w2_weight
++
++       
++        if block_quant:
++            w13_weight_scale = self.w13_weight_scale_inv
++            w2_weight_scale = self.w2_weight_scale_inv
++        else: 
++            w13_weight_scale = self.w13_weight_scale
++            w2_weight_scale = self.w2_weight_scale
++        
++        
++        groupN, groupK = self._get_quant_params(w13_weight, w13_weight_scale, w2_weight, w2_weight_scale, 1)
++
++        w13_weight_ptr = w13_weight.contiguous().data_ptr()
++        w2_weight_ptr = w2_weight.contiguous().data_ptr()
++        w13_weight_scale_ptr = w13_weight_scale.contiguous().data_ptr()
++        w2_weight_scale_ptr = w2_weight_scale.contiguous().data_ptr()
++
++        num_processes, process_id, gpu_id = self._get_processes_info()
++
++        # V2: MOEConfigV2 + MOE_FP8
++        self.lk_moe_config = lk_moe.MOEConfigV2()
++        self.lk_moe_config.num_processes = num_processes
++        self.lk_moe_config.process_id = process_id
++        self.lk_moe_config.gpu_id = gpu_id
++        self.lk_moe_config.has_gate_proj = self.has_gate_proj
++        self.lk_moe_config.expert_num = self.local_num_experts
++        self.lk_moe_config.top_k = self.top_k
++        self.lk_moe_config.hidden_size = self.hidden_size
++        self.lk_moe_config.intermediate_size = self.intermediate_size_per_partition
++        self.lk_moe_config.max_batch_size = self.max_num_batched_tokens
++        self.lk_moe_config.max_num_seqs = self.max_num_seqs
++        self.lk_moe_config.stride = 32
++        self.lk_moe_config.group_min_len = 10
++        self.lk_moe_config.group_max_len = self.max_num_group_batch_size
++        self.lk_moe_config.groupN = groupN
++        self.lk_moe_config.groupK = groupK
++        self.lk_moe_config.activation_type = self.activation_type
++        if self.swiglu_alpha is not None:
++            self.lk_moe_config.swiglu_alpha = self.swiglu_alpha 
++        if self.swiglu_limit is not None:
++            self.lk_moe_config.swiglu_limit = self.swiglu_limit
++        self.lk_moe_config.use_gpu_prefill = self.use_gpu_prefill
++
++        # no global scale
++        if self.params_dtype == torch.bfloat16:
++            self.lk_moe = lk_moe.MOE_FP8(
++                self.lk_moe_config,
++                w13_weight_ptr,
++                w2_weight_ptr,
++                w13_weight_scale_ptr,
++                w2_weight_scale_ptr,
++                0,
++                0,
++            )
++        else:
++            self.lk_moe = lk_moe.MOE_FP8_FP16(
++                self.lk_moe_config,
++                w13_weight_ptr,
++                w2_weight_ptr,
++                w13_weight_scale_ptr,
++                w2_weight_scale_ptr,
++                0,
++                0,
++            )
++            
++    def _process_bf6_fp16(self):
++        w13_weight = self.w13_weight
++        w2_weight = self.w2_weight
++         
++        w13_ptr = w13_weight.contiguous().data_ptr()
++        w2_ptr = w2_weight.contiguous().data_ptr()
++        
++        num_processes, process_id, gpu_id = self._get_processes_info()
++        
++        self.lk_moe_config = lk_moe.MOEConfigV2()
++        self.lk_moe_config.num_processes = num_processes
++        self.lk_moe_config.process_id = process_id
++        self.lk_moe_config.gpu_id = gpu_id
++        self.lk_moe_config.has_gate_proj = self.has_gate_proj
++        self.lk_moe_config.expert_num = self.local_num_experts
++        self.lk_moe_config.top_k = self.top_k
++        self.lk_moe_config.hidden_size = self.hidden_size
++        self.lk_moe_config.intermediate_size = self.intermediate_size_per_partition
++        self.lk_moe_config.max_batch_size = self.max_num_batched_tokens
++        self.lk_moe_config.max_num_seqs = self.max_num_seqs
++        self.lk_moe_config.stride = 32
++        self.lk_moe_config.group_min_len = 10
++        self.lk_moe_config.group_max_len = self.max_num_group_batch_size
++        self.lk_moe_config.activation_type = self.activation_type
++        if self.swiglu_alpha is not None:
++            self.lk_moe_config.swiglu_alpha = self.swiglu_alpha 
++        if self.swiglu_limit is not None:
++            self.lk_moe_config.swiglu_limit = self.swiglu_limit
++        self.lk_moe_config.use_gpu_prefill = self.use_gpu_prefill
++        
++        # no scale
++        if self.params_dtype == torch.bfloat16:
++            self.lk_moe = lk_moe.MOE_BF16(
++                self.lk_moe_config,
++                w13_ptr,
++                w2_ptr,
++                0,
++                0,
++                0,
++                0,
++            )
++        else:
++            self.lk_moe = lk_moe.MOE_FP16(
++                self.lk_moe_config,
++                w13_ptr,
++                w2_ptr,
++                0,
++                0,
++                0,
++                0,
++            )
++        
++        
++        
++    
++    def _process_nvfp4(self, need_reciprocal_global_scale=False):  
++        
++        w13_weight = self.w13_weight_packed if hasattr(self, "w13_weight_packed") else self.w13_weight
++        w2_weight = self.w2_weight_packed if hasattr(self, "w2_weight_packed") else self.w2_weight
++         
++        w13_weight_scale = self.w13_weight_scale
++        w2_weight_scale = self.w2_weight_scale
++        w13_weight_global_scale = self.w13_weight_global_scale if hasattr(self, "w13_weight_global_scale") else self.w13_weight_scale_2
++        w2_weight_global_scale = self.w2_weight_global_scale if hasattr(self, "w2_weight_global_scale") else self.w2_weight_scale_2
++         
++         
++        groupN, groupK = self._get_quant_params(w13_weight, w13_weight_scale, w2_weight, w2_weight_scale, 2)
++        
++        if need_reciprocal_global_scale:
++            w13_weight_global_scale = 1.0 / w13_weight_global_scale
++            w2_weight_global_scale = 1.0 / w2_weight_global_scale
++         
++        w13_weight_ptr = w13_weight.contiguous().data_ptr()
++        w2_weight_ptr = w2_weight.contiguous().data_ptr()
++        w13_weight_scale_ptr = w13_weight_scale.contiguous().data_ptr()
++        w2_weight_scale_ptr = w2_weight_scale.contiguous().data_ptr()
++        w13_weight_global_scale_ptr = w13_weight_global_scale.contiguous().data_ptr()
++        w2_weight_global_scale_ptr = w2_weight_global_scale.contiguous().data_ptr()
++        
++        num_processes, process_id, gpu_id = self._get_processes_info()
++         
++        self.lk_moe_config = lk_moe.MOEConfigV2()
++        self.lk_moe_config.num_processes = num_processes
++        self.lk_moe_config.process_id = process_id
++        self.lk_moe_config.gpu_id = gpu_id
++        self.lk_moe_config.has_gate_proj = self.has_gate_proj
++        self.lk_moe_config.expert_num = self.local_num_experts
++        self.lk_moe_config.top_k = self.top_k
++        self.lk_moe_config.hidden_size = self.hidden_size
++        self.lk_moe_config.intermediate_size = self.intermediate_size_per_partition
++        self.lk_moe_config.max_batch_size = self.max_num_batched_tokens
++        self.lk_moe_config.max_num_seqs = self.max_num_seqs
++        self.lk_moe_config.stride = 32
++        self.lk_moe_config.group_min_len = 10
++        self.lk_moe_config.group_max_len = self.max_num_group_batch_size
++        self.lk_moe_config.groupN = groupN
++        self.lk_moe_config.groupK = groupK
++        self.lk_moe_config.activation_type = self.activation_type
++        if self.swiglu_alpha is not None:
++            self.lk_moe_config.swiglu_alpha = self.swiglu_alpha 
++        if self.swiglu_limit is not None:
++            self.lk_moe_config.swiglu_limit = self.swiglu_limit
++        self.lk_moe_config.use_gpu_prefill = self.use_gpu_prefill
++        
++         
++        if self.params_dtype == torch.bfloat16:
++            self.lk_moe = lk_moe.MOE_NVFP4(
++                self.lk_moe_config,
++                w13_weight_ptr,
++                w2_weight_ptr,
++                w13_weight_scale_ptr,
++                w2_weight_scale_ptr,
++                w13_weight_global_scale_ptr,
++                w2_weight_global_scale_ptr,
++            )
++        else:
++            self.lk_moe = lk_moe.MOE_NVFP4_FP16(
++                self.lk_moe_config,
++                w13_weight_ptr,
++                w2_weight_ptr,
++                w13_weight_scale_ptr,
++                w2_weight_scale_ptr,
++                w13_weight_global_scale_ptr,
++                w2_weight_global_scale_ptr,
++            )
++        
++ 
++    
++    def _process_mxfp4(self):
++        w13_weight = (
++            self.w13_weight_packed
++            if hasattr(self, "w13_weight_packed")
++            else self.w13_weight
++        )
++        w2_weight = (
++            self.w2_weight_packed
++            if hasattr(self, "w2_weight_packed")
++            else self.w2_weight
++        )
++        w13_weight_scale = self.w13_weight_scale
++        w2_weight_scale = self.w2_weight_scale 
++         
++        groupN, groupK = self._get_quant_params(w13_weight, w13_weight_scale, w2_weight, w2_weight_scale, 2)
++
++        w13_weight_ptr = w13_weight.contiguous().data_ptr()
++        w2_weight_ptr = w2_weight.contiguous().data_ptr()
++        w13_weight_scale_ptr = w13_weight_scale.contiguous().data_ptr()
++        w2_weight_scale_ptr = w2_weight_scale.contiguous().data_ptr()
++
++        num_processes, process_id, gpu_id = self._get_processes_info()
++
++        # V2: MOEConfigV2 + MOE_MXFP4
++        self.lk_moe_config = lk_moe.MOEConfigV2()
++        self.lk_moe_config.num_processes = num_processes
++        self.lk_moe_config.process_id = process_id
++        self.lk_moe_config.gpu_id = gpu_id
++        self.lk_moe_config.has_gate_proj = self.has_gate_proj
++        self.lk_moe_config.expert_num = self.local_num_experts
++        self.lk_moe_config.top_k = self.top_k
++        self.lk_moe_config.hidden_size = self.hidden_size
++        self.lk_moe_config.intermediate_size = self.intermediate_size_per_partition
++        self.lk_moe_config.max_batch_size = self.max_num_batched_tokens
++        self.lk_moe_config.max_num_seqs = self.max_num_seqs
++        self.lk_moe_config.stride = 32
++        self.lk_moe_config.group_min_len = 10
++        self.lk_moe_config.group_max_len = self.max_num_group_batch_size
++        self.lk_moe_config.groupN = groupN
++        self.lk_moe_config.groupK = groupK
++        self.lk_moe_config.activation_type = self.activation_type
++        if self.swiglu_alpha is not None:
++            self.lk_moe_config.swiglu_alpha = self.swiglu_alpha 
++        if self.swiglu_limit is not None:
++            self.lk_moe_config.swiglu_limit = self.swiglu_limit
++        self.lk_moe_config.use_gpu_prefill = self.use_gpu_prefill
++
++        # no global scale
++        if self.params_dtype == torch.bfloat16:
++            self.lk_moe = lk_moe.MOE_MXFP4(
++                self.lk_moe_config,
++                w13_weight_ptr,
++                w2_weight_ptr,
++                w13_weight_scale_ptr,
++                w2_weight_scale_ptr,
++                0,
++                0,
++            )
++        else:
++            self.lk_moe = lk_moe.MOE_MXFP4_FP16(
++                self.lk_moe_config,
++                w13_weight_ptr,
++                w2_weight_ptr,
++                w13_weight_scale_ptr,
++                w2_weight_scale_ptr,
++                0,
++                0,
++            )
++         
++         
++    def _get_max_num_seqs(self, vllm_config) -> int:
++        if vllm_config.speculative_config is not None and vllm_config.speculative_config.num_speculative_tokens > 0:
++            batch_size = vllm_config.scheduler_config.max_num_seqs * (
++                1 + vllm_config.speculative_config.num_speculative_tokens
++            )
++        else:
++            batch_size = vllm_config.scheduler_config.max_num_seqs
++        
++        return batch_size
++         
++    def _initialize_cuda_graph_buffers(self): 
++        if not hasattr(RoutedExperts, 'cuda_graphs'):
++            max_batch_size = self.max_num_seqs
++            RoutedExperts.cuda_graphs = [1, 2, 4] + list(range(8, max_batch_size + 1, 8))
++            
++            current_device = torch.cuda.current_device()
++             
++            RoutedExperts.output_gpu = torch.zeros(
++                (max_batch_size, self.hidden_size),
++                device=current_device,
++                dtype=torch.float32,
++                requires_grad=False
++            ).contiguous()
++                 
++    def _cpu_decode(self, hidden_states, topk_weights, topk_ids):
++        stream_ptr = torch.cuda.current_stream().cuda_stream
++        self.lk_moe.cpu_decode(
++            stream_ptr,
++            hidden_states.size(0),
++            self.top_k,
++            hidden_states.data_ptr(),
++            topk_ids.data_ptr(),
++            topk_weights.data_ptr(),
++            RoutedExperts.output_gpu.data_ptr()
++        )
++        
++        output = RoutedExperts.output_gpu[:hidden_states.size(0)]
++        if self.check_nan_in_output:
++            torch.nan_to_num(output, nan=0.0, out=output)
++        return output.to(hidden_states.dtype)
++ 
++
++    def _cpu_prefill(self, hidden_states, topk_weights, topk_ids): 
++         
++        expert_ids_cpu = topk_ids.to(dtype=torch.int32, device='cpu', non_blocking=True)
++        weights_cpu = topk_weights.to(dtype=torch.float32, device='cpu', non_blocking=True)
++        hidden_states_cpu = hidden_states.to(device='cpu', non_blocking=True)
++        output_cpu = torch.empty_like(hidden_states, dtype=torch.float32, device='cpu') 
++        
++        current_stream = torch.cuda.current_stream()
++        current_stream.synchronize()
++        
++        self.lk_moe.cpu_prefill(
++            hidden_states.size(0),
++            expert_ids_cpu.size(1),
++            expert_ids_cpu.data_ptr(),
++            weights_cpu.data_ptr(),
++            hidden_states_cpu.data_ptr(),
++            output_cpu.data_ptr(),
++        )
++             
++        output_gpu = output_cpu.to(torch.cuda.current_device(), dtype=hidden_states.dtype, non_blocking=True) 
++        
++        if self.check_nan_in_output:
++            torch.nan_to_num(output_gpu, nan=0.0, out=output_gpu)
++        
++        return output_gpu
++
++    def _gpu_prefill(self, hidden_states, topk_weights, topk_ids):
++        output = torch.empty_like(hidden_states) 
++        self.lk_moe.gpu_prefill(
++            hidden_states.data_ptr(),
++            output.data_ptr(),
++            topk_ids.data_ptr(),
++            topk_weights.data_ptr(),
++            hidden_states.size(0),
++            topk_ids.size(1),
++            torch.cuda.current_stream().cuda_stream,
++        ) 
++        if self.check_nan_in_output:
++            bad_mask = torch.isnan(output) | torch.isinf(output)
++            if bad_mask.any():
++                output.masked_fill_(bad_mask, 0.0)
++        return output
+ # Mark the RoutedExperts weight_loader as supporting MoE-specific parameters
+ RoutedExperts.weight_loader.supports_moe_loading = True  # type: ignore[attr-defined]
+diff --git a/vllm/model_executor/layers/fused_moe/runner/moe_runner.py b/vllm/model_executor/layers/fused_moe/runner/moe_runner.py
+index 2f072d14b4..1e5b653a33 100644
+--- a/vllm/model_executor/layers/fused_moe/runner/moe_runner.py
++++ b/vllm/model_executor/layers/fused_moe/runner/moe_runner.py
+@@ -611,29 +611,67 @@ class MoERunner(MoERunnerInterface):
+             shared_experts_input, SharedExpertsOrder.NO_OVERLAP
+         )
+ 
+-        if self.routed_experts.quant_method.is_monolithic:
+-            # Monolithic kernels: pass router_logits to routed_experts
+-            fused_out = self.routed_experts.forward_monolithic(
+-                x=hidden_states,
+-                router_logits=router_logits,
+-                input_ids=input_ids,
+-            )
+-        else:
+-            # Modular kernels: select experts first, then call routed_experts
+-            topk_weights, topk_ids = self.router.select_experts(
++        topk_weights, topk_ids = self.router.select_experts(
+                 hidden_states=hidden_states,
+                 router_logits=router_logits,
+                 topk_indices_dtype=self._quant_method.topk_indices_dtype,
+                 input_ids=input_ids,
+             )
+-
+-            fused_out = self.routed_experts.forward_modular(
+-                x=hidden_states,
+-                topk_weights=topk_weights,
+-                topk_ids=topk_ids,
+-                shared_experts=self._shared_experts,
+-                shared_experts_input=shared_experts_input,
+-            )
++        local_topk_ids = self.routed_experts.global_to_local_expert_ids(topk_ids) if self.routed_experts.use_ep else topk_ids
++ 
++        if self.routed_experts.quant_method.is_monolithic:
++            if self.routed_experts.is_gpu_resident_layer:
++                fused_out = self.routed_experts.forward_monolithic(
++                    x=hidden_states,
++                    router_logits=router_logits,
++                    input_ids=input_ids,
++                )
++            elif torch.cuda.is_current_stream_capturing():
++                fused_out = self.routed_experts._cpu_decode(
++                    hidden_states,
++                    topk_weights, 
++                    local_topk_ids, 
++                )
++            elif self.routed_experts.is_gpu_prefill_layer and self.routed_experts.should_use_gpu_prefill(hidden_states):   
++                fused_out = self.routed_experts._gpu_prefill(
++                    hidden_states,
++                    topk_weights, 
++                    local_topk_ids,
++                )
++            else:
++                fused_out = self.routed_experts._cpu_prefill(
++                    hidden_states,
++                    topk_weights, 
++                    local_topk_ids,
++                )
++                  
++        else:
++            if self.routed_experts.is_gpu_resident_layer:
++                fused_out = self.routed_experts.forward_modular(
++                    x=hidden_states,
++                    topk_weights=topk_weights,
++                    topk_ids=topk_ids,
++                    shared_experts=self._shared_experts,
++                    shared_experts_input=shared_experts_input,
++                )
++            elif torch.cuda.is_current_stream_capturing():
++                fused_out = self.routed_experts._cpu_decode(
++                    hidden_states,
++                    topk_weights, 
++                    local_topk_ids, 
++                )
++            elif self.routed_experts.is_gpu_prefill_layer and self.routed_experts.should_use_gpu_prefill(hidden_states):   
++                fused_out = self.routed_experts._gpu_prefill(
++                    hidden_states,
++                    topk_weights, 
++                    local_topk_ids,
++                )
++            else:
++                fused_out = self.routed_experts._cpu_prefill(
++                    hidden_states,
++                    topk_weights, 
++                    local_topk_ids,
++                )
+ 
+         if shared_experts_overlapping:
+             assert self._shared_experts is not None
+diff --git a/vllm/model_executor/layers/fused_moe/unquantized_fused_moe_method.py b/vllm/model_executor/layers/fused_moe/unquantized_fused_moe_method.py
+index 523d1df0d8..512c0222df 100644
+--- a/vllm/model_executor/layers/fused_moe/unquantized_fused_moe_method.py
++++ b/vllm/model_executor/layers/fused_moe/unquantized_fused_moe_method.py
+@@ -68,6 +68,10 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
+         params_dtype: torch.dtype,
+         **extra_weight_attrs,
+     ):
++        from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
++        device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
++        if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
++            device = "cpu"
+         if self.moe.is_act_and_mul:
+             w13_up_dim = 2 * intermediate_size_per_partition
+         else:
+@@ -79,6 +83,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
+                 w13_up_dim,
+                 hidden_size,
+                 dtype=params_dtype,
++                device=device,
+             ),
+             requires_grad=False,
+         )
+@@ -86,7 +91,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
+         set_weight_attrs(w13_weight, extra_weight_attrs)
+         if self.moe.has_bias:
+             w13_bias = torch.nn.Parameter(
+-                torch.zeros(num_experts, w13_up_dim, dtype=params_dtype),
++                torch.zeros(num_experts, w13_up_dim, dtype=params_dtype, device=device),
+                 requires_grad=False,
+             )
+             layer.register_parameter("w13_bias", w13_bias)
+@@ -98,6 +103,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
+                 hidden_size,
+                 intermediate_size_per_partition,
+                 dtype=params_dtype,
++                device=device,
+             ),
+             requires_grad=False,
+         )
+@@ -105,7 +111,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
+         set_weight_attrs(w2_weight, extra_weight_attrs)
+         if self.moe.has_bias:
+             w2_bias = torch.nn.Parameter(
+-                torch.zeros(num_experts, hidden_size, dtype=params_dtype),
++                torch.zeros(num_experts, hidden_size, dtype=params_dtype, device=device),
+                 requires_grad=False,
+             )
+             layer.register_parameter("w2_bias", w2_bias)
+@@ -184,6 +190,9 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
+         )
+ 
+     def process_weights_after_loading(self, layer: "RoutedExperts") -> None:
++        from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
++        if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
++            return None
+         super().process_weights_after_loading(layer)
+ 
+         if is_weights_pre_processed():
+diff --git a/vllm/model_executor/layers/quantization/auto_awq.py b/vllm/model_executor/layers/quantization/auto_awq.py
+index f8c7269add..b18d42517f 100644
+--- a/vllm/model_executor/layers/quantization/auto_awq.py
++++ b/vllm/model_executor/layers/quantization/auto_awq.py
+@@ -549,6 +549,11 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
+         params_dtype: torch.dtype,
+         **extra_weight_attrs,
+     ):
++        from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
++        from vllm.platforms import current_platform
++        device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
++        if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
++            device = "cpu"
+         layer.input_dtype = self.input_dtype
+         extra_weight_attrs.update(
+             {
+@@ -565,6 +570,7 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
+                 * intermediate_size_per_partition
+                 // self.quant_config.pack_factor,
+                 dtype=torch.int32,
++                device=device,
+             ),
+             requires_grad=False,
+         )
+@@ -577,6 +583,7 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
+                 intermediate_size_per_partition,
+                 hidden_size // self.quant_config.pack_factor,
+                 dtype=torch.int32,
++                device=device,
+             ),
+             requires_grad=False,
+         )
+@@ -596,6 +603,7 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
+                 num_groups_w13,
+                 intermediate_size_per_partition * self.moe.w13_num_shards,
+                 dtype=params_dtype,
++                device=device,
+             ),
+             requires_grad=False,
+         )
+@@ -603,7 +611,7 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
+         set_weight_attrs(w13_scales, extra_weight_attrs)
+ 
+         w2_scales = Parameter(
+-            torch.empty(num_experts, num_groups_w2, hidden_size, dtype=params_dtype),
++            torch.empty(num_experts, num_groups_w2, hidden_size, dtype=params_dtype, device=device),
+             requires_grad=False,
+         )
+         layer.register_parameter("w2_scales", w2_scales)
+@@ -619,6 +627,7 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
+                 * intermediate_size_per_partition
+                 // self.quant_config.pack_factor,
+                 dtype=torch.int32,
++                device=device,
+             ),
+             requires_grad=False,
+         )
+@@ -631,6 +640,7 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
+                 num_groups_w2,
+                 hidden_size // self.quant_config.pack_factor,
+                 dtype=torch.int32,
++                device=device,
+             ),
+             requires_grad=False,
+         )
+@@ -641,6 +651,9 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
+         layer.workspace = marlin_make_workspace_new(device, 4)
+ 
+     def process_weights_after_loading(self, layer: RoutedExperts) -> None:
++        from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
++        if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
++            return
+         converted = convert_to_wna16_moe_kernel_format(
+             backend=self.wna16_moe_backend,
+             layer=layer,
+diff --git a/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_w4a4_mxfp4.py b/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_w4a4_mxfp4.py
+index f7d12c8635..9feb367ea9 100644
+--- a/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_w4a4_mxfp4.py
++++ b/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_w4a4_mxfp4.py
+@@ -78,6 +78,12 @@ class CompressedTensorsW4A4Mxfp4MoEMethod(CompressedTensorsMoEMethod):
+         params_dtype: torch.dtype,
+         **extra_weight_attrs,
+     ):
++        device = (
++            torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
++        )
++        if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
++            device = "cpu"
++
+         layer.num_experts = num_experts
+         layer.params_dtype = params_dtype
+ 
+@@ -89,6 +95,7 @@ class CompressedTensorsW4A4Mxfp4MoEMethod(CompressedTensorsMoEMethod):
+                 hidden_size // 2,
+                 requires_grad=False,
+                 dtype=torch.uint8,
++                device=device,
+             ),
+             requires_grad=False,
+         )
+@@ -102,6 +109,7 @@ class CompressedTensorsW4A4Mxfp4MoEMethod(CompressedTensorsMoEMethod):
+                 # 2 fp4 items are packed in the input dimension
+                 intermediate_size_per_partition // 2,
+                 dtype=torch.uint8,
++                device=device,
+             ),
+             requires_grad=False,
+         )
+@@ -115,6 +123,7 @@ class CompressedTensorsW4A4Mxfp4MoEMethod(CompressedTensorsMoEMethod):
+                 # 2 fp4 items are packed in the input dimension
+                 hidden_size // self.group_size,
+                 dtype=torch.uint8,
++                device=device,
+             ),
+             requires_grad=False,
+         )
+@@ -131,6 +140,7 @@ class CompressedTensorsW4A4Mxfp4MoEMethod(CompressedTensorsMoEMethod):
+                 # 2 fp4 items are packed in the input dimension
+                 intermediate_size_per_partition // self.group_size,
+                 dtype=torch.uint8,
++                device=device,
+             ),
+             requires_grad=False,
+         )
+@@ -142,20 +152,30 @@ class CompressedTensorsW4A4Mxfp4MoEMethod(CompressedTensorsMoEMethod):
+     ) -> FusedMoEQuantConfig | None:
+         if self.use_cutlass_mxfp4:
+             # W4A4: both weights and activations quantized to MXFP4
+-            return mxfp4_moe_quant_config(
++            config = mxfp4_moe_quant_config(
+                 w1_scale=layer.w13_weight_scale,
+                 w2_scale=layer.w2_weight_scale,
+             )
++            config.gemm1_alpha = self.moe.swiglu_alpha
++            config.gemm1_beta = self.moe.swiglu_beta
++            config.gemm1_clamp_limit = self.moe.swiglu_limit
++            return config
+         else:
+             # b12x selects W4A8 or W4A16; XPU uses W4A4; Marlin uses W4A16.
+             return make_mxfp4_moe_quant_config(
+                 mxfp4_backend=self.mxfp4_backend,
+                 w1_scale=layer.w13_weight_scale,
+                 w2_scale=layer.w2_weight_scale,
++                gemm1_alpha=self.moe.swiglu_alpha,
++                gemm1_beta=self.moe.swiglu_beta,
++                swiglu_limit=self.moe.swiglu_limit,
+                 layer=layer,
+             )
+ 
+     def process_weights_after_loading(self, layer: RoutedExperts) -> None:
++        if not layer.is_gpu_resident_layer:
++            return
++
+         layer.w13_weight = torch.nn.Parameter(
+             layer.w13_weight_packed.data, requires_grad=False
+         )
+diff --git a/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_w4a4_nvfp4.py b/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_w4a4_nvfp4.py
+index cf98e52bb6..fa7f292f39 100644
+--- a/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_w4a4_nvfp4.py
++++ b/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_w4a4_nvfp4.py
+@@ -79,6 +79,11 @@ class CompressedTensorsW4A4Nvfp4MoEMethod(CompressedTensorsMoEMethod):
+         params_dtype: torch.dtype,
+         **extra_weight_attrs,
+     ):
++        from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
++        from vllm.platforms import current_platform
++        device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
++        if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
++            device = "cpu"
+         layer.num_experts = num_experts
+         layer.params_dtype = params_dtype
+         w13_num_shards = 2 if self.moe.is_act_and_mul else 1
+@@ -91,6 +96,7 @@ class CompressedTensorsW4A4Nvfp4MoEMethod(CompressedTensorsMoEMethod):
+                 hidden_size // 2,
+                 requires_grad=False,
+                 dtype=torch.uint8,
++                device=device,
+             ),
+             requires_grad=False,
+         )
+@@ -104,6 +110,7 @@ class CompressedTensorsW4A4Nvfp4MoEMethod(CompressedTensorsMoEMethod):
+                 # 2 fp4 items are packed in the input dimension
+                 intermediate_size_per_partition // 2,
+                 dtype=torch.uint8,
++                device=device,
+             ),
+             requires_grad=False,
+         )
+@@ -118,6 +125,7 @@ class CompressedTensorsW4A4Nvfp4MoEMethod(CompressedTensorsMoEMethod):
+                 # 2 fp4 items are packed in the input dimension
+                 hidden_size // self.group_size,
+                 dtype=torch.float8_e4m3fn,
++                device=device,
+             ),
+             requires_grad=False,
+         )
+@@ -134,6 +142,7 @@ class CompressedTensorsW4A4Nvfp4MoEMethod(CompressedTensorsMoEMethod):
+                 # 2 fp4 items are packed in the input dimension
+                 intermediate_size_per_partition // self.group_size,
+                 dtype=torch.float8_e4m3fn,
++                device=device,
+             ),
+             requires_grad=False,
+         )
+@@ -145,7 +154,7 @@ class CompressedTensorsW4A4Nvfp4MoEMethod(CompressedTensorsMoEMethod):
+ 
+         # Weight Global Scales
+         w13_weight_scale_2 = torch.nn.Parameter(
+-            torch.empty(num_experts, w13_num_shards, dtype=torch.float32),
++            torch.empty(num_experts, w13_num_shards, dtype=torch.float32, device=device),
+             requires_grad=False,
+         )
+         layer.register_parameter("w13_weight_global_scale", w13_weight_scale_2)
+@@ -155,7 +164,7 @@ class CompressedTensorsW4A4Nvfp4MoEMethod(CompressedTensorsMoEMethod):
+         set_weight_attrs(w13_weight_scale_2, extra_weight_attrs)
+ 
+         w2_weight_scale_2 = torch.nn.Parameter(
+-            torch.empty(num_experts, dtype=torch.float32), requires_grad=False
++            torch.empty(num_experts, dtype=torch.float32, device=device), requires_grad=False
+         )
+         layer.register_parameter("w2_weight_global_scale", w2_weight_scale_2)
+         extra_weight_attrs.update(
+@@ -184,6 +193,9 @@ class CompressedTensorsW4A4Nvfp4MoEMethod(CompressedTensorsMoEMethod):
+         set_weight_attrs(w2_input_scale, extra_weight_attrs)
+ 
+     def process_weights_after_loading(self, layer: RoutedExperts) -> None:
++        from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
++        if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
++            return
+         """
+         Convert NVFP4 MoE weights into kernel format and setup the kernel.
+         """
+@@ -258,14 +270,15 @@ class CompressedTensorsW4A4Nvfp4MoEMethod(CompressedTensorsMoEMethod):
+         self.moe_kernel.fused_experts.process_weights_after_loading(layer)
+ 
+     def get_fused_moe_quant_config(self, layer: torch.nn.Module) -> FusedMoEQuantConfig:
++        
+         return make_nvfp4_moe_quant_config(
+             backend=self.nvfp4_backend,
+             w13_scale=layer.w13_weight_scale,
+             w2_scale=layer.w2_weight_scale,
+-            w13_scale_2=layer.w13_weight_scale_2,
+-            w2_scale_2=layer.w2_weight_scale_2,
+-            a13_scale=layer.w13_input_scale,
+-            a2_scale=layer.w2_input_scale,
++            w13_scale_2=layer.w13_weight_scale_2 if hasattr(layer, "w13_weight_scale_2") else layer.w13_weight_global_scale,
++            w2_scale_2=layer.w2_weight_scale_2 if hasattr(layer, "w2_weight_scale_2") else layer.w2_weight_global_scale,
++            a13_scale=layer.w13_input_scale if hasattr(layer, "w13_input_scale") else layer.w13_input_global_scale,
++            a2_scale=layer.w2_input_scale if hasattr(layer, "w2_input_scale") else layer.w2_input_global_scale,
+             swiglu_limit=getattr(layer, "swiglu_limit", None),
+             swiglu_alpha=getattr(layer, "swiglu_alpha", None),
+             swiglu_beta=getattr(layer, "swiglu_beta", None),
+diff --git a/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_w8a8_fp8.py b/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_w8a8_fp8.py
+index 262cd307a8..2780fe2a92 100644
+--- a/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_w8a8_fp8.py
++++ b/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_w8a8_fp8.py
+@@ -119,6 +119,10 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
+         params_dtype: torch.dtype,
+         **extra_weight_attrs,
+     ):
++        from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
++        device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
++        if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
++            device = "cpu"
+         layer.num_experts = num_experts
+         layer.orig_dtype = params_dtype
+         layer.weight_block_size = None
+@@ -145,6 +149,7 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
+                 w13_num_shards * intermediate_size_per_partition,
+                 hidden_size,
+                 dtype=params_dtype,
++                device=device,
+             ),
+             requires_grad=False,
+         )
+@@ -157,6 +162,7 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
+                 hidden_size,
+                 intermediate_size_per_partition,
+                 dtype=params_dtype,
++                device=device,
+             ),
+             requires_grad=False,
+         )
+@@ -169,12 +175,12 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
+             # They will be combined to a single scale after weight loading.
+             # For non-gated MoE, allocate 1 scale for w13.
+             w13_weight_scale = torch.nn.Parameter(
+-                torch.ones(num_experts, w13_num_shards, dtype=torch.float32),
++                torch.ones(num_experts, w13_num_shards, dtype=torch.float32, device=device),
+                 requires_grad=False,
+             )
+             layer.register_parameter("w13_weight_scale", w13_weight_scale)
+             w2_weight_scale = torch.nn.Parameter(
+-                torch.ones(num_experts, dtype=torch.float32), requires_grad=False
++                torch.ones(num_experts, dtype=torch.float32, device=device), requires_grad=False
+             )
+             layer.register_parameter("w2_weight_scale", w2_weight_scale)
+             # Add PER-TENSOR quantization for RoutedExperts.weight_loader.
+@@ -191,12 +197,13 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
+                     w13_num_shards * intermediate_size_per_partition,
+                     1,
+                     dtype=torch.float32,
++                    device=device,
+                 ),
+                 requires_grad=False,
+             )
+             layer.register_parameter("w13_weight_scale", w13_weight_scale)
+             w2_weight_scale = torch.nn.Parameter(
+-                torch.ones(num_experts, hidden_size, 1, dtype=torch.float32),
++                torch.ones(num_experts, hidden_size, 1, dtype=torch.float32, device=device),
+                 requires_grad=False,
+             )
+             layer.register_parameter("w2_weight_scale", w2_weight_scale)
+@@ -215,6 +222,7 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
+                     * ((intermediate_size_per_partition + block_n - 1) // block_n),
+                     (hidden_size + block_k - 1) // block_k,
+                     dtype=torch.float32,
++                    device=device,
+                 ),
+                 requires_grad=False,
+             )
+@@ -225,6 +233,7 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
+                     (hidden_size + block_n - 1) // block_n,
+                     (intermediate_size_per_partition + block_k - 1) // block_k,
+                     dtype=torch.float32,
++                    device=device,
+                 ),
+                 requires_grad=False,
+             )
+@@ -254,6 +263,9 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
+             layer.w2_input_scale = None
+ 
+     def process_weights_after_loading(self, layer: RoutedExperts) -> None:
++        from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
++        if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
++            return
+         # Allow for accessing weights and scales in standard way.
+         w13 = layer.w13_weight
+         w2 = layer.w2_weight
+diff --git a/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_wna16.py b/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_wna16.py
+index 6a3f73e539..4dcfda5591 100644
+--- a/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_wna16.py
++++ b/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_wna16.py
+@@ -228,6 +228,11 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
+         params_dtype: torch.dtype,
+         **extra_weight_attrs,
+     ):
++        from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
++        from vllm.platforms import current_platform
++        device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
++        if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
++            device = "cpu"
+         # Will transpose the loaded weight along the
+         # intermediate and hidden dim sizes. Will
+         # shard for TP along the transposed dims
+@@ -244,6 +249,7 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
+                     intermediate_size_per_partition,
+                 ),
+                 dtype=torch.int32,
++                device=device,
+             ),
+             requires_grad=False,
+         )
+@@ -259,6 +265,7 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
+                     intermediate_size_per_partition,
+                 ),
+                 dtype=torch.int32,
++                device=device,
+             ),
+             requires_grad=False,
+         )
+@@ -355,6 +362,7 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
+                         num_groups_w13=num_groups_w13,
+                     ),
+                     dtype=torch.int32,
++                    device=device,
+                 ),
+                 requires_grad=False,
+             )
+@@ -371,6 +379,7 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
+                         num_groups_w2=num_groups_w2,
+                     ),
+                     dtype=torch.int32,
++                    device=device,
+                 ),
+                 requires_grad=False,
+             )
+@@ -378,12 +387,12 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
+             set_weight_attrs(w2_zp, extra_weight_attrs)
+ 
+         w2_weight_shape = torch.nn.Parameter(
+-            torch.empty(num_experts, 2), requires_grad=False
++            torch.empty(num_experts, 2, device=device), requires_grad=False
+         )
+         layer.register_parameter("w2_weight_shape", w2_weight_shape)
+         set_weight_attrs(w2_weight_shape, extra_weight_attrs)
+         w13_weight_shape = torch.nn.Parameter(
+-            torch.empty(num_experts, 2), requires_grad=False
++            torch.empty(num_experts, 2, device=device), requires_grad=False
+         )
+ 
+         layer.register_parameter("w13_weight_shape", w13_weight_shape)
+@@ -406,6 +415,9 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
+         )
+ 
+     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
++        from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
++        if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
++            return
+         # Process weights using the shared oracle infrastructure
+         converted = convert_to_wna16_moe_kernel_format(
+             backend=self.wna16_backend,
+diff --git a/vllm/model_executor/layers/quantization/fp8.py b/vllm/model_executor/layers/quantization/fp8.py
+index d8bef7347d..bad2738a4d 100644
+--- a/vllm/model_executor/layers/quantization/fp8.py
++++ b/vllm/model_executor/layers/quantization/fp8.py
+@@ -564,6 +564,10 @@ class Fp8MoEMethod(FusedMoEMethodBase):
+         params_dtype: torch.dtype,
+         **extra_weight_attrs,
+     ):
++        from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
++        device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
++        if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
++            device = "cpu"
+         layer.num_experts = num_experts
+         layer.orig_dtype = params_dtype
+         layer.weight_block_size = None
+@@ -601,6 +605,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
+                 self.moe.w13_num_shards * intermediate_size_per_partition,
+                 hidden_size,
+                 dtype=params_dtype,
++                device=device,
+             ),
+             requires_grad=False,
+         )
+@@ -613,6 +618,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
+                 hidden_size,
+                 intermediate_size_per_partition,
+                 dtype=params_dtype,
++                device=device,
+             ),
+             requires_grad=False,
+         )
+@@ -626,13 +632,14 @@ class Fp8MoEMethod(FusedMoEMethodBase):
+                     num_experts,
+                     self.moe.w13_num_shards * intermediate_size_per_partition,
+                     dtype=layer.orig_dtype,
++                    device=device,
+                 ),
+                 requires_grad=False,
+             )
+             layer.register_parameter("w13_bias", w13_bias)
+             set_weight_attrs(w13_bias, extra_weight_attrs)
+             w2_bias = torch.nn.Parameter(
+-                torch.zeros(num_experts, hidden_size, dtype=layer.orig_dtype),
++                torch.zeros(num_experts, hidden_size, dtype=layer.orig_dtype, device=device),
+                 requires_grad=False,
+             )
+             layer.register_parameter("w2_bias", w2_bias)
+@@ -642,9 +649,9 @@ class Fp8MoEMethod(FusedMoEMethodBase):
+         if not self.block_quant:
+             # For per-tensor quant, the scales are per expert and weight.
+             w13_scale_data = torch.ones(
+-                num_experts, self.moe.w13_num_shards, dtype=torch.float32
++                num_experts, self.moe.w13_num_shards, dtype=torch.float32, device=device
+             )
+-            w2_scale_data = torch.ones(num_experts, dtype=torch.float32)
++            w2_scale_data = torch.ones(num_experts, dtype=torch.float32, device=device)
+         else:
+             # For block quant, the scales are per block (typically 128x128).
+             w13_scale_data = torch.ones(
+@@ -653,12 +660,14 @@ class Fp8MoEMethod(FusedMoEMethodBase):
+                 * ((intermediate_size_per_partition + block_n - 1) // block_n),
+                 (hidden_size + block_k - 1) // block_k,
+                 dtype=torch.float32,
++                device=device,
+             )
+             w2_scale_data = torch.ones(
+                 num_experts,
+                 (hidden_size + block_n - 1) // block_n,
+                 (intermediate_size_per_partition + block_k - 1) // block_k,
+                 dtype=torch.float32,
++                device=device,
+             )
+         w13_weight_scale = torch.nn.Parameter(w13_scale_data, requires_grad=False)
+         w2_weight_scale = torch.nn.Parameter(w2_scale_data, requires_grad=False)
+@@ -740,6 +749,9 @@ class Fp8MoEMethod(FusedMoEMethodBase):
+         )
+ 
+     def process_weights_after_loading(self, layer: RoutedExperts) -> None:
++        from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
++        if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
++            return
+         if is_weights_pre_processed():
+             # Weights are already in kernel format; rebuild the kernel only.
+             self._init_moe_kernel(layer)
+diff --git a/vllm/model_executor/layers/quantization/modelopt.py b/vllm/model_executor/layers/quantization/modelopt.py
+index 2abe60d7ad..b8d2a1a364 100644
+--- a/vllm/model_executor/layers/quantization/modelopt.py
++++ b/vllm/model_executor/layers/quantization/modelopt.py
+@@ -859,6 +859,11 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
+         **extra_weight_attrs,
+     ):
+         assert self.quant_config.is_checkpoint_nvfp4_serialized
++        from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
++        from vllm.platforms import current_platform
++        device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
++        if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
++            device = "cpu"
+ 
+         layer.num_experts = num_experts
+         layer.params_dtype = params_dtype
+@@ -876,6 +881,7 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
+                 # 2 fp4 items are packed in the input dimension
+                 hidden_size // 2,
+                 dtype=weight_dtype,
++                device=device,
+             ),
+             input_dim=1,
+             output_dim=2,
+@@ -891,6 +897,7 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
+                 # 2 fp4 items are packed in the input dimension
+                 intermediate_size_per_partition // 2,
+                 dtype=weight_dtype,
++                device=device,
+             ),
+             input_dim=1,
+             output_dim=2,
+@@ -905,6 +912,7 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
+                 # 2 fp4 items are packed in the input dimension
+                 hidden_size // self.quant_config.group_size,
+                 dtype=weight_scale_dtype,
++                device=device,
+             ),
+             input_dim=1,
+             output_dim=2,
+@@ -919,6 +927,7 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
+                 # 2 fp4 items are packed in the input dimension
+                 intermediate_size_per_partition // self.quant_config.group_size,
+                 dtype=weight_scale_dtype,
++                device=device,
+             ),
+             input_dim=1,
+             output_dim=2,
+@@ -931,13 +940,13 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
+         )
+ 
+         w13_weight_scale_2 = PerTensorScaleParameter(
+-            data=torch.empty(num_experts, w13_num_shards, dtype=torch.float32),
++            data=torch.empty(num_experts, w13_num_shards, dtype=torch.float32, device=device),
+             weight_loader=weight_loader,
+         )
+         layer.register_parameter("w13_weight_scale_2", w13_weight_scale_2)
+ 
+         w2_weight_scale_2 = PerTensorScaleParameter(
+-            data=torch.empty(num_experts, dtype=torch.float32),
++            data=torch.empty(num_experts, dtype=torch.float32, device=device),
+             weight_loader=weight_loader,
+         )
+         layer.register_parameter("w2_weight_scale_2", w2_weight_scale_2)
+@@ -966,6 +975,9 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
+         layer.register_parameter("w2_input_scale", w2_input_scale)
+ 
+     def process_weights_after_loading(self, layer: RoutedExperts) -> None:
++        from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
++        if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
++            return
+         """
+         Convert NVFP4 MoE weights into kernel format and setup the kernel.
+         """
+diff --git a/vllm/model_executor/layers/quantization/mxfp4.py b/vllm/model_executor/layers/quantization/mxfp4.py
+index 1f994ab56c..ebae4aedee 100644
+--- a/vllm/model_executor/layers/quantization/mxfp4.py
++++ b/vllm/model_executor/layers/quantization/mxfp4.py
+@@ -568,6 +568,11 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
+         params_dtype: torch.dtype,
+         **extra_weight_attrs,
+     ):
++        from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
++        from vllm.platforms import current_platform
++        device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
++        if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
++            device = "cpu"
+         self.num_experts = num_experts
+         weight_dtype = torch.uint8
+         scale_dtype = torch.uint8
+@@ -587,6 +592,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
+                 self.moe.w13_num_shards * intermediate_size_per_partition,
+                 hidden_size // 2,
+                 dtype=weight_dtype,
++                device=device,
+             ),
+             requires_grad=False,
+         )
+@@ -600,6 +606,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
+                 self.moe.w13_num_shards * intermediate_size_per_partition,
+                 hidden_size // mxfp4_block,
+                 dtype=scale_dtype,
++                device=device,
+             ),
+             requires_grad=False,
+         )
+@@ -615,6 +622,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
+                 hidden_size,
+                 intermediate_size_per_partition // 2,
+                 dtype=weight_dtype,
++                device=device,
+             ),
+             requires_grad=False,
+         )
+@@ -628,6 +636,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
+                 hidden_size,
+                 intermediate_size_per_partition // mxfp4_block,
+                 dtype=scale_dtype,
++                device=device,
+             ),
+             requires_grad=False,
+         )
+@@ -642,6 +651,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
+                     num_experts,
+                     self.moe.w13_num_shards * intermediate_size_per_partition,
+                     dtype=torch.bfloat16,
++                    device=device,
+                 ),
+                 requires_grad=False,
+             )
+@@ -654,6 +664,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
+                     num_experts,
+                     hidden_size,
+                     dtype=torch.bfloat16,
++                    device=device,
+                 ),
+                 requires_grad=False,
+             )
+@@ -774,6 +785,9 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
+             self.moe_kernel.fused_experts.process_weights_after_loading(layer)
+ 
+     def process_weights_after_loading(self, layer):
++        from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
++        if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
++            return
+         w13 = layer.w13_weight
+         w2 = layer.w2_weight
+         w13_scale = layer.w13_weight_scale
+diff --git a/vllm/model_executor/model_loader/utils.py b/vllm/model_executor/model_loader/utils.py
+index e12910865e..f254c59578 100644
+--- a/vllm/model_executor/model_loader/utils.py
++++ b/vllm/model_executor/model_loader/utils.py
+@@ -104,11 +104,14 @@ def process_weights_after_loading(
+     methods skip tensor transforms and must declare
+     ``supports_pre_processed_weights``, otherwise this raises ``RuntimeError``.
+     """
++    from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
+     # Reclaim memory when an explicit lm_head has been
+     # loaded, but it is identical to the input embeddings.
+     maybe_retie_word_embeddings(model, model_config)
+ 
+     for name, module in model.named_modules():
++        if isinstance(module, RoutedExperts) and not getattr(module, "process_lk_moe_already_called", False):
++            module.process_weights_after_loading()
+         quant_method = getattr(module, "quant_method", None)
+         if isinstance(quant_method, QuantizeMethodBase):
+             if (
+@@ -143,6 +146,9 @@ def process_weights_after_loading(
+             # Repacking transients above can leave large amounts of memory in
+             # the caching allocator, which starves the OS on UMA devices.
+             release_device_memory_under_pressure(target_device)
++        if isinstance(module, RoutedExperts) and not getattr(module, "process_lk_moe_already_called", False):
++            module.clean_weights_after_loading() 
++            setattr(module, "process_lk_moe_already_called", True)
+ 
+     # Initialize post-load attention weights for any attention layer and MM
+     # encoder. NOTE: Happens after other modules so we can easily decompress
+@@ -175,6 +181,10 @@ def process_weights_after_loading(
+ 
+ @contextmanager
+ def device_loading_context(module: torch.nn.Module, target_device: torch.device):
++    from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
++    if isinstance(module, RoutedExperts) and not module.is_gpu_resident_layer: 
++        yield module
++        return
+     if target_device.type == "cpu":
+         # If target is CPU, no need to move anything
+         yield module
+@@ -196,6 +206,8 @@ def device_loading_context(module: torch.nn.Module, target_device: torch.device)
+         yield module
+ 
+     finally:
++        if isinstance(module, RoutedExperts) and not module.is_gpu_resident_layer:  
++            return
+         use_pin_memory = (
+             is_pin_memory_available()
+             and not envs.VLLM_WEIGHT_OFFLOADING_DISABLE_PIN_MEMORY
+diff --git a/vllm/models/qwen4_exp/nvidia/ngram_embedding.py b/vllm/models/qwen4_exp/nvidia/ngram_embedding.py
+index 84c4e7c5e1..afbe797dcc 100644
+--- a/vllm/models/qwen4_exp/nvidia/ngram_embedding.py
++++ b/vllm/models/qwen4_exp/nvidia/ngram_embedding.py
+@@ -46,6 +46,8 @@ from vllm.utils.torch_utils import get_accelerator_view_from_cpu_tensor
+ from ..common.ple import PLEVocabParallelEmbedding
+ from .ops.ple import ple_ngram_ids
+ 
++from vllm.utils.math_utils import next_power_of_2
++
+ logger = init_logger(__name__)
+ 
+ 
+@@ -416,7 +418,7 @@ class Qwen4ExpPLEPinnedHostEmbedding(Qwen4ExpPLEEmbedding):
+             data_parallel_rank=data_parallel_rank,
+         )
+         self._uva_weight = get_accelerator_view_from_cpu_tensor(self.weight)
+-        self._block_d = triton.next_power_of_2(self.embedding_dim)
++        self._block_d = next_power_of_2(self.embedding_dim)
+         self._prefetch_stream = torch.cuda.Stream(device=self._uva_weight.device)
+         self._prefetch_buffer = torch.empty(
+             max_total_tokens * self.etp_data_parallel_size,
+diff --git a/vllm/platforms/__init__.py b/vllm/platforms/__init__.py
+index b34b0b9a7d..71dbefaeed 100644
+--- a/vllm/platforms/__init__.py
++++ b/vllm/platforms/__init__.py
+@@ -22,7 +22,7 @@ def vllm_version_matches_substr(substr: str) -> bool:
+     from importlib.metadata import PackageNotFoundError, version
+ 
+     try:
+-        vllm_version = version("vllm")
++        vllm_version = version("lvllm")
+     except PackageNotFoundError as e:
+         logger.warning(
+             "The vLLM package was not found, so its version could not be "
+diff --git a/vllm/triton_utils/importing.py b/vllm/triton_utils/importing.py
+index 966ab55f32..b04881691d 100644
+--- a/vllm/triton_utils/importing.py
++++ b/vllm/triton_utils/importing.py
+@@ -35,7 +35,7 @@ if HAS_TRITON:
+         ]
+ 
+         # Check Triton CPU
+-        if "cpu" in version("vllm"):
++        if "cpu" in version("lvllm"):
+             if "cpu" in backends:
+                 HAS_TRITON = True
+                 # Suppress following warnings on CPU-only platforms
+diff --git a/vllm/utils/numa_utils.py b/vllm/utils/numa_utils.py
+index 2e52935ea6..c467191cdf 100644
+--- a/vllm/utils/numa_utils.py
++++ b/vllm/utils/numa_utils.py
+@@ -513,22 +513,33 @@ def configure_subprocess(
+ ):
+     """Temporarily replace the multiprocessing executable with a numactl wrapper."""
+     parallel_config = vllm_config.parallel_config
+-    if not parallel_config.numa_bind:
+-        yield
+-        return
+-
+-    if process_kind == "EngineCore":
+-        numactl_args = _get_numactl_enginecore_args(
+-            parallel_config, local_rank, dp_local_rank
+-        )
+-    elif process_kind == "worker":
+-        numactl_args = _get_numactl_worker_args(
+-            parallel_config, local_rank, dp_local_rank
++    from vllm.envs import is_lk_moe_feature_enabled, is_numa_interleave_enabled
++    
++    # Check if NUMA interleave override should take precedence
++    if is_lk_moe_feature_enabled() and is_numa_interleave_enabled():  
++        numactl_args = "--interleave=all"
++        logger.info(
++            "Enabling NUMA interleave override when LVLLM_MOE_NUMA_ENABLED=1 "
++            "and LVLLM_ENABLE_NUMA_INTERLEAVE=1"
+         )
+     else:
+-        raise ValueError(
+-            f"Unknown process_kind {process_kind!r}; expected 'worker' or 'EngineCore'."
+-        )
++        # Original logic
++        if not parallel_config.numa_bind:
++            yield
++            return
++
++        if process_kind == "EngineCore":
++            numactl_args = _get_numactl_enginecore_args(
++                parallel_config, local_rank, dp_local_rank
++            )
++        elif process_kind == "worker":
++            numactl_args = _get_numactl_worker_args(
++                parallel_config, local_rank, dp_local_rank
++            )
++        else:
++            raise ValueError(
++                f"Unknown process_kind {process_kind!r}; expected 'worker' or 'EngineCore'."
++            )
+ 
+     executable, debug_str = _get_numactl_executable()
+     numactl_args = _resolve_numactl_args(numactl_args)
