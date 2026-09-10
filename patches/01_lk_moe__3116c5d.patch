@@ -1,6 +1,6 @@
 diff --git a/benchmarks/llm-performance-test.html b/benchmarks/llm-performance-test.html
 new file mode 100644
-index 000000000..6615b4459
+index 0000000000..6615b44595
 --- /dev/null
 +++ b/benchmarks/llm-performance-test.html
 @@ -0,0 +1,1833 @@
@@ -1837,65 +1837,11 @@ index 000000000..6615b4459
 +</body>
 +
 +</html>
-diff --git a/config.yaml b/config.yaml
-new file mode 100644
-index 000000000..8abe7cb63
---- /dev/null
-+++ b/config.yaml
-@@ -0,0 +1,47 @@
-+model: "/home/guqiong/Downloads/DeepSeek-V4-Flash-0731"
-+host: "0.0.0.0"
-+port: 8070
-+tensor-parallel-size: 2
-+max-model-len: 36000
-+gpu-memory-utilization: 0.95
-+trust-remote-code: true
-+tokenizer-mode: "auto"
-+served-model-name: "DeepSeek-V4-Flash-0731"
-+compilation_config.cudagraph_mode: "FULL_DECODE_ONLY"
-+enable_prefix_caching: true
-+enable-chunked-prefill: true
-+max_num_batched_tokens: 4096
-+dtype: "bfloat16"
-+max_num_seqs: 2
-+compilation_config.mode: "VLLM_COMPILE"
-+enable-auto-tool-choice: true
-+# mamba-ssm-cache-dtype: "float16"
-+# reasoning-parser: "super_v3"
-+# kv_cache_dtype: "bfloat16"  
-+# speculative-config: '{"method":"qwen3_next_mtp","num_speculative_tokens":7}'
-+# tool-call-parser: "minimax_m2"
-+# reasoning-parser: "minimax_m2_append_think"
-+# tool-call-parser: glm47
-+# reasoning-parser: glm45
-+# tool-call-parser: "kimi_k2"
-+# reasoning-parser: "kimi_k2" 
-+# mm-encoder-tp-mode: "data"
-+# disable-cascade-attn: true
-+# reasoning-parser: "step3p5" 
-+# tool-call-parser: "step3p5"  
-+# reasoning-parser: "qwen3"
-+# tool-call-parser: "qwen3_coder"
-+# reasoning-parser: "nemotron_v3"
-+# reasoning-parser: "gemma4"
-+# tool-call-parser: "gemma4"
-+# tool-call-parser: minimax_m3 
-+# reasoning-parser: minimax_m3 
-+# block-size: 128
-+kv-cache-dtype: "fp8_ds_mla"  
-+tokenizer-mode: "deepseek_v4"     
-+tool-call-parser: "deepseek_v4"     
-+reasoning-parser: "deepseek_v4"
-+# speculative-config: '{"num_speculative_tokens": 3,"method": "deepseek_mtp"}'
-+speculative-config: '{"method":"dspark","num_speculative_tokens":5,"draft_sample_method":"probabilistic"}'
-+default-chat-template-kwargs: '{"enable_thinking": true}'
-+disable-custom-all-reduce: true
-\ No newline at end of file
 diff --git a/docker/Dockerfile b/docker/Dockerfile
-index aba7b1727..d537fea51 100644
+index 9f70c4b2b9..d2b5177599 100644
 --- a/docker/Dockerfile
 +++ b/docker/Dockerfile
-@@ -1082,7 +1082,8 @@ COPY requirements/test/cuda.txt requirements/test/cuda.txt
+@@ -1102,7 +1102,8 @@ COPY requirements/test/cuda.txt requirements/test/cuda.txt
  COPY requirements/dev.txt requirements/dev.txt
  COPY use_existing_torch.py use_existing_torch.py
  COPY --from=base /workspace/torch_lib_versions.txt torch_lib_versions.txt
@@ -1905,11 +1851,8 @@ index aba7b1727..d537fea51 100644
      CUDA_MAJOR="${CUDA_VERSION%%.*}"; \
      if [ "$CUDA_MAJOR" -ge 12 ]; then \
          if [ "${PYTORCH_NIGHTLY}" = "1" ]; then \
-diff --git a/patches/01_lk_moe__v0.29.0.patch b/patches/01_lk_moe__v0.29.0.patch
-new file mode 100644
-index 000000000..68906de7f
 diff --git a/pyproject.toml b/pyproject.toml
-index d689d50d8..622349163 100644
+index d689d50d8d..6223491630 100644
 --- a/pyproject.toml
 +++ b/pyproject.toml
 @@ -14,7 +14,7 @@ requires = [
@@ -1922,7 +1865,7 @@ index d689d50d8..622349163 100644
  license = "Apache-2.0"
  license-files = ["LICENSE"]
 diff --git a/requirements/cuda.txt b/requirements/cuda.txt
-index ffcff13c8..a6b389010 100644
+index ffcff13c82..a6b3890107 100644
 --- a/requirements/cuda.txt
 +++ b/requirements/cuda.txt
 @@ -34,3 +34,5 @@ tokenspeed-mla==0.1.8; platform_system == "Linux"
@@ -1932,7 +1875,7 @@ index ffcff13c8..a6b389010 100644
 +
 +lk_moe==2.4.2
 diff --git a/tests/evals/gsm8k/configs/Qwen3-30B-A3B-NVFP4.yaml b/tests/evals/gsm8k/configs/Qwen3-30B-A3B-NVFP4.yaml
-index f162aa8bf..799a7694e 100644
+index f162aa8bfe..799a7694e9 100644
 --- a/tests/evals/gsm8k/configs/Qwen3-30B-A3B-NVFP4.yaml
 +++ b/tests/evals/gsm8k/configs/Qwen3-30B-A3B-NVFP4.yaml
 @@ -2,4 +2,5 @@ model_name: "nvidia/Qwen3-30B-A3B-FP4"
@@ -1942,7 +1885,7 @@ index f162aa8bf..799a7694e 100644
 +startup_max_wait_seconds: 1200
  server_args: "--enforce-eager --max-model-len 4096"
 diff --git a/tests/evals/gsm8k/configs/Qwen3-Next-80B-A3B-NVFP4-EP2.yaml b/tests/evals/gsm8k/configs/Qwen3-Next-80B-A3B-NVFP4-EP2.yaml
-index 7f2f096fd..a26dfccda 100644
+index 7f2f096fd2..a26dfccda4 100644
 --- a/tests/evals/gsm8k/configs/Qwen3-Next-80B-A3B-NVFP4-EP2.yaml
 +++ b/tests/evals/gsm8k/configs/Qwen3-Next-80B-A3B-NVFP4-EP2.yaml
 @@ -2,6 +2,7 @@ model_name: "nm-testing/Qwen3-Next-80B-A3B-Instruct-NVFP4"
@@ -1954,7 +1897,7 @@ index 7f2f096fd..a26dfccda 100644
    --enforce-eager
    --max-model-len 4096
 diff --git a/tests/evals/gsm8k/configs/moe-refactor-dp-ep/Qwen3-30B-A3B-NvFp4-CT-fi-cutlass.yaml b/tests/evals/gsm8k/configs/moe-refactor-dp-ep/Qwen3-30B-A3B-NvFp4-CT-fi-cutlass.yaml
-index 90265a12a..c84bc9223 100644
+index 90265a12af..c84bc9223f 100644
 --- a/tests/evals/gsm8k/configs/moe-refactor-dp-ep/Qwen3-30B-A3B-NvFp4-CT-fi-cutlass.yaml
 +++ b/tests/evals/gsm8k/configs/moe-refactor-dp-ep/Qwen3-30B-A3B-NvFp4-CT-fi-cutlass.yaml
 @@ -2,4 +2,5 @@ model_name: "RedHatAI/Qwen3-30B-A3B-NVFP4"
@@ -1964,7 +1907,7 @@ index 90265a12a..c84bc9223 100644
 +startup_max_wait_seconds: 1200
  server_args: "--enforce-eager --max-model-len 8192 --data-parallel-size 2 --enable-expert-parallel --moe-backend=flashinfer_cutlass"
 diff --git a/tests/evals/gsm8k/configs/moe-refactor-dp-ep/Qwen3-30B-A3B-NvFp4-ModelOpt-fi-trtllm.yaml b/tests/evals/gsm8k/configs/moe-refactor-dp-ep/Qwen3-30B-A3B-NvFp4-ModelOpt-fi-trtllm.yaml
-index 23d29e06f..6277a7cc7 100644
+index 23d29e06f8..6277a7cc78 100644
 --- a/tests/evals/gsm8k/configs/moe-refactor-dp-ep/Qwen3-30B-A3B-NvFp4-ModelOpt-fi-trtllm.yaml
 +++ b/tests/evals/gsm8k/configs/moe-refactor-dp-ep/Qwen3-30B-A3B-NvFp4-ModelOpt-fi-trtllm.yaml
 @@ -2,4 +2,5 @@ model_name: "nvidia/Qwen3-30B-A3B-NVFP4"
@@ -1974,7 +1917,7 @@ index 23d29e06f..6277a7cc7 100644
 +startup_max_wait_seconds: 1200
  server_args: "--enforce-eager --max-model-len 8192 --data-parallel-size 2 --enable-expert-parallel --moe-backend=flashinfer_trtllm"
 diff --git a/tests/evals/gsm8k/configs/moe-refactor/Qwen3-30B-A3B-NvFp4-CT-fi-trtllm.yaml b/tests/evals/gsm8k/configs/moe-refactor/Qwen3-30B-A3B-NvFp4-CT-fi-trtllm.yaml
-index 094ec92f1..1dfccafe0 100644
+index 094ec92f1e..1dfccafe0d 100644
 --- a/tests/evals/gsm8k/configs/moe-refactor/Qwen3-30B-A3B-NvFp4-CT-fi-trtllm.yaml
 +++ b/tests/evals/gsm8k/configs/moe-refactor/Qwen3-30B-A3B-NvFp4-CT-fi-trtllm.yaml
 @@ -2,4 +2,5 @@ model_name: "RedHatAI/Qwen3-30B-A3B-NVFP4"
@@ -1984,7 +1927,7 @@ index 094ec92f1..1dfccafe0 100644
 +startup_max_wait_seconds: 1200
  server_args: "--enforce-eager --max-model-len 8192 --tensor-parallel-size 2 --moe-backend=flashinfer_trtllm"
 diff --git a/tests/evals/gsm8k/configs/moe-refactor/Qwen3-30B-A3B-NvFp4-ModelOpt-fi-trtllm.yaml b/tests/evals/gsm8k/configs/moe-refactor/Qwen3-30B-A3B-NvFp4-ModelOpt-fi-trtllm.yaml
-index 491b3c82f..8b4fbc033 100644
+index 491b3c82fa..8b4fbc0333 100644
 --- a/tests/evals/gsm8k/configs/moe-refactor/Qwen3-30B-A3B-NvFp4-ModelOpt-fi-trtllm.yaml
 +++ b/tests/evals/gsm8k/configs/moe-refactor/Qwen3-30B-A3B-NvFp4-ModelOpt-fi-trtllm.yaml
 @@ -2,4 +2,5 @@ model_name: "nvidia/Qwen3-30B-A3B-NVFP4"
@@ -1994,10 +1937,10 @@ index 491b3c82f..8b4fbc033 100644
 +startup_max_wait_seconds: 1200
  server_args: "--enforce-eager --max-model-len 8192 --tensor-parallel-size 2 --moe-backend=flashinfer_trtllm"
 diff --git a/tests/quantization/test_compressed_tensors.py b/tests/quantization/test_compressed_tensors.py
-index 304ef1efb..81327d6a5 100644
+index ef80287e5f..831c58c8cc 100644
 --- a/tests/quantization/test_compressed_tensors.py
 +++ b/tests/quantization/test_compressed_tensors.py
-@@ -1058,3 +1058,69 @@ def test_compressed_tensors_mxfp4(vllm_runner):
+@@ -1022,3 +1022,69 @@ def test_compressed_tensors_mxfp4(vllm_runner):
          llm.apply_model(check_model)
          output = llm.generate_greedy("Hello my name is", max_tokens=4)
          assert output
@@ -2067,21 +2010,8 @@ index 304ef1efb..81327d6a5 100644
 +    assert config.gemm1_alpha == 1.702
 +    assert config.gemm1_beta == 1.0
 +    assert config.gemm1_clamp_limit == 7.0
-diff --git a/vllm/config/speculative.py b/vllm/config/speculative.py
-index fde84a262..f9f9e764e 100644
---- a/vllm/config/speculative.py
-+++ b/vllm/config/speculative.py
-@@ -1383,6 +1383,8 @@ class SpeculativeConfig:
-                         self.target_model_config.quantization
-                     )
-                     self.update_arch_()
-+                    if self.draft_model_config.quantization == "fp8":
-+                        self.draft_model_config.quantization = "deepseek_v4_fp8"
-                 elif (
-                     self.method == "dspark"
-                     and "Gemma4DSparkModel" in self.draft_model_config.architectures
 diff --git a/vllm/entrypoints/cli/main.py b/vllm/entrypoints/cli/main.py
-index 3dc69dd3a..0da6a3d99 100644
+index 3dc69dd3ad..0da6a3d99a 100644
 --- a/vllm/entrypoints/cli/main.py
 +++ b/vllm/entrypoints/cli/main.py
 @@ -18,7 +18,7 @@ def main():
@@ -2116,7 +2046,7 @@ similarity index 100%
 rename from vllm/entrypoints/cli/openai.py
 rename to vllm/entrypoints/cli/openai_entrypoint.py
 diff --git a/vllm/entrypoints/cli/run_batch.py b/vllm/entrypoints/cli/run_batch.py
-index 5fa626a6a..0ab3e9f5a 100644
+index 5fa626a6a5..0ab3e9f5a7 100644
 --- a/vllm/entrypoints/cli/run_batch.py
 +++ b/vllm/entrypoints/cli/run_batch.py
 @@ -28,7 +28,7 @@ class RunBatchSubcommand(CLISubcommand):
@@ -2129,10 +2059,10 @@ index 5fa626a6a..0ab3e9f5a 100644
          logger.info("args: %s", args)
  
 diff --git a/vllm/envs.py b/vllm/envs.py
-index 786864b91..06d104cb9 100755
+index d429686d9c..f228168230 100755
 --- a/vllm/envs.py
 +++ b/vllm/envs.py
-@@ -204,7 +204,7 @@ if TYPE_CHECKING:
+@@ -206,7 +206,7 @@ if TYPE_CHECKING:
          "skip",
          "full",
          "relax",
@@ -2141,7 +2071,7 @@ index 786864b91..06d104cb9 100755
      VLLM_USE_FUSED_MOE_GROUPED_TOPK: bool = True
      VLLM_MOE_SKIP_PADDING: bool = True
      VLLM_KIMI_K3_SHARD_SP_SHARED_EXPERT: bool = False
-@@ -275,6 +275,12 @@ if TYPE_CHECKING:
+@@ -279,6 +279,12 @@ if TYPE_CHECKING:
      VLLM_NVTX_SCOPES_FOR_PROFILING: bool = False
      VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES: bool = True
      VLLM_OBJECT_STORAGE_SHM_BUFFER_NAME: str = "VLLM_OBJECT_STORAGE_SHM_BUFFER"
@@ -2154,7 +2084,7 @@ index 786864b91..06d104cb9 100755
      VLLM_DEEPEP_BUFFER_SIZE_MB: int = 1024
      VLLM_DEEPEP_HIGH_THROUGHPUT_FORCE_INTRA_NODE: bool = False
      VLLM_DEEPEP_LOW_LATENCY_USE_MNNVL: bool = False
-@@ -1566,7 +1572,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
+@@ -1591,7 +1597,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
      #   shapes, but provides no guarantees.
      "VLLM_DEEP_GEMM_WARMUP": env_with_choices(
          "VLLM_DEEP_GEMM_WARMUP",
@@ -2163,7 +2093,7 @@ index 786864b91..06d104cb9 100755
          [
              "skip",
              "full",
-@@ -1994,6 +2000,23 @@ environment_variables: dict[str, Callable[[], Any]] = {
+@@ -2031,6 +2037,23 @@ environment_variables: dict[str, Callable[[], Any]] = {
      # Debug workspace allocations.
      # logging of workspace resize operations.
      "VLLM_DEBUG_WORKSPACE": lambda: bool(int(os.getenv("VLLM_DEBUG_WORKSPACE", "0"))),
@@ -2187,7 +2117,7 @@ index 786864b91..06d104cb9 100755
      # Disables parallel execution of shared_experts via separate cuda stream
      "VLLM_DISABLE_SHARED_EXPERTS_STREAM": lambda: bool(
          int(os.getenv("VLLM_DISABLE_SHARED_EXPERTS_STREAM", "0"))
-@@ -2336,6 +2359,12 @@ def compile_factors() -> dict[str, object]:
+@@ -2380,6 +2403,12 @@ def compile_factors() -> dict[str, object]:
          "VLLM_SKIP_MODEL_NAME_VALIDATION",
          "LOCAL_RANK",
          "CUDA_VISIBLE_DEVICES",
@@ -2200,7 +2130,7 @@ index 786864b91..06d104cb9 100755
          "NO_COLOR",
      }
  
-@@ -2384,3 +2413,165 @@ def compile_factors() -> dict[str, object]:
+@@ -2428,3 +2457,165 @@ def compile_factors() -> dict[str, object]:
          factors[var] = normalize_value(os.getenv(var))
  
      return factors
@@ -2367,7 +2297,7 @@ index 786864b91..06d104cb9 100755
 +        
 +        return info
 diff --git a/vllm/model_executor/layers/fused_moe/config.py b/vllm/model_executor/layers/fused_moe/config.py
-index 8736b1393..d4b9c2a60 100644
+index 8736b1393d..d4b9c2a60a 100644
 --- a/vllm/model_executor/layers/fused_moe/config.py
 +++ b/vllm/model_executor/layers/fused_moe/config.py
 @@ -335,6 +335,14 @@ class FusedMoEQuantConfig:
@@ -2401,10 +2331,10 @@ index 8736b1393..d4b9c2a60 100644
      @property
      def w2_zp(self) -> torch.Tensor | None:
 diff --git a/vllm/model_executor/layers/fused_moe/routed_experts.py b/vllm/model_executor/layers/fused_moe/routed_experts.py
-index 59562ed8b..ca9ff04b0 100644
+index 5d284bcc80..ce20e2a945 100644
 --- a/vllm/model_executor/layers/fused_moe/routed_experts.py
 +++ b/vllm/model_executor/layers/fused_moe/routed_experts.py
-@@ -33,6 +33,14 @@ if TYPE_CHECKING:
+@@ -34,6 +34,14 @@ if TYPE_CHECKING:
  
  logger = init_logger(__name__)
  
@@ -2419,7 +2349,7 @@ index 59562ed8b..ca9ff04b0 100644
  
  class FusedMoeWeightScaleSupported(Enum):
      TENSOR = "tensor"
-@@ -118,6 +126,46 @@ class RoutedExperts(PluggableLayer):
+@@ -119,6 +127,46 @@ class RoutedExperts(PluggableLayer):
          self.apply_router_weight_on_input = apply_router_weight_on_input
          # End random parameters
          self._loaded_expert_biases: set[str] = set()
@@ -2466,7 +2396,7 @@ index 59562ed8b..ca9ff04b0 100644
  
          self.quant_method = self._get_quant_method(
              self.layer_name,
-@@ -1297,6 +1345,582 @@ class RoutedExperts(PluggableLayer):
+@@ -1246,6 +1294,582 @@ class RoutedExperts(PluggableLayer):
      ) -> torch.Tensor:
          raise AssertionError("Call forward_modular or forward_monolithic instead.")
  
@@ -3051,7 +2981,7 @@ index 59562ed8b..ca9ff04b0 100644
  # Mark the RoutedExperts weight_loader as supporting MoE-specific parameters
  RoutedExperts.weight_loader.supports_moe_loading = True  # type: ignore[attr-defined]
 diff --git a/vllm/model_executor/layers/fused_moe/runner/moe_runner.py b/vllm/model_executor/layers/fused_moe/runner/moe_runner.py
-index 2f072d14b..1e5b653a3 100644
+index 2f072d14b4..1e5b653a33 100644
 --- a/vllm/model_executor/layers/fused_moe/runner/moe_runner.py
 +++ b/vllm/model_executor/layers/fused_moe/runner/moe_runner.py
 @@ -611,29 +611,67 @@ class MoERunner(MoERunnerInterface):
@@ -3141,21 +3071,21 @@ index 2f072d14b..1e5b653a3 100644
          if shared_experts_overlapping:
              assert self._shared_experts is not None
 diff --git a/vllm/model_executor/layers/fused_moe/unquantized_fused_moe_method.py b/vllm/model_executor/layers/fused_moe/unquantized_fused_moe_method.py
-index 31404c93a..186e07dac 100644
+index 523d1df0d8..512c0222df 100644
 --- a/vllm/model_executor/layers/fused_moe/unquantized_fused_moe_method.py
 +++ b/vllm/model_executor/layers/fused_moe/unquantized_fused_moe_method.py
-@@ -62,6 +62,10 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
+@@ -68,6 +68,10 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
          params_dtype: torch.dtype,
          **extra_weight_attrs,
      ):
 +        from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
 +        device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
 +        if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
-+            device = "cpu" 
++            device = "cpu"
          if self.moe.is_act_and_mul:
              w13_up_dim = 2 * intermediate_size_per_partition
          else:
-@@ -73,6 +77,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
+@@ -79,6 +83,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
                  w13_up_dim,
                  hidden_size,
                  dtype=params_dtype,
@@ -3163,7 +3093,7 @@ index 31404c93a..186e07dac 100644
              ),
              requires_grad=False,
          )
-@@ -80,7 +85,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
+@@ -86,7 +91,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
          set_weight_attrs(w13_weight, extra_weight_attrs)
          if self.moe.has_bias:
              w13_bias = torch.nn.Parameter(
@@ -3172,7 +3102,7 @@ index 31404c93a..186e07dac 100644
                  requires_grad=False,
              )
              layer.register_parameter("w13_bias", w13_bias)
-@@ -92,6 +97,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
+@@ -98,6 +103,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
                  hidden_size,
                  intermediate_size_per_partition,
                  dtype=params_dtype,
@@ -3180,7 +3110,7 @@ index 31404c93a..186e07dac 100644
              ),
              requires_grad=False,
          )
-@@ -99,7 +105,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
+@@ -105,7 +111,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
          set_weight_attrs(w2_weight, extra_weight_attrs)
          if self.moe.has_bias:
              w2_bias = torch.nn.Parameter(
@@ -3189,8 +3119,8 @@ index 31404c93a..186e07dac 100644
                  requires_grad=False,
              )
              layer.register_parameter("w2_bias", w2_bias)
-@@ -173,6 +179,9 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
-                 self.moe_kernel.fused_experts.process_weights_after_loading(layer)
+@@ -184,6 +190,9 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
+         )
  
      def process_weights_after_loading(self, layer: "RoutedExperts") -> None:
 +        from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
@@ -3198,12 +3128,12 @@ index 31404c93a..186e07dac 100644
 +            return None
          super().process_weights_after_loading(layer)
  
-         # Padding the weight for better performance on ROCm.
+         if is_weights_pre_processed():
 diff --git a/vllm/model_executor/layers/quantization/auto_awq.py b/vllm/model_executor/layers/quantization/auto_awq.py
-index 713bd7bd5..5c734dab1 100644
+index f8c7269add..b18d42517f 100644
 --- a/vllm/model_executor/layers/quantization/auto_awq.py
 +++ b/vllm/model_executor/layers/quantization/auto_awq.py
-@@ -550,6 +550,11 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
+@@ -549,6 +549,11 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
          params_dtype: torch.dtype,
          **extra_weight_attrs,
      ):
@@ -3215,7 +3145,7 @@ index 713bd7bd5..5c734dab1 100644
          layer.input_dtype = self.input_dtype
          extra_weight_attrs.update(
              {
-@@ -571,6 +576,7 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
+@@ -565,6 +570,7 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
                  * intermediate_size_per_partition
                  // self.quant_config.pack_factor,
                  dtype=torch.int32,
@@ -3223,7 +3153,7 @@ index 713bd7bd5..5c734dab1 100644
              ),
              requires_grad=False,
          )
-@@ -583,6 +589,7 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
+@@ -577,6 +583,7 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
                  intermediate_size_per_partition,
                  hidden_size // self.quant_config.pack_factor,
                  dtype=torch.int32,
@@ -3231,7 +3161,7 @@ index 713bd7bd5..5c734dab1 100644
              ),
              requires_grad=False,
          )
-@@ -602,6 +609,7 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
+@@ -596,6 +603,7 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
                  num_groups_w13,
                  intermediate_size_per_partition * self.moe.w13_num_shards,
                  dtype=params_dtype,
@@ -3239,7 +3169,7 @@ index 713bd7bd5..5c734dab1 100644
              ),
              requires_grad=False,
          )
-@@ -609,7 +617,7 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
+@@ -603,7 +611,7 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
          set_weight_attrs(w13_scales, extra_weight_attrs)
  
          w2_scales = Parameter(
@@ -3248,7 +3178,7 @@ index 713bd7bd5..5c734dab1 100644
              requires_grad=False,
          )
          layer.register_parameter("w2_scales", w2_scales)
-@@ -625,6 +633,7 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
+@@ -619,6 +627,7 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
                  * intermediate_size_per_partition
                  // self.quant_config.pack_factor,
                  dtype=torch.int32,
@@ -3256,7 +3186,7 @@ index 713bd7bd5..5c734dab1 100644
              ),
              requires_grad=False,
          )
-@@ -637,6 +646,7 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
+@@ -631,6 +640,7 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
                  num_groups_w2,
                  hidden_size // self.quant_config.pack_factor,
                  dtype=torch.int32,
@@ -3264,7 +3194,7 @@ index 713bd7bd5..5c734dab1 100644
              ),
              requires_grad=False,
          )
-@@ -647,6 +657,9 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
+@@ -641,6 +651,9 @@ class AutoAWQMoEMethod(FusedMoEMethodBase):
          layer.workspace = marlin_make_workspace_new(device, 4)
  
      def process_weights_after_loading(self, layer: RoutedExperts) -> None:
@@ -3275,7 +3205,7 @@ index 713bd7bd5..5c734dab1 100644
              backend=self.wna16_moe_backend,
              layer=layer,
 diff --git a/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_w4a4_mxfp4.py b/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_w4a4_mxfp4.py
-index f7d12c863..9feb367ea 100644
+index f7d12c8635..9feb367ea9 100644
 --- a/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_w4a4_mxfp4.py
 +++ b/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_w4a4_mxfp4.py
 @@ -78,6 +78,12 @@ class CompressedTensorsW4A4Mxfp4MoEMethod(CompressedTensorsMoEMethod):
@@ -3356,7 +3286,7 @@ index f7d12c863..9feb367ea 100644
              layer.w13_weight_packed.data, requires_grad=False
          )
 diff --git a/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_w4a4_nvfp4.py b/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_w4a4_nvfp4.py
-index cf98e52bb..fa7f292f3 100644
+index cf98e52bb6..fa7f292f39 100644
 --- a/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_w4a4_nvfp4.py
 +++ b/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_w4a4_nvfp4.py
 @@ -79,6 +79,11 @@ class CompressedTensorsW4A4Nvfp4MoEMethod(CompressedTensorsMoEMethod):
@@ -3452,7 +3382,7 @@ index cf98e52bb..fa7f292f3 100644
              swiglu_alpha=getattr(layer, "swiglu_alpha", None),
              swiglu_beta=getattr(layer, "swiglu_beta", None),
 diff --git a/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_w8a8_fp8.py b/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_w8a8_fp8.py
-index 7829ef65c..14e8c7ec7 100644
+index 262cd307a8..2780fe2a92 100644
 --- a/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_w8a8_fp8.py
 +++ b/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_w8a8_fp8.py
 @@ -119,6 +119,10 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
@@ -3466,7 +3396,7 @@ index 7829ef65c..14e8c7ec7 100644
          layer.num_experts = num_experts
          layer.orig_dtype = params_dtype
          layer.weight_block_size = None
-@@ -159,6 +163,7 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
+@@ -145,6 +149,7 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
                  w13_num_shards * intermediate_size_per_partition,
                  hidden_size,
                  dtype=params_dtype,
@@ -3474,7 +3404,7 @@ index 7829ef65c..14e8c7ec7 100644
              ),
              requires_grad=False,
          )
-@@ -171,6 +176,7 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
+@@ -157,6 +162,7 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
                  hidden_size,
                  intermediate_size_per_partition,
                  dtype=params_dtype,
@@ -3482,7 +3412,7 @@ index 7829ef65c..14e8c7ec7 100644
              ),
              requires_grad=False,
          )
-@@ -183,12 +189,12 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
+@@ -169,12 +175,12 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
              # They will be combined to a single scale after weight loading.
              # For non-gated MoE, allocate 1 scale for w13.
              w13_weight_scale = torch.nn.Parameter(
@@ -3497,7 +3427,7 @@ index 7829ef65c..14e8c7ec7 100644
              )
              layer.register_parameter("w2_weight_scale", w2_weight_scale)
              # Add PER-TENSOR quantization for RoutedExperts.weight_loader.
-@@ -205,12 +211,13 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
+@@ -191,12 +197,13 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
                      w13_num_shards * intermediate_size_per_partition,
                      1,
                      dtype=torch.float32,
@@ -3512,7 +3442,7 @@ index 7829ef65c..14e8c7ec7 100644
                  requires_grad=False,
              )
              layer.register_parameter("w2_weight_scale", w2_weight_scale)
-@@ -229,6 +236,7 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
+@@ -215,6 +222,7 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
                      * ((intermediate_size_per_partition + block_n - 1) // block_n),
                      (hidden_size + block_k - 1) // block_k,
                      dtype=torch.float32,
@@ -3520,7 +3450,7 @@ index 7829ef65c..14e8c7ec7 100644
                  ),
                  requires_grad=False,
              )
-@@ -239,6 +247,7 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
+@@ -225,6 +233,7 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
                      (hidden_size + block_n - 1) // block_n,
                      (intermediate_size_per_partition + block_k - 1) // block_k,
                      dtype=torch.float32,
@@ -3528,7 +3458,7 @@ index 7829ef65c..14e8c7ec7 100644
                  ),
                  requires_grad=False,
              )
-@@ -268,6 +277,9 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
+@@ -254,6 +263,9 @@ class CompressedTensorsW8A8Fp8MoEMethod(CompressedTensorsMoEMethod):
              layer.w2_input_scale = None
  
      def process_weights_after_loading(self, layer: RoutedExperts) -> None:
@@ -3539,10 +3469,10 @@ index 7829ef65c..14e8c7ec7 100644
          w13 = layer.w13_weight
          w2 = layer.w2_weight
 diff --git a/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_wna16.py b/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_wna16.py
-index 1ab508514..da27ab8e8 100644
+index 6a3f73e539..4dcfda5591 100644
 --- a/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_wna16.py
 +++ b/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_wna16.py
-@@ -258,8 +258,12 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
+@@ -228,6 +228,11 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
          params_dtype: torch.dtype,
          **extra_weight_attrs,
      ):
@@ -3551,12 +3481,10 @@ index 1ab508514..da27ab8e8 100644
 +        device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
 +        if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
 +            device = "cpu"
-         intermediate_size_full = extra_weight_attrs.pop("intermediate_size_full")
--
          # Will transpose the loaded weight along the
          # intermediate and hidden dim sizes. Will
          # shard for TP along the transposed dims
-@@ -276,6 +280,7 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
+@@ -244,6 +249,7 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
                      intermediate_size_per_partition,
                  ),
                  dtype=torch.int32,
@@ -3564,7 +3492,7 @@ index 1ab508514..da27ab8e8 100644
              ),
              requires_grad=False,
          )
-@@ -291,6 +296,7 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
+@@ -259,6 +265,7 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
                      intermediate_size_per_partition,
                  ),
                  dtype=torch.int32,
@@ -3572,55 +3500,38 @@ index 1ab508514..da27ab8e8 100644
              ),
              requires_grad=False,
          )
-@@ -364,6 +370,7 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
-                     num_groups_w13=num_groups_w13,
+@@ -355,6 +362,7 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
+                         num_groups_w13=num_groups_w13,
+                     ),
+                     dtype=torch.int32,
++                    device=device,
                  ),
-                 dtype=params_dtype,
-+                device=device,
-             ),
-             requires_grad=False,
-         )
-@@ -380,6 +387,7 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
-                     num_groups_w2=num_groups_w2,
+                 requires_grad=False,
+             )
+@@ -371,6 +379,7 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
+                         num_groups_w2=num_groups_w2,
+                     ),
+                     dtype=torch.int32,
++                    device=device,
                  ),
-                 dtype=params_dtype,
-+                device=device,
-             ),
-             requires_grad=False,
+                 requires_grad=False,
+             )
+@@ -378,12 +387,12 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
+             set_weight_attrs(w2_zp, extra_weight_attrs)
+ 
+         w2_weight_shape = torch.nn.Parameter(
+-            torch.empty(num_experts, 2), requires_grad=False
++            torch.empty(num_experts, 2, device=device), requires_grad=False
          )
-@@ -437,6 +445,7 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
-                 num_experts,
-                 hidden_size,
-                 dtype=torch.int32,
-+                device=device,
-             ),
-             requires_grad=False,
+         layer.register_parameter("w2_weight_shape", w2_weight_shape)
+         set_weight_attrs(w2_weight_shape, extra_weight_attrs)
+         w13_weight_shape = torch.nn.Parameter(
+-            torch.empty(num_experts, 2), requires_grad=False
++            torch.empty(num_experts, 2, device=device), requires_grad=False
          )
-@@ -448,6 +457,7 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
-                 num_experts,
-                 intermediate_size_per_partition,
-                 dtype=torch.int32,
-+                device=device,
-             ),
-             requires_grad=False,
-         )
-@@ -459,6 +469,7 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
-                 num_experts,
-                 hidden_size,
-                 dtype=torch.int32,
-+                device=device,
-             ),
-             requires_grad=False,
-         )
-@@ -470,6 +481,7 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
-                 num_experts,
-                 intermediate_size_per_partition,
-                 dtype=torch.int32,
-+                device=device,
-             ),
-             requires_grad=False,
-         )
-@@ -505,6 +517,9 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
+ 
+         layer.register_parameter("w13_weight_shape", w13_weight_shape)
+@@ -406,6 +415,9 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
          )
  
      def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
@@ -3631,10 +3542,10 @@ index 1ab508514..da27ab8e8 100644
          converted = convert_to_wna16_moe_kernel_format(
              backend=self.wna16_backend,
 diff --git a/vllm/model_executor/layers/quantization/fp8.py b/vllm/model_executor/layers/quantization/fp8.py
-index 7d74bd987..2e4f76df5 100644
+index d8bef7347d..bad2738a4d 100644
 --- a/vllm/model_executor/layers/quantization/fp8.py
 +++ b/vllm/model_executor/layers/quantization/fp8.py
-@@ -542,6 +542,10 @@ class Fp8MoEMethod(FusedMoEMethodBase):
+@@ -564,6 +564,10 @@ class Fp8MoEMethod(FusedMoEMethodBase):
          params_dtype: torch.dtype,
          **extra_weight_attrs,
      ):
@@ -3645,7 +3556,7 @@ index 7d74bd987..2e4f76df5 100644
          layer.num_experts = num_experts
          layer.orig_dtype = params_dtype
          layer.weight_block_size = None
-@@ -590,6 +594,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
+@@ -601,6 +605,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                  self.moe.w13_num_shards * intermediate_size_per_partition,
                  hidden_size,
                  dtype=params_dtype,
@@ -3653,7 +3564,7 @@ index 7d74bd987..2e4f76df5 100644
              ),
              requires_grad=False,
          )
-@@ -602,6 +607,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
+@@ -613,6 +618,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                  hidden_size,
                  intermediate_size_per_partition,
                  dtype=params_dtype,
@@ -3661,7 +3572,7 @@ index 7d74bd987..2e4f76df5 100644
              ),
              requires_grad=False,
          )
-@@ -615,13 +621,14 @@ class Fp8MoEMethod(FusedMoEMethodBase):
+@@ -626,13 +632,14 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                      num_experts,
                      self.moe.w13_num_shards * intermediate_size_per_partition,
                      dtype=layer.orig_dtype,
@@ -3677,7 +3588,7 @@ index 7d74bd987..2e4f76df5 100644
                  requires_grad=False,
              )
              layer.register_parameter("w2_bias", w2_bias)
-@@ -631,9 +638,9 @@ class Fp8MoEMethod(FusedMoEMethodBase):
+@@ -642,9 +649,9 @@ class Fp8MoEMethod(FusedMoEMethodBase):
          if not self.block_quant:
              # For per-tensor quant, the scales are per expert and weight.
              w13_scale_data = torch.ones(
@@ -3689,7 +3600,7 @@ index 7d74bd987..2e4f76df5 100644
          else:
              # For block quant, the scales are per block (typically 128x128).
              w13_scale_data = torch.ones(
-@@ -642,12 +649,14 @@ class Fp8MoEMethod(FusedMoEMethodBase):
+@@ -653,12 +660,14 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                  * ((intermediate_size_per_partition + block_n - 1) // block_n),
                  (hidden_size + block_k - 1) // block_k,
                  dtype=torch.float32,
@@ -3704,21 +3615,21 @@ index 7d74bd987..2e4f76df5 100644
              )
          w13_weight_scale = torch.nn.Parameter(w13_scale_data, requires_grad=False)
          w2_weight_scale = torch.nn.Parameter(w2_scale_data, requires_grad=False)
-@@ -725,6 +734,9 @@ class Fp8MoEMethod(FusedMoEMethodBase):
+@@ -740,6 +749,9 @@ class Fp8MoEMethod(FusedMoEMethodBase):
          )
  
      def process_weights_after_loading(self, layer: RoutedExperts) -> None:
 +        from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
 +        if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
 +            return
-         # Allow for accessing weights and scales in standard way.
-         w13 = layer.w13_weight
-         w2 = layer.w2_weight
+         if is_weights_pre_processed():
+             # Weights are already in kernel format; rebuild the kernel only.
+             self._init_moe_kernel(layer)
 diff --git a/vllm/model_executor/layers/quantization/modelopt.py b/vllm/model_executor/layers/quantization/modelopt.py
-index 575c122d6..38b4ff57e 100644
+index 2abe60d7ad..b8d2a1a364 100644
 --- a/vllm/model_executor/layers/quantization/modelopt.py
 +++ b/vllm/model_executor/layers/quantization/modelopt.py
-@@ -1449,6 +1449,11 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
+@@ -859,6 +859,11 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
          **extra_weight_attrs,
      ):
          assert self.quant_config.is_checkpoint_nvfp4_serialized
@@ -3730,7 +3641,7 @@ index 575c122d6..38b4ff57e 100644
  
          layer.num_experts = num_experts
          layer.params_dtype = params_dtype
-@@ -1466,6 +1471,7 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
+@@ -876,6 +881,7 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
                  # 2 fp4 items are packed in the input dimension
                  hidden_size // 2,
                  dtype=weight_dtype,
@@ -3738,7 +3649,7 @@ index 575c122d6..38b4ff57e 100644
              ),
              input_dim=1,
              output_dim=2,
-@@ -1481,6 +1487,7 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
+@@ -891,6 +897,7 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
                  # 2 fp4 items are packed in the input dimension
                  intermediate_size_per_partition // 2,
                  dtype=weight_dtype,
@@ -3746,7 +3657,7 @@ index 575c122d6..38b4ff57e 100644
              ),
              input_dim=1,
              output_dim=2,
-@@ -1495,6 +1502,7 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
+@@ -905,6 +912,7 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
                  # 2 fp4 items are packed in the input dimension
                  hidden_size // self.quant_config.group_size,
                  dtype=weight_scale_dtype,
@@ -3754,7 +3665,7 @@ index 575c122d6..38b4ff57e 100644
              ),
              input_dim=1,
              output_dim=2,
-@@ -1509,6 +1517,7 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
+@@ -919,6 +927,7 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
                  # 2 fp4 items are packed in the input dimension
                  intermediate_size_per_partition // self.quant_config.group_size,
                  dtype=weight_scale_dtype,
@@ -3762,7 +3673,7 @@ index 575c122d6..38b4ff57e 100644
              ),
              input_dim=1,
              output_dim=2,
-@@ -1521,13 +1530,13 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
+@@ -931,13 +940,13 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
          )
  
          w13_weight_scale_2 = PerTensorScaleParameter(
@@ -3778,7 +3689,7 @@ index 575c122d6..38b4ff57e 100644
              weight_loader=weight_loader,
          )
          layer.register_parameter("w2_weight_scale_2", w2_weight_scale_2)
-@@ -1556,6 +1565,9 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
+@@ -966,6 +975,9 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
          layer.register_parameter("w2_input_scale", w2_input_scale)
  
      def process_weights_after_loading(self, layer: RoutedExperts) -> None:
@@ -3789,7 +3700,7 @@ index 575c122d6..38b4ff57e 100644
          Convert NVFP4 MoE weights into kernel format and setup the kernel.
          """
 diff --git a/vllm/model_executor/layers/quantization/mxfp4.py b/vllm/model_executor/layers/quantization/mxfp4.py
-index 1f994ab56..ebae4aede 100644
+index 1f994ab56c..ebae4aedee 100644
 --- a/vllm/model_executor/layers/quantization/mxfp4.py
 +++ b/vllm/model_executor/layers/quantization/mxfp4.py
 @@ -568,6 +568,11 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
@@ -3863,25 +3774,25 @@ index 1f994ab56..ebae4aede 100644
          w2 = layer.w2_weight
          w13_scale = layer.w13_weight_scale
 diff --git a/vllm/model_executor/model_loader/utils.py b/vllm/model_executor/model_loader/utils.py
-index e904f07fc..b949f58d2 100644
+index e12910865e..f254c59578 100644
 --- a/vllm/model_executor/model_loader/utils.py
 +++ b/vllm/model_executor/model_loader/utils.py
-@@ -97,11 +97,14 @@ def initialize_model(
- def process_weights_after_loading(
-     model: nn.Module, model_config: ModelConfig, target_device: torch.device
- ) -> None:
+@@ -104,11 +104,14 @@ def process_weights_after_loading(
+     methods skip tensor transforms and must declare
+     ``supports_pre_processed_weights``, otherwise this raises ``RuntimeError``.
+     """
 +    from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
      # Reclaim memory when an explicit lm_head has been
      # loaded, but it is identical to the input embeddings.
      maybe_retie_word_embeddings(model, model_config)
  
-     for _, module in model.named_modules():
+     for name, module in model.named_modules():
 +        if isinstance(module, RoutedExperts) and not getattr(module, "process_lk_moe_already_called", False):
 +            module.process_weights_after_loading()
          quant_method = getattr(module, "quant_method", None)
          if isinstance(quant_method, QuantizeMethodBase):
-             # When quant methods need to process weights after loading
-@@ -121,6 +124,9 @@ def process_weights_after_loading(
+             if (
+@@ -143,6 +146,9 @@ def process_weights_after_loading(
              # Repacking transients above can leave large amounts of memory in
              # the caching allocator, which starves the OS on UMA devices.
              release_device_memory_under_pressure(target_device)
@@ -3891,7 +3802,7 @@ index e904f07fc..b949f58d2 100644
  
      # Initialize post-load attention weights for any attention layer and MM
      # encoder. NOTE: Happens after other modules so we can easily decompress
-@@ -153,6 +159,10 @@ def process_weights_after_loading(
+@@ -175,6 +181,10 @@ def process_weights_after_loading(
  
  @contextmanager
  def device_loading_context(module: torch.nn.Module, target_device: torch.device):
@@ -3902,7 +3813,7 @@ index e904f07fc..b949f58d2 100644
      if target_device.type == "cpu":
          # If target is CPU, no need to move anything
          yield module
-@@ -174,6 +184,8 @@ def device_loading_context(module: torch.nn.Module, target_device: torch.device)
+@@ -196,6 +206,8 @@ def device_loading_context(module: torch.nn.Module, target_device: torch.device)
          yield module
  
      finally:
@@ -3911,8 +3822,30 @@ index e904f07fc..b949f58d2 100644
          use_pin_memory = (
              is_pin_memory_available()
              and not envs.VLLM_WEIGHT_OFFLOADING_DISABLE_PIN_MEMORY
+diff --git a/vllm/models/qwen4_exp/nvidia/ngram_embedding.py b/vllm/models/qwen4_exp/nvidia/ngram_embedding.py
+index 84c4e7c5e1..afbe797dcc 100644
+--- a/vllm/models/qwen4_exp/nvidia/ngram_embedding.py
++++ b/vllm/models/qwen4_exp/nvidia/ngram_embedding.py
+@@ -46,6 +46,8 @@ from vllm.utils.torch_utils import get_accelerator_view_from_cpu_tensor
+ from ..common.ple import PLEVocabParallelEmbedding
+ from .ops.ple import ple_ngram_ids
+ 
++from vllm.utils.math_utils import next_power_of_2
++
+ logger = init_logger(__name__)
+ 
+ 
+@@ -416,7 +418,7 @@ class Qwen4ExpPLEPinnedHostEmbedding(Qwen4ExpPLEEmbedding):
+             data_parallel_rank=data_parallel_rank,
+         )
+         self._uva_weight = get_accelerator_view_from_cpu_tensor(self.weight)
+-        self._block_d = triton.next_power_of_2(self.embedding_dim)
++        self._block_d = next_power_of_2(self.embedding_dim)
+         self._prefetch_stream = torch.cuda.Stream(device=self._uva_weight.device)
+         self._prefetch_buffer = torch.empty(
+             max_total_tokens * self.etp_data_parallel_size,
 diff --git a/vllm/platforms/__init__.py b/vllm/platforms/__init__.py
-index b34b0b9a7..71dbefaee 100644
+index b34b0b9a7d..71dbefaeed 100644
 --- a/vllm/platforms/__init__.py
 +++ b/vllm/platforms/__init__.py
 @@ -22,7 +22,7 @@ def vllm_version_matches_substr(substr: str) -> bool:
@@ -3924,8 +3857,21 @@ index b34b0b9a7..71dbefaee 100644
      except PackageNotFoundError as e:
          logger.warning(
              "The vLLM package was not found, so its version could not be "
+diff --git a/vllm/triton_utils/importing.py b/vllm/triton_utils/importing.py
+index 966ab55f32..b04881691d 100644
+--- a/vllm/triton_utils/importing.py
++++ b/vllm/triton_utils/importing.py
+@@ -35,7 +35,7 @@ if HAS_TRITON:
+         ]
+ 
+         # Check Triton CPU
+-        if "cpu" in version("vllm"):
++        if "cpu" in version("lvllm"):
+             if "cpu" in backends:
+                 HAS_TRITON = True
+                 # Suppress following warnings on CPU-only platforms
 diff --git a/vllm/utils/numa_utils.py b/vllm/utils/numa_utils.py
-index 2e52935ea..c467191cd 100644
+index 2e52935ea6..c467191cdf 100644
 --- a/vllm/utils/numa_utils.py
 +++ b/vllm/utils/numa_utils.py
 @@ -513,22 +513,33 @@ def configure_subprocess(
