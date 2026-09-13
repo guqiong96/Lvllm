@@ -63,9 +63,9 @@ vllm 侧的集成工作**只是把每个 MOE 层路由到 lk_moe**（哪些层�
 
 ### 集成案例 — LvLLM（vllm）逐文件
 
-整个 lk_moe 集成被整理为**一个可移植补丁**：[`patches/01_lk_moe__3116c5d.patch`](./patches/01_lk_moe__3116c5d.patch)
-—— 即上游 base commit `3116c5d` 与当前 lk_moe 分支的全部代码差异（不包含 README/RELEASE_NOTES 文档）。
-在干净的 `3116c5d` checkout 上执行 `git apply patches/01_lk_moe__3116c5d.patch` 即可。
+整个 lk_moe 集成被整理为**一个可移植补丁**：[`patches/01_lk_moe__71888f507a.patch`](./patches/01_lk_moe__71888f507a.patch)
+—— 即上游 base commit `71888f507a` 与当前 lk_moe 分支的全部代码差异（不包含 README/RELEASE_NOTES 文档）。
+在干净的 `71888f507a` checkout 上执行 `git apply patches/01_lk_moe__71888f507a.patch` 即可。
 
 | 文件 | 作用 |
 |---|---|
@@ -214,6 +214,16 @@ pip install https://github.com/guqiong96/Lvllm/releases/download/lvllm-v2.4.0/fl
 
 从源码编译：
 
+DeepSelect 的 `csrc/api.cpp` 用到 `<format>`（C++20），需要 GCC ≥ 13。若系统默认 GCC 过低（如 Rocky 9 自带 GCC 11），编译前先启用新版工具链，否则会报 `fatal error: format: No such file or directory`：
+
+```bash
+# RHEL/Rocky/Alma：sudo dnf install gcc-toolset-14
+for d in /opt/rh/gcc-toolset-{14,13}/enable; do [ -f "$d" ] && source "$d" && break; done
+# Ubuntu/Debian：sudo apt-get install g++-13
+command -v g++-13 >/dev/null && export CC=gcc-13 CXX=g++-13
+# 或跨发行版用 conda：conda install -c conda-forge "gxx_linux-64>=13"
+```
+
 ```bash
 git clone https://github.com/guqiong96/Lvllm.git
 cd Lvllm
@@ -284,19 +294,19 @@ auditwheel repair dist/lvllm*-2.4.0-cp312-cp312-linux_x86_64.whl -w dist/ \
 
 ## 四、如何生成 lk_moe 补丁
 
-可移植补丁 `patches/01_lk_moe__3116c5d.patch` 通过对比当前代码树与上游 base commit 生成（使用本地
-`3116c5d` commit，无需联网）。**注意：补丁只包含 lk_moe 集成的代码改动，不包含
+可移植补丁 `patches/01_lk_moe__71888f507a.patch` 通过对比当前代码树与上游 base commit 生成（使用本地
+`71888f507a` commit，无需联网）。**注意：补丁只包含 lk_moe 集成的代码改动，不包含
 README.md / README_cn.md / RELEASE_NOTES.md 等文档。**
 
 ```bash
-git diff 3116c5d -- . ':!README.md' ':!README_cn.md' ':!RELEASE_NOTES.md' > patches/01_lk_moe__3116c5d.patch
+git diff 71888f507a -- . ':!README.md' ':!README_cn.md' ':!RELEASE_NOTES.md' ':!patches/' > patches/01_lk_moe__71888f507a.patch
 ```
 
-在干净的上游 `3116c5d` checkout 上应用：
+在干净的上游 `71888f507a` checkout 上应用：
 
 ```bash
 git clone https://github.com/vllm-project/vllm.git
 cd vllm
-git checkout 3116c5d
-git apply ../Lvllm/patches/01_lk_moe__3116c5d.patch
+git checkout 71888f507a
+git apply ../Lvllm/patches/01_lk_moe__71888f507a.patch
 ```
