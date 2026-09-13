@@ -1,7 +1,7 @@
 model: "/home/guqiong/Models/Qwen3.8-Flash-Next-NVFP4"
 host: "0.0.0.0"
 port: 8070
-tensor-parallel-size: 2
+tensor-parallel-size: 4
 max-model-len: 36000
 gpu-memory-utilization: 0.95
 trust-remote-code: true
@@ -10,7 +10,7 @@ served-model-name: "Qwen3.8-Flash-Next-NVFP4"
 compilation_config.cudagraph_mode: "FULL_DECODE_ONLY"
 enable_prefix_caching: true
 enable-chunked-prefill: true
-max_num_batched_tokens: 4096
+max_num_batched_tokens: 8192
 dtype: "bfloat16"
 max_num_seqs: 2
 compilation_config.mode: "VLLM_COMPILE"

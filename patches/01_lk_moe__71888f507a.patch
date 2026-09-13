@@ -1837,8 +1837,62 @@ index 0000000000..6615b44595
 +</body>
 +
 +</html>
+diff --git a/config.yaml b/config.yaml
+new file mode 100644
+index 0000000000..4222e73d8d
+--- /dev/null
++++ b/config.yaml
+@@ -0,0 +1,47 @@
++model: "/home/guqiong/Models/Qwen3.8-Flash-Next-NVFP4"
++host: "0.0.0.0"
++port: 8070
++tensor-parallel-size: 4
++max-model-len: 36000
++gpu-memory-utilization: 0.95
++trust-remote-code: true
++tokenizer-mode: "auto"
++served-model-name: "Qwen3.8-Flash-Next-NVFP4"
++compilation_config.cudagraph_mode: "FULL_DECODE_ONLY"
++enable_prefix_caching: true
++enable-chunked-prefill: true
++max_num_batched_tokens: 8192
++dtype: "bfloat16"
++max_num_seqs: 2
++compilation_config.mode: "VLLM_COMPILE"
++enable-auto-tool-choice: true
++# mamba-ssm-cache-dtype: "float16"
++# reasoning-parser: "super_v3"
++# kv_cache_dtype: "bfloat16"  
++# speculative-config: '{"method":"qwen3_next_mtp","num_speculative_tokens":7}'
++# tool-call-parser: "minimax_m2"
++# reasoning-parser: "minimax_m2_append_think"
++# tool-call-parser: glm47
++# reasoning-parser: glm45
++# tool-call-parser: "kimi_k2"
++# reasoning-parser: "kimi_k2" 
++# mm-encoder-tp-mode: "data"
++# disable-cascade-attn: true
++# reasoning-parser: "step3p5" 
++# tool-call-parser: "step3p5"  
++reasoning-parser: "qwen3"
++tool-call-parser: "qwen3_coder"
++# reasoning-parser: "nemotron_v3"
++# reasoning-parser: "gemma4"
++# tool-call-parser: "gemma4"
++# tool-call-parser: minimax_m3 
++# reasoning-parser: minimax_m3 
++# block-size: 128
++# kv-cache-dtype: "fp8_ds_mla"  
++# tokenizer-mode: "deepseek_v4"     
++# tool-call-parser: "deepseek_v4"     
++# reasoning-parser: "deepseek_v4"
++# speculative-config: '{"num_speculative_tokens": 3,"method": "deepseek_mtp"}'
++# speculative-config: '{"method":"dspark","num_speculative_tokens":5,"draft_sample_method":"probabilistic"}'
++default-chat-template-kwargs: '{"enable_thinking": false}'
++disable-custom-all-reduce: true
+\ No newline at end of file
 diff --git a/docker/Dockerfile b/docker/Dockerfile
-index 9f70c4b2b9..d2b5177599 100644
+index 9b344552c5..b5e19355a5 100644
 --- a/docker/Dockerfile
 +++ b/docker/Dockerfile
 @@ -1102,7 +1102,8 @@ COPY requirements/test/cuda.txt requirements/test/cuda.txt
@@ -1852,7 +1906,7 @@ index 9f70c4b2b9..d2b5177599 100644
      if [ "$CUDA_MAJOR" -ge 12 ]; then \
          if [ "${PYTORCH_NIGHTLY}" = "1" ]; then \
 diff --git a/pyproject.toml b/pyproject.toml
-index d689d50d8d..6223491630 100644
+index 1a77433f9c..47ece0b774 100644
 --- a/pyproject.toml
 +++ b/pyproject.toml
 @@ -14,7 +14,7 @@ requires = [
@@ -1865,7 +1919,7 @@ index d689d50d8d..6223491630 100644
  license = "Apache-2.0"
  license-files = ["LICENSE"]
 diff --git a/requirements/cuda.txt b/requirements/cuda.txt
-index ffcff13c82..a6b3890107 100644
+index 00a56ac3bd..279390853c 100644
 --- a/requirements/cuda.txt
 +++ b/requirements/cuda.txt
 @@ -34,3 +34,5 @@ tokenspeed-mla==0.1.8; platform_system == "Linux"
@@ -1874,6 +1928,918 @@ index ffcff13c82..a6b3890107 100644
  humming-kernels[cu13]==0.1.12
 +
 +lk_moe==2.4.2
+diff --git a/rust/src/chat/src/renderer/deepseek_v4/encoding.rs b/rust/src/chat/src/renderer/deepseek_v4/encoding.rs
+new file mode 100644
+index 0000000000..263edba831
+--- /dev/null
++++ b/rust/src/chat/src/renderer/deepseek_v4/encoding.rs
+@@ -0,0 +1,612 @@
++// SPDX-License-Identifier: Apache-2.0
++// SPDX-FileCopyrightText: Copyright contributors to the vLLM project
++
++//! DeepSeek V4 prompt renderer.
++//!
++//! Official Python reference:
++//! <https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash/blob/main/encoding/encoding_dsv4.py>
++
++use std::collections::HashMap;
++use std::fmt::Write as _;
++
++use serde::Serialize;
++use serde_json::Value;
++use serde_json_fmt::JsonFormat;
++
++use crate::error::{Error, Result};
++use crate::request::{ChatContent, ChatMessage, ChatRequest, ChatTool, ReasoningEffort};
++use crate::{AssistantContentBlock, AssistantMessageExt, AssistantToolCall};
++
++const BOS_TOKEN: &str = "<｜begin▁of▁sentence｜>";
++const EOS_TOKEN: &str = "<｜end▁of▁sentence｜>";
++const THINKING_START_TOKEN: &str = "<think>";
++const THINKING_END_TOKEN: &str = "</think>";
++const DSML_TOKEN: &str = "｜DSML｜";
++const USER_SP_TOKEN: &str = "<｜User｜>";
++const ASSISTANT_SP_TOKEN: &str = "<｜Assistant｜>";
++const REASONING_EFFORT_HIGH: &str = concat!(
++    "Reasoning Effort: Absolute maximum with no shortcuts permitted.\n",
++    "You MUST be very thorough in your thinking and comprehensively decompose the problem to resolve the root cause, rigorously stress-testing your logic against all potential paths, edge cases, and adversarial scenarios.\n",
++    "Explicitly write out your entire deliberation process, documenting every intermediate step, considered alternative, and rejected hypothesis to ensure absolutely no assumption is left unchecked.\n\n",
++);
++const REASONING_EFFORT_MAX: &str = concat!(
++    "Reasoning Effort: Beyond maximum — exhaustive, relentless, and uncompromising.\n",
++    "You MUST reason with the utmost depth and rigor, leaving absolutely nothing to chance: exhaustively decompose the problem into its most fundamental components, trace every causal chain to its root, and resolve the underlying cause rather than any surface symptom.\n",
++    "Do not stop reasoning until you have independently verified the solution from multiple angles and are certain that no assumption remains unchecked and no error remains undiscovered.\n\n",
++);
++
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++enum ThinkingMode {
++    Chat,
++    Thinking,
++}
++
++#[serde_with::skip_serializing_none]
++#[derive(Debug, Serialize)]
++struct RenderedToolSchema<'a> {
++    name: &'a str,
++    description: Option<&'a str>,
++    parameters: &'a Value,
++    strict: Option<bool>,
++}
++
++/// Render one chat request into the final prompt string.
++pub(super) fn render_request(request: &ChatRequest) -> Result<String> {
++    let (thinking_mode, reasoning_effort_prompt) = resolve_thinking_options(request)?;
++    let request_tools = request_tools(request);
++    let synthetic_tool_system = needs_synthetic_tool_system(request, request_tools);
++    let drop_thinking = request.parse_template_bool("drop_thinking")?.unwrap_or(true)
++        && !rendered_tools_present(request, request_tools);
++    let drop_historical_developers = thinking_mode == ThinkingMode::Thinking && drop_thinking;
++    let last_user_like_message_index = request.messages.iter().rposition(is_user_like_entry);
++    let last_user_render_index =
++        find_last_user_render_index(request.messages.as_slice(), synthetic_tool_system);
++    let mut out = String::from(BOS_TOKEN);
++    if thinking_mode == ThinkingMode::Thinking {
++        out.push_str(reasoning_effort_prompt);
++    }
++
++    let mut request_tools_attached = false;
++    let mut render_index = 0isize;
++    if synthetic_tool_system {
++        render_system_message(&mut out, None, request_tools)?;
++        request_tools_attached = true;
++        render_index += 1;
++    }
++
++    let mut last_tool_call_order = HashMap::new();
++    for (message_index, message) in request.messages.iter().enumerate() {
++        if is_following_user_content(request.messages.as_slice(), message_index) {
++            continue;
++        }
++
++        let current_render_index = render_index;
++        render_index += 1;
++
++        if drop_historical_developers
++            && is_historical_developer(message, message_index, last_user_like_message_index)
++        {
++            continue;
++        }
++
++        match message {
++            ChatMessage::System { content } => {
++                let tools = if !request_tools_attached {
++                    request_tools_attached = true;
++                    request_tools
++                } else {
++                    &[]
++                };
++                render_system_message(&mut out, Some(content), tools)?;
++            }
++            ChatMessage::Developer { content, tools } => {
++                render_developer_message(&mut out, content, tools.as_deref().unwrap_or(&[]))?;
++            }
++            ChatMessage::User { .. } | ChatMessage::ToolResponse { .. } => {
++                render_user_content_block(
++                    &mut out,
++                    request.messages.as_slice(),
++                    message_index,
++                    &last_tool_call_order,
++                )?;
++            }
++            ChatMessage::Assistant { content } => {
++                // Mirror Python: thinking block (reasoning + </think>) is
++                // emitted whenever thinking is active and reasoning isn't
++                // dropped - i.e. drop_thinking is off OR this turn lies
++                // strictly after the last user turn.
++                let emit_thinking_block = thinking_mode == ThinkingMode::Thinking
++                    && (!drop_thinking || current_render_index > last_user_render_index);
++                let append_eos = !(message_index + 1 == request.messages.len()
++                    && request.chat_options.continue_final_message());
++                render_assistant_message(&mut out, emit_thinking_block, append_eos, content)?;
++
++                if content.has_tool_calls() {
++                    last_tool_call_order.clear();
++                    last_tool_call_order.extend(
++                        content
++                            .tool_calls()
++                            .enumerate()
++                            .map(|(index, tool_call)| (tool_call.id.clone(), index)),
++                    );
++                }
++            }
++        }
++
++        if (is_user_like_entry(message) || matches!(message, ChatMessage::System { .. }))
++            && next_rendered_entry_is_assistant_or_end(
++                request.messages.as_slice(),
++                message_index,
++                drop_historical_developers,
++                last_user_like_message_index,
++            )
++        {
++            write_assistant_transition(
++                &mut out,
++                thinking_mode,
++                drop_thinking,
++                current_render_index >= last_user_render_index,
++            );
++        }
++    }
++
++    Ok(out)
++}
++
++/// Resolve DeepSeek V4's thinking controls. Unlike the Python tokenizer
++/// wrapper, the Rust renderer only consumes the typed top-level
++/// `reasoning_effort`; the generic template-kwargs map is left for HF
++/// templates.
++fn resolve_thinking_options(request: &ChatRequest) -> Result<(ThinkingMode, &'static str)> {
++    let mut thinking_mode = match request.enable_thinking()?.unwrap_or(true) {
++        true => ThinkingMode::Thinking,
++        false => ThinkingMode::Chat,
++    };
++    let mut reasoning_effort_prompt = REASONING_EFFORT_HIGH;
++
++    match request.chat_options.reasoning_effort {
++        Some(ReasoningEffort::None) => thinking_mode = ThinkingMode::Chat,
++        Some(ReasoningEffort::Max) => {
++            reasoning_effort_prompt = REASONING_EFFORT_MAX;
++        }
++        Some(ReasoningEffort::XHigh | ReasoningEffort::High) => {
++            reasoning_effort_prompt = REASONING_EFFORT_HIGH;
++        }
++        Some(ReasoningEffort::Minimal | ReasoningEffort::Medium | ReasoningEffort::Low) => {
++            reasoning_effort_prompt = "";
++        }
++        None => {}
++    }
++
++    Ok((thinking_mode, reasoning_effort_prompt))
++}
++
++/// Return request-level tools only when native tool parsing is enabled.
++fn request_tools(request: &ChatRequest) -> &[ChatTool] {
++    if request.tool_parsing_enabled() {
++        request.initial_tools()
++    } else {
++        &[]
++    }
++}
++
++/// Return whether request tools need a synthetic leading system entry.
++fn needs_synthetic_tool_system(request: &ChatRequest, request_tools: &[ChatTool]) -> bool {
++    !request_tools.is_empty()
++        && !request
++            .messages
++            .iter()
++            .any(|message| matches!(message, ChatMessage::System { .. }))
++}
++
++/// Return whether any rendered message carries tool schemas.
++fn rendered_tools_present(request: &ChatRequest, request_tools: &[ChatTool]) -> bool {
++    !request_tools.is_empty()
++        || request.messages.iter().any(|message| {
++            matches!(
++                message,
++                ChatMessage::Developer {
++                    tools: Some(tools),
++                    ..
++                } if !tools.is_empty()
++            )
++        })
++}
++
++/// Find the last user-like turn after inline tool-response merging.
++fn find_last_user_render_index(messages: &[ChatMessage], synthetic_tool_system: bool) -> isize {
++    let mut render_index = isize::from(synthetic_tool_system);
++    let mut last_user_index = -1;
++
++    for (message_index, message) in messages.iter().enumerate() {
++        if is_following_user_content(messages, message_index) {
++            continue;
++        }
++
++        if is_user_like_entry(message) {
++            last_user_index = render_index;
++        }
++        render_index += 1;
++    }
++
++    last_user_index
++}
++
++/// Return whether this message is already covered by a previous user-content
++/// entry.
++fn is_following_user_content(messages: &[ChatMessage], message_index: usize) -> bool {
++    is_user_content_entry(&messages[message_index])
++        && message_index > 0
++        && is_user_content_entry(&messages[message_index - 1])
++}
++
++/// Return whether one message contributes content to a V4 user turn.
++fn is_user_content_entry(message: &ChatMessage) -> bool {
++    matches!(
++        message,
++        ChatMessage::User { .. } | ChatMessage::ToolResponse { .. }
++    )
++}
++
++/// Return whether one rendered entry should be treated as user-like.
++fn is_user_like_entry(message: &ChatMessage) -> bool {
++    matches!(
++        message,
++        ChatMessage::Developer { .. } | ChatMessage::User { .. } | ChatMessage::ToolResponse { .. }
++    )
++}
++
++/// Return whether a developer entry precedes another user-like turn.
++fn is_historical_developer(
++    message: &ChatMessage,
++    message_index: usize,
++    last_user_like_message_index: Option<usize>,
++) -> bool {
++    matches!(message, ChatMessage::Developer { .. })
++        && last_user_like_message_index.is_some_and(|last_index| message_index < last_index)
++}
++
++/// Return whether the next rendered entry is assistant, or there is no next
++/// entry.
++fn next_rendered_entry_is_assistant_or_end(
++    messages: &[ChatMessage],
++    message_index: usize,
++    drop_historical_developers: bool,
++    last_user_like_message_index: Option<usize>,
++) -> bool {
++    let mut next_index = message_index + 1;
++    while next_index < messages.len()
++        && (is_following_user_content(messages, next_index)
++            || (drop_historical_developers
++                && is_historical_developer(
++                    &messages[next_index],
++                    next_index,
++                    last_user_like_message_index,
++                )))
++    {
++        next_index += 1;
++    }
++
++    messages
++        .get(next_index)
++        .map(|message| matches!(message, ChatMessage::Assistant { .. }))
++        .unwrap_or(true)
++}
++
++/// Render the tool preamble shown to the model, V4 flavor.
++fn render_tools(out: &mut String, tools: &[ChatTool]) -> Result<()> {
++    out.push_str(
++        r#"## Tools
++
++You have access to a set of tools to help answer the user's question. You can invoke tools by writing a "<｜DSML｜tool_calls>" block like the following:
++
++<｜DSML｜tool_calls>
++<｜DSML｜invoke name="$TOOL_NAME">
++<｜DSML｜parameter name="$PARAMETER_NAME" string="true|false">$PARAMETER_VALUE</｜DSML｜parameter>
++...
++</｜DSML｜invoke>
++<｜DSML｜invoke name="$TOOL_NAME2">
++...
++</｜DSML｜invoke>
++</｜DSML｜tool_calls>
++
++String parameters should be specified as is and set `string="true"`. For all other types (numbers, booleans, arrays, objects), pass the value in JSON format and set `string="false"`.
++
++If thinking_mode is enabled (triggered by <think>), you MUST output your complete reasoning inside <think>...</think> BEFORE any tool calls or final response.
++
++Otherwise, output directly after </think> with tool calls or final response.
++
++### Available Tool Schemas
++
++"#,
++    );
++
++    for (index, tool) in tools.iter().enumerate() {
++        if index > 0 {
++            out.push('\n');
++        }
++        render_tool_schema(out, tool)?;
++    }
++
++    out.push_str(
++        "\n\nYou MUST strictly follow the above defined tool name and parameter schemas to invoke tool calls.\n",
++    );
++    Ok(())
++}
++
++/// Serialize one typed tool schema into the JSON shape embedded in the prompt.
++fn render_tool_schema(out: &mut String, tool: &ChatTool) -> Result<()> {
++    out.push_str(&json_dumps(&RenderedToolSchema {
++        name: &tool.name,
++        description: tool.description.as_deref(),
++        parameters: &tool.parameters,
++        strict: tool.strict,
++    })?);
++    Ok(())
++}
++
++/// Render a system turn, optionally followed by the V4 tool preamble.
++fn render_system_message(
++    out: &mut String,
++    content: Option<&ChatContent>,
++    tools: &[ChatTool],
++) -> Result<()> {
++    if let Some(content) = content {
++        write_chat_content(out, content)?;
++    }
++    if !tools.is_empty() {
++        out.push_str("\n\n");
++        render_tools(out, tools)?;
++    }
++    Ok(())
++}
++
++/// Developer messages are rendered as user-like turns with optional tools.
++fn render_developer_message(
++    out: &mut String,
++    content: &ChatContent,
++    tools: &[ChatTool],
++) -> Result<()> {
++    if content.is_empty() {
++        return Err(Error::ChatTemplate(
++            "invalid DeepSeek V4 developer message: empty content".to_string(),
++        ));
++    }
++
++    out.push_str(USER_SP_TOKEN);
++    write_chat_content(out, content)?;
++    if !tools.is_empty() {
++        out.push_str("\n\n");
++        render_tools(out, tools)?;
++    }
++    Ok(())
++}
++
++/// Render contiguous user and tool-response messages as one V4 user turn.
++fn render_user_content_block(
++    out: &mut String,
++    messages: &[ChatMessage],
++    message_index: usize,
++    tool_call_order: &HashMap<String, usize>,
++) -> Result<()> {
++    let (block_start, block_end) = user_content_block_bounds(messages, message_index);
++    let mut sorted_tool_indices =
++        sorted_tool_response_indices(messages, block_start, block_end, tool_call_order).into_iter();
++
++    out.push_str(USER_SP_TOKEN);
++    for (offset, message_index) in (block_start..block_end).enumerate() {
++        if offset > 0 {
++            out.push_str("\n\n");
++        }
++        match &messages[message_index] {
++            ChatMessage::User { content } => write_chat_content(out, content)?,
++            ChatMessage::ToolResponse { .. } => {
++                let sorted_index = sorted_tool_indices
++                    .next()
++                    .expect("tool response block should include this tool message");
++                let ChatMessage::ToolResponse { content, .. } = &messages[sorted_index] else {
++                    unreachable!("sorted tool response index should reference a tool message");
++                };
++                write_tool_result(out, content)?;
++            }
++            _ => unreachable!("user content block should only contain user content messages"),
++        }
++    }
++
++    Ok(())
++}
++
++/// Return the contiguous user-content block containing `actual_index`.
++fn user_content_block_bounds(messages: &[ChatMessage], actual_index: usize) -> (usize, usize) {
++    let mut block_start = actual_index;
++    while block_start > 0 && is_user_content_entry(&messages[block_start - 1]) {
++        block_start -= 1;
++    }
++
++    let mut block_end = actual_index + 1;
++    while block_end < messages.len() && is_user_content_entry(&messages[block_end]) {
++        block_end += 1;
++    }
++
++    (block_start, block_end)
++}
++
++fn sorted_tool_response_indices(
++    messages: &[ChatMessage],
++    block_start: usize,
++    block_end: usize,
++    tool_call_order: &HashMap<String, usize>,
++) -> Vec<usize> {
++    let mut indices = (block_start..block_end)
++        .filter(|index| matches!(messages[*index], ChatMessage::ToolResponse { .. }))
++        .collect::<Vec<_>>();
++    if indices.len() <= 1 || tool_call_order.is_empty() {
++        return indices;
++    }
++
++    indices.sort_by_key(|index| {
++        let ChatMessage::ToolResponse { tool_call_id, .. } = &messages[*index] else {
++            unreachable!("tool response block should only contain tool messages");
++        };
++        tool_call_order.get(tool_call_id.as_str()).copied().unwrap_or(0)
++    });
++    indices
++}
++
++/// Render one tool response payload inside a V4 `<tool_result>` block.
++fn write_tool_result(out: &mut String, content: &ChatContent) -> Result<()> {
++    out.push_str("<tool_result>");
++    write_chat_content(out, content)?;
++    out.push_str("</tool_result>");
++    Ok(())
++}
++
++/// Append the assistant transition token after a user-like or system turn.
++fn write_assistant_transition(
++    out: &mut String,
++    thinking_mode: ThinkingMode,
++    drop_thinking: bool,
++    opens_thinking: bool,
++) {
++    out.push_str(ASSISTANT_SP_TOKEN);
++    if thinking_mode == ThinkingMode::Thinking && (!drop_thinking || opens_thinking) {
++        out.push_str(THINKING_START_TOKEN);
++    } else {
++        out.push_str(THINKING_END_TOKEN);
++    }
++}
++
++/// Render one assistant turn, including optional reasoning, DSML tool calls,
++/// and the trailing EOS marker.
++fn render_assistant_message(
++    out: &mut String,
++    emit_thinking_block: bool,
++    append_eos: bool,
++    content: &[AssistantContentBlock],
++) -> Result<()> {
++    let has_tool_calls = content.has_tool_calls();
++
++    if emit_thinking_block {
++        if content.has_reasoning() {
++            write_assistant_reasoning(out, content);
++        }
++        out.push_str(THINKING_END_TOKEN);
++    }
++
++    write_assistant_text(out, content);
++
++    if has_tool_calls {
++        out.push_str("\n\n<｜DSML｜tool_calls>\n");
++        for (index, tool_call) in content.tool_calls().enumerate() {
++            if index > 0 {
++                out.push('\n');
++            }
++            render_tool_call(out, tool_call)?;
++        }
++        out.push_str("\n</｜DSML｜tool_calls>");
++    }
++
++    if append_eos {
++        out.push_str(EOS_TOKEN);
++    }
++    Ok(())
++}
++
++/// Render one assistant tool call in DSML XML-like format.
++fn render_tool_call(out: &mut String, tool_call: &AssistantToolCall) -> Result<()> {
++    writeln!(out, "<{DSML_TOKEN}invoke name=\"{}\">", tool_call.name)
++        .expect("writing to String cannot fail");
++    encode_arguments_to_dsml(out, tool_call)?;
++    write!(out, "\n</{DSML_TOKEN}invoke>").expect("writing to String cannot fail");
++    Ok(())
++}
++
++/// Convert one assistant tool-call arguments object into DSML parameter form.
++///
++/// String values are emitted raw with `string="true"`, while all other JSON
++/// values are rendered with JSON syntax and `string="false"`.
++fn encode_arguments_to_dsml(out: &mut String, tool_call: &AssistantToolCall) -> Result<()> {
++    let arguments: Value = serde_json::from_str(&tool_call.arguments).map_err(|error| {
++        Error::ChatTemplate(format!(
++            "assistant tool call has invalid JSON arguments for DeepSeek V4: {error}"
++        ))
++    })?;
++    let Some(arguments) = arguments.as_object() else {
++        return Err(Error::ChatTemplate(
++            "assistant tool call arguments for DeepSeek V4 must be a JSON object".to_string(),
++        ));
++    };
++
++    let mut wrote_parameter = false;
++    for (key, value) in arguments {
++        if wrote_parameter {
++            out.push('\n');
++        }
++
++        let is_string = matches!(value, Value::String(_));
++        write!(
++            out,
++            "<{DSML_TOKEN}parameter name=\"{key}\" string=\"{}\">",
++            if is_string { "true" } else { "false" }
++        )
++        .expect("writing to String cannot fail");
++
++        match value {
++            Value::String(value) => out.push_str(value),
++            value => out.push_str(&json_dumps(value)?),
++        }
++
++        write!(out, "</{DSML_TOKEN}parameter>").expect("writing to String cannot fail");
++        wrote_parameter = true;
++    }
++
++    Ok(())
++}
++
++/// Write chat content directly into the destination buffer without flattening
++/// it into an intermediate `String`.
++fn write_chat_content(out: &mut String, content: &ChatContent) -> Result<()> {
++    match content {
++        ChatContent::Text(text) => out.push_str(text),
++        ChatContent::Parts(parts) => {
++            for part in parts {
++                out.push_str(part.as_text()?);
++            }
++        }
++    }
++    Ok(())
++}
++
++/// Write all reasoning blocks in encounter order.
++fn write_assistant_reasoning(out: &mut String, content: &[AssistantContentBlock]) {
++    for block in content {
++        if let AssistantContentBlock::Reasoning { text } = block {
++            out.push_str(text);
++        }
++    }
++}
++
++/// Write all visible assistant text blocks in encounter order.
++fn write_assistant_text(out: &mut String, content: &[AssistantContentBlock]) {
++    for block in content {
++        if let AssistantContentBlock::Text { text } = block {
++            out.push_str(text);
++        }
++    }
++}
++
++/// Compact JSON serialization used by this renderer for exact prompt text.
++fn json_dumps<T: Serialize>(value: &T) -> Result<String> {
++    JsonFormat::new()
++        .comma(", ")
++        .expect("literal comma separator is valid JSON")
++        .colon(": ")
++        .expect("literal colon separator is valid JSON")
++        .ascii(false)
++        .format_to_string(value)
++        .map_err(|error| {
++            Error::ChatTemplate(format!(
++                "failed to serialize DeepSeek V4 JSON payload: {error}"
++            ))
++        })
++}
+diff --git a/rust/src/server/build.rs b/rust/src/server/build.rs
+new file mode 100644
+index 0000000000..1a2ba8a6b0
+--- /dev/null
++++ b/rust/src/server/build.rs
+@@ -0,0 +1,24 @@
++// SPDX-License-Identifier: Apache-2.0
++// SPDX-FileCopyrightText: Copyright contributors to the vLLM project
++
++fn main() -> Result<(), Box<dyn std::error::Error>> {
++    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
++    let proto_dir = std::path::PathBuf::from(format!("{manifest_dir}/../../proto"));
++    let protos = [
++        proto_dir.join("control.proto"),
++        proto_dir.join("inference.proto"),
++    ];
++
++    for proto in &protos {
++        println!("cargo:rerun-if-changed={}", proto.display());
++    }
++
++    let file_descriptor_set = protox::compile(&protos, [&proto_dir])?;
++
++    tonic_prost_build::configure()
++        .build_server(true)
++        .build_client(true)
++        .compile_fds(file_descriptor_set)?;
++
++    Ok(())
++}
+diff --git a/tests/entrypoints/openai/test_sse_keep_alive.py b/tests/entrypoints/openai/test_sse_keep_alive.py
+new file mode 100644
+index 0000000000..74f5ee3ba2
+--- /dev/null
++++ b/tests/entrypoints/openai/test_sse_keep_alive.py
+@@ -0,0 +1,258 @@
++# SPDX-License-Identifier: Apache-2.0
++# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
++
++import asyncio
++
++import pytest
++from starlette.responses import StreamingResponse
++
++from vllm.entrypoints.openai.sse_keep_alive import (
++    SSE_KEEP_ALIVE_COMMENT,
++    with_sse_keep_alive,
++)
++
++# --- Disabled path ----------------------------------------------------------
++
++
++def test_disabled_returns_same_generator():
++    """For 0, negative, and NaN intervals the exact same generator object must
++    be returned (identity), proving no wrapper or per-chunk overhead when
++    disabled."""
++
++    async def gen():
++        yield "x"
++
++    for disabled in (0.0, -5.0, float("nan"), float("inf")):
++        g = gen()
++        assert with_sse_keep_alive(g, disabled) is g
++
++
++# --- Keep-alive emission ----------------------------------------------------
++
++
++@pytest.mark.asyncio
++async def test_keep_alive_during_silent_start():
++    """A silent start (queue wait / prefill) emits keep-alive comments before
++    the first real chunk."""
++    release = asyncio.Event()
++
++    async def gen():
++        await release.wait()  # simulates queue wait / prefill
++        yield "data: first\n\n"
++
++    out: list[str] = []
++    async for item in with_sse_keep_alive(gen(), 0.01):
++        out.append(item)
++        if item == SSE_KEEP_ALIVE_COMMENT:
++            release.set()
++        if item == "data: first\n\n":
++            break
++
++    assert SSE_KEEP_ALIVE_COMMENT in out
++    assert out.index(SSE_KEEP_ALIVE_COMMENT) < out.index("data: first\n\n")
++
++
++@pytest.mark.asyncio
++async def test_no_keep_alive_when_streaming_is_fast():
++    """If chunks arrive faster than the interval, no comment is emitted and all
++    data is forwarded."""
++
++    async def gen():
++        for chunk in ["a", "b", "c"]:
++            yield chunk
++
++    out = [c async for c in with_sse_keep_alive(gen(), 0.5)]
++    assert out == ["a", "b", "c"]
++    assert SSE_KEEP_ALIVE_COMMENT not in out
++
++
++@pytest.mark.asyncio
++async def test_keep_alive_between_chunks_does_not_drop_data():
++    """Keep-alives interleaved with real chunks must never drop or reorder
++    data."""
++    release_b = asyncio.Event()
++    release_c = asyncio.Event()
++
++    async def gen():
++        yield "data: a\n\n"
++        await release_b.wait()
++        yield "data: b\n\n"
++        await release_c.wait()
++        yield "data: c\n\n"
++
++    out: list[str] = []
++    async for item in with_sse_keep_alive(gen(), 0.01):
++        out.append(item)
++        if item == SSE_KEEP_ALIVE_COMMENT and not release_b.is_set():
++            release_b.set()
++        elif item == "data: b\n\n" and not release_c.is_set():
++            release_c.set()
++        elif item == "data: c\n\n":
++            break
++
++    assert SSE_KEEP_ALIVE_COMMENT in out
++    data_chunks = [c for c in out if c != SSE_KEEP_ALIVE_COMMENT]
++    assert data_chunks == ["data: a\n\n", "data: b\n\n", "data: c\n\n"]
++
++
++@pytest.mark.asyncio
++async def test_empty_generator_returns_immediately():
++    async def gen():
++        if False:
++            yield "never"
++
++    out = [c async for c in with_sse_keep_alive(gen(), 0.01)]
++    assert out == []
++
++
++# --- Errors and cancellation ------------------------------------------------
++
++
++@pytest.mark.asyncio
++async def test_exception_propagates():
++    async def gen():
++        yield "data: before\n\n"
++        raise RuntimeError("boom")
++
++    wrapped = with_sse_keep_alive(gen(), 0.01)
++    assert await anext(wrapped) == "data: before\n\n"
++    with pytest.raises(RuntimeError, match="boom"):
++        await anext(wrapped)
++
++
++@pytest.mark.asyncio
++async def test_upstream_cancelled_error_propagates():
++    async def gen():
++        yield "data: before\n\n"
++        raise asyncio.CancelledError("upstream cancelled")
++
++    wrapped = with_sse_keep_alive(gen(), 0.01)
++    assert await anext(wrapped) == "data: before\n\n"
++    with pytest.raises(asyncio.CancelledError):
++        await anext(wrapped)
++
++
++@pytest.mark.asyncio
++async def test_aclose_closes_upstream():
++    """Closing a wrapper that is mid-stream must complete promptly and close
++    the upstream generator (regression for the earlier leaked-task hang)."""
++    finalized = asyncio.Event()
++
++    async def gen():
++        try:
++            yield "chunk-0"
++            await asyncio.Event().wait()  # block forever
++        finally:
++            finalized.set()
++
++    wrapped = with_sse_keep_alive(gen(), 10.0)
++    assert await anext(wrapped) == "chunk-0"
++    await asyncio.wait_for(wrapped.aclose(), timeout=2.0)
++    assert finalized.is_set()
++
++
++@pytest.mark.asyncio
++async def test_client_disconnect_cancels_upstream():
++    """Cancelling the consumer mid-stream must cancel the pending anext and
++    close the upstream generator so its cleanup runs."""
++    finalized = asyncio.Event()
++
++    async def gen():
++        try:
++            for i in range(1000):
++                yield f"chunk-{i}"
++            await asyncio.Event().wait()
++        finally:
++            finalized.set()
++
++    wrapped = with_sse_keep_alive(gen(), 10.0)
++    assert await anext(wrapped) == "chunk-0"
++    task = asyncio.current_task()
++    assert task is not None
++    task.cancel()
++    with pytest.raises(asyncio.CancelledError):
++        await anext(wrapped)
++    assert finalized.is_set()
++
++
++# --- Response-level integration (the shipped StreamingResponse path) --------
++
++
++@pytest.mark.asyncio
++async def test_streaming_response_emits_comment():
++    """A keep-alive comment must reach the client through the real
++    StreamingResponse used by the routers."""
++    release = asyncio.Event()
++
++    async def gen():
++        await release.wait()
++        yield "data: hi\n\n"
++
++    response = StreamingResponse(
++        content=with_sse_keep_alive(gen(), 0.01),
++        media_type="text/event-stream",
++    )
++    body: list[bytes] = []
++    started = asyncio.Event()
++
++    async def send(message):
++        if message["type"] == "http.response.start":
++            started.set()
++        elif message["type"] == "http.response.body":
++            body.append(message["body"])
++            if SSE_KEEP_ALIVE_COMMENT.encode() in message["body"]:
++                release.set()
++
++    async def receive():
++        await asyncio.Event().wait()
++
++    await response(
++        {"type": "http", "asgi": {"spec_version": "2.3"}},
++        receive,
++        send,
++    )
++    data = b"".join(body).decode()
++    assert SSE_KEEP_ALIVE_COMMENT in data
++    assert "data: hi" in data
++
++
++@pytest.mark.asyncio
++async def test_streaming_response_disconnect_closes_upstream():
++    """On the ASGI 2.3 disconnect path used by the pinned Uvicorn, Starlette
++    cancels streaming and the wrapper's finally must close the upstream
++    generator."""
++    finalized = asyncio.Event()
++
++    async def gen():
++        try:
++            await asyncio.Event().wait()
++            yield "never"
++        finally:
++            finalized.set()
++
++    response = StreamingResponse(
++        content=with_sse_keep_alive(gen(), 10.0),
++        media_type="text/event-stream",
++    )
++    started = asyncio.Event()
++
++    async def receive():
++        await started.wait()
++        return {"type": "http.disconnect"}
++
++    async def send(message):
++        if message["type"] == "http.response.start":
++            started.set()
++
++    await response(
++        {"type": "http", "asgi": {"spec_version": "2.3"}},
++        receive,
++        send,
++    )
++    assert finalized.is_set()
++    pending = [
++        t
++        for t in asyncio.all_tasks()
++        if t is not asyncio.current_task() and not t.done()
++    ]
++    assert pending == []
 diff --git a/tests/evals/gsm8k/configs/Qwen3-30B-A3B-NVFP4.yaml b/tests/evals/gsm8k/configs/Qwen3-30B-A3B-NVFP4.yaml
 index f162aa8bfe..799a7694e9 100644
 --- a/tests/evals/gsm8k/configs/Qwen3-30B-A3B-NVFP4.yaml
@@ -2011,40 +2977,18 @@ index ef80287e5f..831c58c8cc 100644
 +    assert config.gemm1_beta == 1.0
 +    assert config.gemm1_clamp_limit == 7.0
 diff --git a/vllm/entrypoints/cli/main.py b/vllm/entrypoints/cli/main.py
-index 3dc69dd3ad..0da6a3d99a 100644
+index d173bc392f..47a2435752 100644
 --- a/vllm/entrypoints/cli/main.py
 +++ b/vllm/entrypoints/cli/main.py
-@@ -18,7 +18,7 @@ def main():
-     import vllm.entrypoints.cli.benchmark.main
-     import vllm.entrypoints.cli.collect_env
-     import vllm.entrypoints.cli.launch
--    import vllm.entrypoints.cli.openai
-+    import vllm.entrypoints.cli.openai_entrypoint
-     import vllm.entrypoints.cli.run_batch
-     import vllm.entrypoints.cli.serve
-     from vllm.entrypoints.serve.utils.api_utils import (
-@@ -28,7 +28,7 @@ def main():
-     from vllm.utils.argparse_utils import FlexibleArgumentParser
- 
-     CMD_MODULES = [
--        vllm.entrypoints.cli.openai,
-+        vllm.entrypoints.cli.openai_entrypoint,
-         vllm.entrypoints.cli.serve,
-         vllm.entrypoints.cli.launch,
-         vllm.entrypoints.cli.benchmark.main,
-@@ -80,7 +80,7 @@ def main():
-             "-v",
-             "--version",
-             action="version",
--            version=importlib.metadata.version("vllm"),
-+            version=importlib.metadata.version("lvllm"),
-         )
-         subparsers = parser.add_subparsers(required=False, dest="subparser")
-         cmds = {}
-diff --git a/vllm/entrypoints/cli/openai.py b/vllm/entrypoints/cli/openai_entrypoint.py
-similarity index 100%
-rename from vllm/entrypoints/cli/openai.py
-rename to vllm/entrypoints/cli/openai_entrypoint.py
+@@ -89,7 +89,7 @@ def main():
+         "-v",
+         "--version",
+         action="version",
+-        version=importlib.metadata.version("vllm"),
++        version=importlib.metadata.version("lvllm"),
+     )
+     subparsers = parser.add_subparsers(required=False, dest="subparser")
+     cmds = {}
 diff --git a/vllm/entrypoints/cli/run_batch.py b/vllm/entrypoints/cli/run_batch.py
 index 5fa626a6a5..0ab3e9f5a7 100644
 --- a/vllm/entrypoints/cli/run_batch.py
@@ -2058,11 +3002,82 @@ index 5fa626a6a5..0ab3e9f5a7 100644
          )
          logger.info("args: %s", args)
  
+diff --git a/vllm/entrypoints/openai/sse_keep_alive.py b/vllm/entrypoints/openai/sse_keep_alive.py
+new file mode 100644
+index 0000000000..ec9ef177b0
+--- /dev/null
++++ b/vllm/entrypoints/openai/sse_keep_alive.py
+@@ -0,0 +1,65 @@
++# SPDX-License-Identifier: Apache-2.0
++# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
++"""SSE keep-alive comments for idle streaming responses.
++
++Reverse proxies and tunnels (Cloudflare Tunnel, NGINX ``proxy_read_timeout``,
++AWS ALB, ...) can close a streaming connection when no bytes are sent for a
++while. That happens while a request is queued, during prefill, or in gaps
++between tokens. ``with_sse_keep_alive`` wraps the final SSE generator and emits
++a comment line (``": keep-alive\\n\\n"``) whenever it has been idle for
++``interval`` seconds. Comments are ignored by SSE-compliant clients but still
++count as bytes for proxy read-timeout logic.
++"""
++
++import asyncio
++import contextlib
++from collections.abc import AsyncGenerator
++
++SSE_KEEP_ALIVE_COMMENT = ": keep-alive\n\n"
++
++
++def with_sse_keep_alive(
++    generator: AsyncGenerator[str, None],
++    interval: float,
++) -> AsyncGenerator[str, None]:
++    """Emit an SSE keep-alive comment when ``generator`` is idle.
++
++    A non-positive or non-finite ``interval`` returns ``generator`` unchanged,
++    so the default path has no overhead. Otherwise a keep-alive comment is
++    yielded whenever no chunk arrives within ``interval`` seconds.
++    """
++    if not 0 < interval < float("inf"):
++        return generator
++    return _keep_alive_stream(generator, interval)
++
++
++async def _keep_alive_stream(
++    generator: AsyncGenerator[str, None],
++    interval: float,
++) -> AsyncGenerator[str, None]:
++    # A single retained ``anext()`` task advances the generator; asyncio forbids
++    # concurrent ``__anext__`` calls, and ``wait_for`` would cancel the task
++    # mid-advance on timeout. ``asyncio.wait`` observes both outcomes without
++    # cancelling the pending advance.
++    next_task: asyncio.Task[str] = asyncio.create_task(anext(generator))
++    try:
++        while True:
++            done, _ = await asyncio.wait({next_task}, timeout=interval)
++            if not done:
++                yield SSE_KEEP_ALIVE_COMMENT
++                continue
++            try:
++                chunk = next_task.result()
++            except StopAsyncIteration:
++                return
++            yield chunk
++            next_task = asyncio.create_task(anext(generator))
++    finally:
++        next_task.cancel()
++        # The task outcome was already handled in the loop; suppress so cleanup
++        # never corrupts it (matching ``merge_async_iterators``).
++        with contextlib.suppress(BaseException):
++            await next_task
++        # Close the upstream generator so its cleanup runs deterministically.
++        with contextlib.suppress(BaseException):
++            await generator.aclose()
 diff --git a/vllm/envs.py b/vllm/envs.py
-index d429686d9c..f228168230 100755
+index 0269a96409..52cd462445 100755
 --- a/vllm/envs.py
 +++ b/vllm/envs.py
-@@ -206,7 +206,7 @@ if TYPE_CHECKING:
+@@ -205,7 +205,7 @@ if TYPE_CHECKING:
          "skip",
          "full",
          "relax",
@@ -2071,7 +3086,7 @@ index d429686d9c..f228168230 100755
      VLLM_USE_FUSED_MOE_GROUPED_TOPK: bool = True
      VLLM_MOE_SKIP_PADDING: bool = True
      VLLM_KIMI_K3_SHARD_SP_SHARED_EXPERT: bool = False
-@@ -279,6 +279,12 @@ if TYPE_CHECKING:
+@@ -278,6 +278,12 @@ if TYPE_CHECKING:
      VLLM_NVTX_SCOPES_FOR_PROFILING: bool = False
      VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES: bool = True
      VLLM_OBJECT_STORAGE_SHM_BUFFER_NAME: str = "VLLM_OBJECT_STORAGE_SHM_BUFFER"
@@ -2084,7 +3099,7 @@ index d429686d9c..f228168230 100755
      VLLM_DEEPEP_BUFFER_SIZE_MB: int = 1024
      VLLM_DEEPEP_HIGH_THROUGHPUT_FORCE_INTRA_NODE: bool = False
      VLLM_DEEPEP_LOW_LATENCY_USE_MNNVL: bool = False
-@@ -1591,7 +1597,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
+@@ -1572,7 +1578,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
      #   shapes, but provides no guarantees.
      "VLLM_DEEP_GEMM_WARMUP": env_with_choices(
          "VLLM_DEEP_GEMM_WARMUP",
@@ -2093,7 +3108,7 @@ index d429686d9c..f228168230 100755
          [
              "skip",
              "full",
-@@ -2031,6 +2037,23 @@ environment_variables: dict[str, Callable[[], Any]] = {
+@@ -2012,6 +2018,23 @@ environment_variables: dict[str, Callable[[], Any]] = {
      # Debug workspace allocations.
      # logging of workspace resize operations.
      "VLLM_DEBUG_WORKSPACE": lambda: bool(int(os.getenv("VLLM_DEBUG_WORKSPACE", "0"))),
@@ -2117,7 +3132,7 @@ index d429686d9c..f228168230 100755
      # Disables parallel execution of shared_experts via separate cuda stream
      "VLLM_DISABLE_SHARED_EXPERTS_STREAM": lambda: bool(
          int(os.getenv("VLLM_DISABLE_SHARED_EXPERTS_STREAM", "0"))
-@@ -2380,6 +2403,12 @@ def compile_factors() -> dict[str, object]:
+@@ -2354,6 +2377,12 @@ def compile_factors() -> dict[str, object]:
          "VLLM_SKIP_MODEL_NAME_VALIDATION",
          "LOCAL_RANK",
          "CUDA_VISIBLE_DEVICES",
@@ -2130,7 +3145,7 @@ index d429686d9c..f228168230 100755
          "NO_COLOR",
      }
  
-@@ -2428,3 +2457,165 @@ def compile_factors() -> dict[str, object]:
+@@ -2402,3 +2431,165 @@ def compile_factors() -> dict[str, object]:
          factors[var] = normalize_value(os.getenv(var))
  
      return factors
@@ -2297,7 +3312,7 @@ index d429686d9c..f228168230 100755
 +        
 +        return info
 diff --git a/vllm/model_executor/layers/fused_moe/config.py b/vllm/model_executor/layers/fused_moe/config.py
-index 8736b1393d..d4b9c2a60a 100644
+index 4c7760d007..aed757704e 100644
 --- a/vllm/model_executor/layers/fused_moe/config.py
 +++ b/vllm/model_executor/layers/fused_moe/config.py
 @@ -335,6 +335,14 @@ class FusedMoEQuantConfig:
@@ -2331,7 +3346,7 @@ index 8736b1393d..d4b9c2a60a 100644
      @property
      def w2_zp(self) -> torch.Tensor | None:
 diff --git a/vllm/model_executor/layers/fused_moe/routed_experts.py b/vllm/model_executor/layers/fused_moe/routed_experts.py
-index 5d284bcc80..ce20e2a945 100644
+index 2dafb6c493..a9a85636e7 100644
 --- a/vllm/model_executor/layers/fused_moe/routed_experts.py
 +++ b/vllm/model_executor/layers/fused_moe/routed_experts.py
 @@ -34,6 +34,14 @@ if TYPE_CHECKING:
@@ -2396,7 +3411,7 @@ index 5d284bcc80..ce20e2a945 100644
  
          self.quant_method = self._get_quant_method(
              self.layer_name,
-@@ -1246,6 +1294,582 @@ class RoutedExperts(PluggableLayer):
+@@ -1245,6 +1293,582 @@ class RoutedExperts(PluggableLayer):
      ) -> torch.Tensor:
          raise AssertionError("Call forward_modular or forward_monolithic instead.")
  
@@ -2981,10 +3996,10 @@ index 5d284bcc80..ce20e2a945 100644
  # Mark the RoutedExperts weight_loader as supporting MoE-specific parameters
  RoutedExperts.weight_loader.supports_moe_loading = True  # type: ignore[attr-defined]
 diff --git a/vllm/model_executor/layers/fused_moe/runner/moe_runner.py b/vllm/model_executor/layers/fused_moe/runner/moe_runner.py
-index 2f072d14b4..1e5b653a33 100644
+index 2868690ebe..61a99cd60f 100644
 --- a/vllm/model_executor/layers/fused_moe/runner/moe_runner.py
 +++ b/vllm/model_executor/layers/fused_moe/runner/moe_runner.py
-@@ -611,29 +611,67 @@ class MoERunner(MoERunnerInterface):
+@@ -605,29 +605,67 @@ class MoERunner(MoERunnerInterface):
              shared_experts_input, SharedExpertsOrder.NO_OVERLAP
          )
  
@@ -3469,7 +4484,7 @@ index 262cd307a8..2780fe2a92 100644
          w13 = layer.w13_weight
          w2 = layer.w2_weight
 diff --git a/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_wna16.py b/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_wna16.py
-index 6a3f73e539..4dcfda5591 100644
+index 7a5b2d949b..099b7d7b79 100644
 --- a/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_wna16.py
 +++ b/vllm/model_executor/layers/quantization/compressed_tensors/compressed_tensors_moe/compressed_tensors_moe_wna16.py
 @@ -228,6 +228,11 @@ class CompressedTensorsWNA16MoEMethod(CompressedTensorsMoEMethod):
@@ -3626,10 +4641,10 @@ index d8bef7347d..bad2738a4d 100644
              # Weights are already in kernel format; rebuild the kernel only.
              self._init_moe_kernel(layer)
 diff --git a/vllm/model_executor/layers/quantization/modelopt.py b/vllm/model_executor/layers/quantization/modelopt.py
-index 2abe60d7ad..b8d2a1a364 100644
+index e3e8b37369..577d4c9915 100644
 --- a/vllm/model_executor/layers/quantization/modelopt.py
 +++ b/vllm/model_executor/layers/quantization/modelopt.py
-@@ -859,6 +859,11 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
+@@ -866,6 +866,11 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
          **extra_weight_attrs,
      ):
          assert self.quant_config.is_checkpoint_nvfp4_serialized
@@ -3641,7 +4656,7 @@ index 2abe60d7ad..b8d2a1a364 100644
  
          layer.num_experts = num_experts
          layer.params_dtype = params_dtype
-@@ -876,6 +881,7 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
+@@ -883,6 +888,7 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
                  # 2 fp4 items are packed in the input dimension
                  hidden_size // 2,
                  dtype=weight_dtype,
@@ -3649,7 +4664,7 @@ index 2abe60d7ad..b8d2a1a364 100644
              ),
              input_dim=1,
              output_dim=2,
-@@ -891,6 +897,7 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
+@@ -898,6 +904,7 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
                  # 2 fp4 items are packed in the input dimension
                  intermediate_size_per_partition // 2,
                  dtype=weight_dtype,
@@ -3657,7 +4672,7 @@ index 2abe60d7ad..b8d2a1a364 100644
              ),
              input_dim=1,
              output_dim=2,
-@@ -905,6 +912,7 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
+@@ -912,6 +919,7 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
                  # 2 fp4 items are packed in the input dimension
                  hidden_size // self.quant_config.group_size,
                  dtype=weight_scale_dtype,
@@ -3665,7 +4680,7 @@ index 2abe60d7ad..b8d2a1a364 100644
              ),
              input_dim=1,
              output_dim=2,
-@@ -919,6 +927,7 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
+@@ -926,6 +934,7 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
                  # 2 fp4 items are packed in the input dimension
                  intermediate_size_per_partition // self.quant_config.group_size,
                  dtype=weight_scale_dtype,
@@ -3673,7 +4688,7 @@ index 2abe60d7ad..b8d2a1a364 100644
              ),
              input_dim=1,
              output_dim=2,
-@@ -931,13 +940,13 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
+@@ -938,13 +947,13 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
          )
  
          w13_weight_scale_2 = PerTensorScaleParameter(
@@ -3689,7 +4704,7 @@ index 2abe60d7ad..b8d2a1a364 100644
              weight_loader=weight_loader,
          )
          layer.register_parameter("w2_weight_scale_2", w2_weight_scale_2)
-@@ -966,6 +975,9 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
+@@ -973,6 +982,9 @@ class ModelOptNvFp4FusedMoE(FusedMoEMethodBase):
          layer.register_parameter("w2_input_scale", w2_input_scale)
  
      def process_weights_after_loading(self, layer: RoutedExperts) -> None:
@@ -3700,10 +4715,10 @@ index 2abe60d7ad..b8d2a1a364 100644
          Convert NVFP4 MoE weights into kernel format and setup the kernel.
          """
 diff --git a/vllm/model_executor/layers/quantization/mxfp4.py b/vllm/model_executor/layers/quantization/mxfp4.py
-index 1f994ab56c..ebae4aedee 100644
+index 33f6afac80..839add5fef 100644
 --- a/vllm/model_executor/layers/quantization/mxfp4.py
 +++ b/vllm/model_executor/layers/quantization/mxfp4.py
-@@ -568,6 +568,11 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
+@@ -574,6 +574,11 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
          params_dtype: torch.dtype,
          **extra_weight_attrs,
      ):
@@ -3715,7 +4730,7 @@ index 1f994ab56c..ebae4aedee 100644
          self.num_experts = num_experts
          weight_dtype = torch.uint8
          scale_dtype = torch.uint8
-@@ -587,6 +592,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
+@@ -593,6 +598,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
                  self.moe.w13_num_shards * intermediate_size_per_partition,
                  hidden_size // 2,
                  dtype=weight_dtype,
@@ -3723,7 +4738,7 @@ index 1f994ab56c..ebae4aedee 100644
              ),
              requires_grad=False,
          )
-@@ -600,6 +606,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
+@@ -606,6 +612,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
                  self.moe.w13_num_shards * intermediate_size_per_partition,
                  hidden_size // mxfp4_block,
                  dtype=scale_dtype,
@@ -3731,7 +4746,7 @@ index 1f994ab56c..ebae4aedee 100644
              ),
              requires_grad=False,
          )
-@@ -615,6 +622,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
+@@ -621,6 +628,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
                  hidden_size,
                  intermediate_size_per_partition // 2,
                  dtype=weight_dtype,
@@ -3739,7 +4754,7 @@ index 1f994ab56c..ebae4aedee 100644
              ),
              requires_grad=False,
          )
-@@ -628,6 +636,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
+@@ -634,6 +642,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
                  hidden_size,
                  intermediate_size_per_partition // mxfp4_block,
                  dtype=scale_dtype,
@@ -3747,7 +4762,7 @@ index 1f994ab56c..ebae4aedee 100644
              ),
              requires_grad=False,
          )
-@@ -642,6 +651,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
+@@ -648,6 +657,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
                      num_experts,
                      self.moe.w13_num_shards * intermediate_size_per_partition,
                      dtype=torch.bfloat16,
@@ -3755,7 +4770,7 @@ index 1f994ab56c..ebae4aedee 100644
                  ),
                  requires_grad=False,
              )
-@@ -654,6 +664,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
+@@ -660,6 +670,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
                      num_experts,
                      hidden_size,
                      dtype=torch.bfloat16,
@@ -3763,16 +4778,16 @@ index 1f994ab56c..ebae4aedee 100644
                  ),
                  requires_grad=False,
              )
-@@ -774,6 +785,9 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
+@@ -782,6 +793,9 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
              self.moe_kernel.fused_experts.process_weights_after_loading(layer)
  
      def process_weights_after_loading(self, layer):
 +        from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
 +        if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
 +            return
-         w13 = layer.w13_weight
-         w2 = layer.w2_weight
-         w13_scale = layer.w13_weight_scale
+         if self.mxfp4_backend == Mxfp4MoeBackend.NONE:
+             return
+ 
 diff --git a/vllm/model_executor/model_loader/utils.py b/vllm/model_executor/model_loader/utils.py
 index e12910865e..f254c59578 100644
 --- a/vllm/model_executor/model_loader/utils.py

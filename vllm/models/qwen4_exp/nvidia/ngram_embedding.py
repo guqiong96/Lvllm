@@ -366,7 +366,12 @@ def _lookup_ple_embedding_from_pinned_kernel(
     tp_vocab_end,
     BLOCK_D: tl.constexpr,
 ):
-    """Look up TP-owned PLE rows through a CUDA view of pinned host memory."""
+    """Look up TP-owned PLE rows through a CUDA view of pinned host memory.
+
+    Byte gather: callers pass FP8 tables as uint8 views so the pointer element
+    type is always byte-wide. fp8e4nv has no Triton representation on SM80/86,
+    yet the gathered bytes are arch-independent (no arithmetic happens here).
+    """
     row_id = tl.program_id(0)
     global_idx = tl.load(ids_ptr + row_id)
     in_range = (global_idx >= tp_vocab_start) & (global_idx < tp_vocab_end)
@@ -377,7 +382,7 @@ def _lookup_ple_embedding_from_pinned_kernel(
     values = tl.load(
         weight_ptr + local_idx * embedding_dim + offsets,
         mask=load_mask,
-        other=0.0,
+        other=0,
     )
     tl.store(
         output_ptr + row_id * embedding_dim + offsets,
@@ -469,10 +474,18 @@ class Qwen4ExpPLEPinnedHostEmbedding(Qwen4ExpPLEEmbedding):
 
         flat_ids = input_ids.reshape(-1).long()
         if flat_ids.numel():
+            # Pass FP8 tables as byte views: Triton bakes the tensor arg's type
+            # into the kernel signature, and fp8e4nv fails to compile on SM80/86.
+            # The gather is a pure byte copy, so uint8 is arch-independent.
+            weight_arg = self._uva_weight
+            output_arg = output
+            if weight_arg.dtype in (torch.float8_e4m3fn, torch.float8_e5m2):
+                weight_arg = weight_arg.view(torch.uint8)
+                output_arg = output_arg.view(torch.uint8)
             _lookup_ple_embedding_from_pinned_kernel[(flat_ids.numel(),)](
-                self._uva_weight,
+                weight_arg,
                 flat_ids,
-                output,
+                output_arg,
                 self.embedding_dim,
                 self.shard_indices.org_vocab_start_index,
                 self.shard_indices.org_vocab_end_index,
