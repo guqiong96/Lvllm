@@ -9,13 +9,16 @@ from torch import nn
 
 from vllm.config import VllmConfig
 from vllm.forward_context import get_forward_context
+from vllm.logger import init_logger
 from vllm.model_executor.layers.layernorm import GemmaRMSNorm
 from vllm.model_executor.layers.linear import ReplicatedLinear
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.layers.rotary_embedding.mrope import triton_mrope
+from vllm.platforms import current_platform
 from vllm.transformers_utils.configs.qwen4_exp import (
     Qwen4ExpTextConfig,
 )
+from vllm.utils.math_utils import cdiv, round_up
 
 from ..common.qsa_cache import (
     QSACompressedKeyCache,
@@ -24,6 +27,8 @@ from ..common.qsa_cache import (
     canonical_qsa_rope_positions,
 )
 from .ops.qsa_pre_indexer import qsa_pre_indexer
+
+logger = init_logger(__name__)
 
 
 def apply_qsa_rope(
@@ -117,6 +122,9 @@ class QSAIndexer(nn.Module):
         self.index_head_dim = int(config.indexer_head_dim)
         self.token_topk = int(config.indexer_budget)
         self.compress_ratio = int(config.indexer_compress_ratio)
+        self.max_logits_width = round_up(
+            cdiv(vllm_config.model_config.max_model_len, self.compress_ratio), 64
+        )
         self.rotary_emb = rotary_emb
         self.use_fused_pre_indexer = _supports_fused_pre_indexer(
             rotary_emb,
@@ -152,6 +160,13 @@ class QSAIndexer(nn.Module):
         self.indexer_kv_dtype = vllm_config.attention_config.resolve_indexer_kv_dtype(
             "bf16"
         )
+        if self.indexer_kv_dtype == "fp8" and not current_platform.supports_fp8():
+            logger.warning(
+                "%s: the fp8 QSA indexer cache needs native fp8e4nv (SM89+); "
+                "falling back to bf16 on this device.",
+                prefix or "Qwen4Exp QSA indexer",
+            )
+            self.indexer_kv_dtype = "bf16"
         if self.indexer_kv_dtype == "fp8":
             indexer_dtype = torch.float8_e4m3fn
         elif self.indexer_kv_dtype == "bf16":

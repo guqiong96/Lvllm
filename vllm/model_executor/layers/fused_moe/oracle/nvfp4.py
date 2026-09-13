@@ -35,6 +35,7 @@ from vllm.model_executor.layers.quantization.utils.nvfp4_emulation_utils import 
 from vllm.model_executor.layers.quantization.utils.quant_utils import (
     QuantKey,
 )
+from vllm.platforms import current_platform
 
 logger = init_logger(__name__)
 
@@ -203,6 +204,23 @@ def select_nvfp4_moe_backend(
         NvFp4MoeBackend.HUMMING,
         NvFp4MoeBackend.EMULATION,
     ]
+
+    # SM120 (consumer Blackwell, e.g. RTX 50-series): prefer the SM12x-native
+    # b12x fused MoE over the datacenter-tuned FLASHINFER_CUTLASS fallback,
+    # which collapses to a poorly-tiled grouped GEMM at decode M=1 and loses to
+    # SM86 Marlin. Restricted to SM120 (not SM121) because the b12x CUTLASS
+    # kernel is gated on an unresolved upstream SM121 MMA op guard; SM121 keeps
+    # the original order. On SM86/SM100 the b12x device gate is False, so this
+    # change is a no-op there.
+    if (
+        current_platform.is_device_capability_family(120)
+        and not current_platform.is_device_capability((12, 1))
+    ):
+        AVAILABLE_BACKENDS = [
+            NvFp4MoeBackend.FLASHINFER_B12X,
+            NvFp4MoeBackend.B12X,
+            *AVAILABLE_BACKENDS,
+        ]
 
     NVFP4_BACKENDS_WITH_CLAMP = {
         NvFp4MoeBackend.B12X,
