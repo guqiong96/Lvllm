@@ -13,6 +13,7 @@ from transformers.utils import SAFE_WEIGHTS_INDEX_NAME
 
 from vllm.config import ModelConfig
 from vllm.config.load import LoadConfig
+import vllm.envs as envs
 from vllm.logger import init_logger
 from vllm.model_executor.layers.quantization.torchao import torchao_version_at_least
 from vllm.model_executor.model_loader.base_loader import BaseModelLoader
@@ -74,6 +75,11 @@ class DefaultModelLoader(BaseModelLoader):
     def __init__(self, load_config: LoadConfig):
         super().__init__(load_config)
         self.local_expert_ids: set[int] | None = None
+        # Regexes from ``model.weight_load_skip_patterns``: matched weights
+        # are not read during the main sweep; the model's
+        # ``load_deferred_weights`` hook reloads them at the end of
+        # process_weights_after_loading (see VLLM_ENGRAM_DEFER_HOST_FILL).
+        self.weight_skip_patterns = None
 
         extra_config = load_config.model_loader_extra_config
         if not isinstance(extra_config, dict):
@@ -289,6 +295,7 @@ class DefaultModelLoader(BaseModelLoader):
                         self.load_config.use_tqdm_on_load,
                         self.load_config.safetensors_load_strategy,
                         local_expert_ids=self.local_expert_ids,
+                        skip_patterns=self.weight_skip_patterns,
                         safetensors_prefetch_num_threads=(
                             self.load_config.safetensors_prefetch_num_threads
                         ),
@@ -423,6 +430,14 @@ class DefaultModelLoader(BaseModelLoader):
                 self.load_config.safetensors_load_strategy = "torchao"
 
         self._init_ep_weight_filter(model_config)
+
+        if envs.VLLM_ENGRAM_DEFER_HOST_FILL:
+            self.weight_skip_patterns = getattr(model, "weight_load_skip_patterns", None)
+        if self.weight_skip_patterns:
+            logger.info_once(
+                "Deferring %d weight pattern(s) to a dedicated post-load pass",
+                len(self.weight_skip_patterns),
+            )
 
         loaded_weights = model.load_weights(self.get_all_weights(model_config, model))
 

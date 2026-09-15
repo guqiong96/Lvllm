@@ -64,9 +64,18 @@ def compute_local_expert_ids(
 def should_skip_weight(
     weight_name: str,
     local_expert_ids: set[int] | None,
+    skip_patterns=None,
 ) -> bool:
-    """Return ``True`` if *weight_name* is an expert weight that does not
-    belong to the local rank and should be skipped during loading."""
+    """Return ``True`` if *weight_name* should not be read from disk during
+    the main sweep.
+
+    ``skip_patterns`` (compiled regexes) are checked first: matched weights
+    are deferred to a dedicated second pass (e.g. the Engram host tables);
+    the model's ``load_deferred_weights`` hook is responsible for loading
+    exactly the names these patterns match.
+    Expert weights not belonging to the local rank are skipped too."""
+    if skip_patterns and any(p.search(weight_name) for p in skip_patterns):
+        return True
     if local_expert_ids is None:
         return False
     eid = parse_expert_id(weight_name)

@@ -158,6 +158,8 @@ if TYPE_CHECKING:
     # Log a per-spec breakdown of the startup KV-size check (needed vs available
     # and which spec family dominates it). Default off.
     VLLM_KV_SIZE_DEBUG: bool = False
+    VLLM_ENGRAM_DROP_PAGE_CACHE: bool = True
+    VLLM_ENGRAM_DEFER_HOST_FILL: bool = True
     VLLM_DISABLE_COMPILE_CACHE: bool = False
     VLLM_REPLICATE_EMBED: bool = False
     VLLM_USE_LAYERNAME: bool = True
@@ -2090,6 +2092,19 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # Dump a per-spec KV-size breakdown (needed vs available, grouped by spec
     # family) when the startup KV check runs. Off by default.
     "VLLM_KV_SIZE_DEBUG": lambda: bool(int(os.getenv("VLLM_KV_SIZE_DEBUG", "0"))),
+    # sglang-style: once per process, drop the checkpoint page cache with
+    # posix_fadvise(DONTNEED) before pre-faulting the pinned Engram host
+    # table and when the table fill starts, so huge-page/pinned allocation
+    # faults find free memory instead of thrashing a full page cache.
+    "VLLM_ENGRAM_DROP_PAGE_CACHE": lambda: bool(
+        int(os.getenv("VLLM_ENGRAM_DROP_PAGE_CACHE", "1"))
+    ),
+    # Skip Engram host-table fills during the checkpoint sweep and run them
+    # after all bulk loaders (including lk_moe experts) finished, right after
+    # one page-cache drop, so the pinned table faults into freed memory.
+    "VLLM_ENGRAM_DEFER_HOST_FILL": lambda: bool(
+        int(os.getenv("VLLM_ENGRAM_DEFER_HOST_FILL", "1"))
+    ),
     # Debug logging for --enable-mfu-metrics
     "VLLM_DEBUG_MFU_METRICS": lambda: bool(
         int(os.getenv("VLLM_DEBUG_MFU_METRICS", "0"))

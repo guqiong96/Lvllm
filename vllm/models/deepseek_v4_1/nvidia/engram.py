@@ -2,7 +2,11 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """NVIDIA Engram DP sharding, shared host storage, and asynchronous prefetch."""
 
+import glob
+import json
 import mmap
+import os
+import re
 import tempfile
 import weakref
 from contextlib import ExitStack
@@ -10,6 +14,7 @@ from contextlib import ExitStack
 import numpy as np
 import torch
 
+import vllm.envs as envs
 from vllm.compilation.breakable_cudagraph import eager_break_during_capture
 from vllm.config import get_current_vllm_config
 from vllm.distributed import (
@@ -39,6 +44,187 @@ from vllm.utils.platform_utils import is_uva_available
 from vllm.utils.torch_utils import get_accelerator_view_from_cpu_tensor
 
 logger = init_logger(__name__)
+
+_page_cache_dropped_phases: set[str] = set()
+
+
+def _mapped_file_identities() -> set[tuple[int, int]]:
+    """(st_dev, inode) pairs of regular files currently mapped by this
+    process. The maps dev column is ``major:minor`` in hex."""
+    identities: set[tuple[int, int]] = set()
+    try:
+        with open("/proc/self/maps") as maps:
+            for line in maps:
+                fields = line.split(maxsplit=5)
+                if len(fields) < 6 or not fields[5].startswith("/"):
+                    continue
+                major, _, minor = fields[3].partition(":")
+                identities.add(
+                    (
+                        os.makedev(int(major, 16), int(minor, 16)),
+                        int(fields[4]),
+                    )
+                )
+    except (OSError, ValueError):
+        pass
+    return identities
+
+
+def _open_file_identities() -> set[tuple[int, int]]:
+    """(st_dev, st_ino) of every file currently open by any process on this
+    machine: another rank's mmap or prefetch thread reading a checkpoint file
+    looks idle to us, but evicting under it buys everyone a second pass of
+    synchronous 4 KB page faults."""
+    identities: set[tuple[int, int]] = set()
+    try:
+        pids = os.listdir("/proc")
+    except OSError:
+        return identities
+    for pid in pids:
+        if not pid.isdigit():
+            continue
+        fd_dir = f"/proc/{pid}/fd"
+        try:
+            fds = os.listdir(fd_dir)
+        except OSError:
+            continue
+        for fd in fds:
+            try:
+                target = os.readlink(f"{fd_dir}/{fd}")
+            except OSError:
+                continue
+            if not target.startswith("/") or target.endswith(" (deleted)"):
+                continue
+            try:
+                stat = os.stat(target)
+            except OSError:
+                continue
+            identities.add((stat.st_dev, stat.st_ino))
+    return identities
+
+
+def drop_checkpoint_page_cache(model_dir: str) -> tuple[int, int]:
+    """Drop cached checkpoint pages with posix_fadvise(DONTNEED); return
+    (files, bytes). Files still mapped by this process or open by anyone
+    (mmap users, other ranks' prefetchers) are skipped: evicting a file
+    mid-read buys a second pass of synchronous 4 KB page faults (the
+    double-read storm seen with per-file hooks during loading).
+    """
+    in_use = _mapped_file_identities() | _open_file_identities()
+    files = num_bytes = 0
+    for path in sorted(glob.glob(os.path.join(model_dir, "*.safetensors"))):
+        try:
+            stat = os.stat(path)
+            if (stat.st_dev, stat.st_ino) in in_use:
+                continue
+            fd = os.open(path, os.O_RDONLY)
+        except OSError:
+            continue
+        try:
+            os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+            files += 1
+            num_bytes += stat.st_size
+        finally:
+            os.close(fd)
+    return files, num_bytes
+
+
+def _drop_page_cache_once(phase: str) -> None:
+    """One-shot checkpoint page-cache drop per phase (sglang port): a single
+    time point per process, so pre-faulting the host table and the loads that
+    follow it find free memory instead of thrashing a full page cache.
+    """
+    if not envs.VLLM_ENGRAM_DROP_PAGE_CACHE or phase in _page_cache_dropped_phases:
+        return
+    _page_cache_dropped_phases.add(phase)
+    try:
+        model_dir = get_current_vllm_config().model_config.model
+    except (AssertionError, AttributeError, ValueError):
+        return
+    if not model_dir or not os.path.isdir(model_dir):
+        return
+    files, num_bytes = drop_checkpoint_page_cache(model_dir)
+    if files:
+        logger.info(
+            "Engram host table: dropped the page cache of %d checkpoint "
+            "files (%.1f GiB) before %s",
+            files,
+            num_bytes / 2**30,
+            "pre-faulting the host table"
+            if phase == "allocate"
+            else "filling the table",
+        )
+
+
+def load_deferred_engram_tables(
+    root_module: torch.nn.Module,
+    model_dir: str,
+    patterns: tuple[re.Pattern, ...],
+) -> None:
+    """Dedicated second pass for the weights the main sweep skipped via
+    ``weight_load_skip_patterns`` (the Engram host tables): drop the
+    checkpoint page cache once, re-read only those tensors, stream them
+    through the model's normal loader (so the usual TP/DP-sharded
+    weight_loaders run and record the fills), then flush the pinned host
+    tables. Runs strictly after all regular load + after-processing, so
+    the huge table faults into freed memory as the last load step.
+    """
+    if not envs.VLLM_ENGRAM_DEFER_HOST_FILL:
+        return
+    from safetensors import safe_open
+
+    from vllm.model_executor.models.utils import AutoWeightsLoader
+
+    index = os.path.join(model_dir, "model.safetensors.index.json")
+    by_file: dict[str, list[str]] = {}
+    if os.path.exists(index):
+        with open(index) as f:
+            weight_map = json.load(f)["weight_map"]
+        for name, shard in weight_map.items():
+            if any(p.search(name) for p in patterns):
+                by_file.setdefault(os.path.join(model_dir, shard), []).append(name)
+    else:
+        for shard in sorted(glob.glob(os.path.join(model_dir, "*.safetensors"))):
+            by_file[shard] = []
+
+    wanted = sum(len(names) for names in by_file.values())
+    if not any(
+        isinstance(m, ParallelEngramEmbedding) for m in root_module.modules()
+    ):
+        return
+    if wanted == 0:
+        raise RuntimeError(
+            "Engram deferred load: the main sweep skipped the host tables but "
+            f"no matching tensors were found under {model_dir}."
+        )
+    logger.info(
+        "Engram host table: deferred load pass starting over %d file(s)",
+        len(by_file),
+    )
+    _drop_page_cache_once("fill")
+
+    def gen():
+        for shard, names in sorted(by_file.items()):
+            with safe_open(shard, framework="pt") as sf:
+                if not names:  # no index: match against this file's keys
+                    names = [n for n in sf.keys() if any(p.search(n) for p in patterns)]
+                for name in names:
+                    yield name, sf.get_tensor(name)
+
+    # The generator yields raw HF checkpoint names, so resolve them with the
+    # model's *checkpoint* mapper (its normal pass-1 mapper).  Under the VL
+    # wrapper the live ``hf_to_vllm_mapper`` is deliberately identity (the
+    # outer wrapper already re-rooted names), so fall back to the stashed
+    # checkpoint mapper when present.
+    mapper = getattr(root_module, "_checkpoint_hf_to_vllm_mapper", None)
+    if mapper is None:
+        mapper = getattr(root_module, "hf_to_vllm_mapper", None)
+    loader = AutoWeightsLoader(root_module)
+    loader.load_weights(gen(), mapper=mapper)
+    for module in root_module.modules():
+        flush = getattr(module, "flush_deferred_host_fills", None)
+        if callable(flush):
+            flush()
 
 
 def engram_head_shard_rank() -> int:
@@ -108,6 +294,7 @@ class DPSharedEngramStorage:
             check_shm_free_space,
         )
 
+        _drop_page_cache_once("allocate")
         group = self.group
         with ExitStack() as stack:
             path, error = None, None
@@ -246,6 +433,14 @@ class ParallelEngramEmbedding(BaseParallelEngramEmbedding):
             raise RuntimeError("Engram CPU offload requires UVA support")
         self._views: tuple[torch.Tensor, torch.Tensor] | None = None
         self._view_src: tuple[int, int] | None = None
+        # True while the host table is only a lazy placeholder; the real
+        # page-locked buffer is created in flush_deferred_host_fills().
+        self._host_table_deferred = False
+        # (param, checkpoint-view) pairs recorded when host fills are deferred
+        # past the checkpoint sweep (VLLM_ENGRAM_DEFER_HOST_FILL). The views
+        # keep their mmap alive through reference counting, so filling later
+        # is safe; the page cache just gets dropped first.
+        self._pending_host_fills: list[tuple[torch.nn.Parameter, torch.Tensor]] = []
         super().__init__(num_embeddings, dim, head_sizes, block_size)
         if cpu_offload:
             # Constant dummy values avoid randomizing huge CPU lookup tables.
@@ -275,11 +470,37 @@ class ParallelEngramEmbedding(BaseParallelEngramEmbedding):
             )
             self._shared_memory = storage
             self._weight_loader = storage.load_weight
+            self._wrap_weight_loader_with_drop()
             return storage.weight, storage.weight_scale_inv
         if not self.cpu_offload:
             return super()._allocate_weights()
+        if envs.VLLM_ENGRAM_DEFER_HOST_FILL:
+            # Do not commit or page-lock ~189 GiB at construction. Hand back a
+            # lazy, untouched CPU shape (device="cpu" so a surrounding meta
+            # device context cannot make it a meta tensor; ~0 resident RSS) and
+            # record the true pinned buffer's shape. flush_deferred_host_fills
+            # () creates the real page-locked tensor right after the page-cache
+            # drop, so the table no longer sits allocated across the whole
+            # expert sweep -- matching sglang's allocate-late peak.
+            self._host_table_deferred = True
+            self._wrap_weight_loader_with_drop()
+            return (
+                torch.empty(
+                    self.part_num_embeddings,
+                    self.dim,
+                    dtype=torch.float8_e4m3fn,
+                    device="cpu",
+                ),
+                torch.empty(
+                    self.part_num_embeddings,
+                    self.dim // self.block_size,
+                    dtype=torch.uint8,
+                    device="cpu",
+                ),
+            )
+        _drop_page_cache_once("allocate")
         # Model initialization may be inside a CUDA device context.
-        return (
+        weights = (
             torch.empty(
                 self.part_num_embeddings,
                 self.dim,
@@ -295,8 +516,81 @@ class ParallelEngramEmbedding(BaseParallelEngramEmbedding):
                 pin_memory=True,
             ),
         )
+        self._wrap_weight_loader_with_drop()
+        return weights
+
+    def _wrap_weight_loader_with_drop(self) -> None:
+        """Drop the page cache once (per process) when the host-table fill
+        starts, at the one time point where earlier checkpoint pages are no
+        longer needed and only the still-mapped source file is protected.
+
+        With VLLM_ENGRAM_DEFER_HOST_FILL the fill is instead recorded and run
+        after the checkpoint sweep ends (``flush_deferred_host_fills``), so
+        the huge pinned-table pages are touched with an empty page cache
+        instead of competing with the loader for memory.
+        """
+        base_loader = self._weight_loader
+        self._host_fill_loader = base_loader
+
+        def load_with_drop(
+            param: torch.nn.Parameter, loaded_weight: torch.Tensor
+        ) -> None:
+            if envs.VLLM_ENGRAM_DEFER_HOST_FILL:
+                self._pending_host_fills.append((param, loaded_weight))
+                return
+            _drop_page_cache_once("fill")
+            base_loader(param, loaded_weight)
+
+        self._weight_loader = load_with_drop
+
+    def flush_deferred_host_fills(self) -> None:
+        """Run the host-table fills that were deferred during the checkpoint
+        sweep: one page-cache drop, then pre-fault the pinned table into the
+        freed memory. Idempotent; safe to call from every post-load hook."""
+        pending = getattr(self, "_pending_host_fills", None)
+        if not pending and not self._host_table_deferred:
+            return
+        if pending:
+            logger.info(
+                "Engram host table: flushing %d deferred fills (of %d rows) after "
+                "the checkpoint sweep",
+                len(pending),
+                self.part_num_embeddings,
+            )
+        _drop_page_cache_once("fill")
+        if self._host_table_deferred:
+            # The drop just freed the checkpoint page cache; take that memory
+            # now for the page-locked table, in place of the lazy placeholder
+            # handed back at construction, so CUDA's UVA helper never has to
+            # make a private pinned copy of it.
+            self.weight.data = torch.empty(
+                self.part_num_embeddings,
+                self.dim,
+                dtype=torch.float8_e4m3fn,
+                device="cpu",
+                pin_memory=True,
+            )
+            self.weight_scale_inv.data = torch.empty(
+                self.part_num_embeddings,
+                self.dim // self.block_size,
+                dtype=torch.uint8,
+                device="cpu",
+                pin_memory=True,
+            )
+            self._host_table_deferred = False
+            self._views = None
+            self._view_src = None
+        fill = self._host_fill_loader
+        while pending:
+            param, loaded_weight = pending.pop(0)
+            fill(param, loaded_weight)
 
     def _storage(self) -> tuple[torch.Tensor, torch.Tensor]:
+        if getattr(self, "_pending_host_fills", None) or self._host_table_deferred:
+            # A post-load hook did not flush the deferred fills (or the table is
+            # still a lazy placeholder); do it at first use so a lookup never
+            # reads an empty or un-pinned table.
+            self.flush_deferred_host_fills()
         if self._shared_memory is not None:
             return self._shared_memory.get_views(self.weight, self.weight_scale_inv)
         if not self.cpu_offload:

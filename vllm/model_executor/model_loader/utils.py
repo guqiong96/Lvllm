@@ -173,6 +173,15 @@ def process_weights_after_loading(
     if hasattr(model, "process_weights_after_loading"):
         model.process_weights_after_loading()
 
+    # Last load step: weights the main sweep skipped pre-read (e.g. the
+    # Engram host tables, see weight_load_skip_patterns) are read here —
+    # after a one-shot page-cache drop — and streamed through their
+    # weight_loaders, so the huge pinned tables fault into freed memory
+    # once, sequentially, with every bulk loader already finished.
+    deferred = getattr(model, "load_deferred_weights", None)
+    if callable(deferred):
+        deferred(model_config)
+
     # Needed for torchao model reloading via model.reload_weights
     # @kylesayrs @jerryzh168 this can be removed if callers move to `reload_weights`
     if model_config.quantization == "torchao":

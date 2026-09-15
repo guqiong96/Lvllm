@@ -171,7 +171,13 @@ class DeepseekV41ForCausalLM(nn.Module, SupportsMultiModal, SupportsPP, Supports
         # "language_model." prefix and delegates to the child's load_weights,
         # so the child's own mapper must be a no-op. Its suffix rules are not
         # idempotent (e.g. "lm_head.weight".endswith("head.weight") would
-        # re-fire "head.weight" -> "lm_head.weight").
+        # re-fire "head.weight" -> "lm_head.weight").  Keep the real checkpoint
+        # mapper for the deferred Engram pass: its generator yields raw HF text
+        # names (``layers.N.engram.embed.weight``), not the VL-re-rooted
+        # ``language_model.`` names that pass 1 hands this child.
+        self.language_model._checkpoint_hf_to_vllm_mapper = (
+            self.language_model.hf_to_vllm_mapper
+        )
         self.language_model.hf_to_vllm_mapper = WeightsMapper()
         self.make_empty_intermediate_tensors = (  # type: ignore[method-assign]
             self.language_model.make_empty_intermediate_tensors
@@ -347,3 +353,10 @@ class DeepseekV41ForCausalLM(nn.Module, SupportsMultiModal, SupportsPP, Supports
         if getattr(self, "_weights_finalized", False):
             return
         self.language_model.process_weights_after_loading()
+
+    # Engram host tables are skipped by the main sweep; the deferred pass
+    # resolves through the language model's own loader (same as pass 1).
+    weight_load_skip_patterns = DeepseekV41LLMForCausalLM.weight_load_skip_patterns
+
+    def load_deferred_weights(self, model_config) -> None:
+        self.language_model.load_deferred_weights(model_config)

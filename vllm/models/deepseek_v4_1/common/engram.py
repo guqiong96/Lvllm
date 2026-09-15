@@ -49,6 +49,10 @@ from vllm.distributed import (
 from vllm.logger import init_logger
 from vllm.model_executor.layers.linear import ReplicatedLinear
 from vllm.model_executor.layers.quantization import QuantizationConfig
+from vllm.model_executor.layers.quantization.utils.fp8_emulate import (
+    e4m3fn_u8_to_f32,
+    fp8_native_supported,
+)
 from vllm.model_executor.utils import set_weight_attrs
 from vllm.triton_utils import tl, triton
 
@@ -600,6 +604,7 @@ def _engram_lookup_kernel(
     TOTAL_HEADS: tl.constexpr,
     DIM: tl.constexpr,
     QUANT_BLOCK: tl.constexpr,
+    EMULATE_FP8: tl.constexpr,
     BLOCK_R: tl.constexpr,
     GRID,
 ):
@@ -623,11 +628,24 @@ def _engram_lookup_kernel(
         owned = valid & (head < TOTAL_HEADS)
         owned &= (index >= vocab_start) & (index < vocab_end)
         local = tl.where(owned, index - vocab_start, 0)
-        values = tl.load(
-            weight + local[:, None] * DIM + cols[None, :],
-            mask=owned[:, None],
-            other=0.0,
-        )
+        # SM8x Triton cannot name fp8e4nv (pointer included): the launcher
+        # passes a uint8 view and the byte is decoded bit-wise.
+        if EMULATE_FP8:
+            values = e4m3fn_u8_to_f32(
+                tl.load(
+                    weight + local[:, None] * DIM + cols[None, :],
+                    mask=owned[:, None],
+                    other=0,
+                )
+            )
+        else:
+            values = (
+                tl.load(
+                    weight + local[:, None] * DIM + cols[None, :],
+                    mask=owned[:, None],
+                    other=0.0,
+                )
+            ).to(tl.float32)
         scale = tl.load(
             scales + local[:, None] * (DIM // QUANT_BLOCK) + scale_cols[None, :],
             mask=owned[:, None],
@@ -637,7 +655,7 @@ def _engram_lookup_kernel(
         scale = (scale.to(tl.int32) << 23).to(tl.float32, bitcast=True)
         tl.store(
             out + rows[:, None] * DIM + cols[None, :],
-            (values.to(tl.float32) * scale).to(tl.bfloat16),
+            (values * scale).to(tl.bfloat16),
             mask=valid[:, None],
         )
 
@@ -714,6 +732,9 @@ class ParallelEngramEmbedding(nn.Module):
         if not rows:
             return
         weight, scales = self._storage()
+        emulate_fp8 = not fp8_native_supported(weight.device.index)
+        if emulate_fp8:
+            weight = weight.view(torch.uint8)
         # The table dwarfs TLB reach, so a persistent grid near the SM count
         # beats one program per row; halve it to leave SMs for the main stream.
         tiles = triton.cdiv(rows, 16)
@@ -733,6 +754,7 @@ class ParallelEngramEmbedding(nn.Module):
             TOTAL_HEADS=self.n_hash_cols,
             DIM=self.dim,
             QUANT_BLOCK=self.block_size,
+            EMULATE_FP8=emulate_fp8,
             BLOCK_R=16,
             GRID=grid,
         )
@@ -1001,7 +1023,14 @@ class Engram(nn.Module):
         """hidden_states: [T, hc_mult, dim]; hash_ids: [T, n_hash_cols] (all
         tokens, pre sequence-parallel shard); token_mask: [T], False shuts
         the gate so those positions pass through untouched."""
-        kv = self.wkv(self.embed(hash_ids).flatten(-2))
+        embed_out = self.embed(hash_ids)
+        from .ops.stat_probe import stat_probe_once
+
+        stat_probe_once(f"engram_lookup[h{self.layer_hash_index}]", embed_out)
+        stat_probe_once(f"engram_qw[h{self.layer_hash_index}]", self.q_weight)
+        stat_probe_once(f"engram_kw[h{self.layer_hash_index}]", self.k_weight)
+        kv = self.wkv(embed_out.flatten(-2))
+        stat_probe_once(f"engram_kv[h{self.layer_hash_index}]", kv)
         num_kv_tokens = hash_ids.shape[0]
         assert token_mask is None or token_mask.shape == (num_kv_tokens,)
         if self.use_sequence_parallel:
@@ -1016,6 +1045,7 @@ class Engram(nn.Module):
 
         num_tokens, hc_mult, dim = hidden_states.shape
         assert hc_mult == self.hc_mult and dim == self.dim
+        stat_probe_once(f"engram_streamin[h{self.layer_hash_index}]", hidden_states)
         assert kv.ndim == 2 and kv.shape[1] == (hc_mult + 1) * dim
         output = torch.empty_like(hidden_states)
         if num_tokens == 0:
@@ -1053,4 +1083,5 @@ class Engram(nn.Module):
             HAS_MASK=token_mask is not None,
             num_warps=num_warps,
         )
+        stat_probe_once(f"engram_stream[h{self.layer_hash_index}]", output)
         return output
