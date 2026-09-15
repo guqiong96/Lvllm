@@ -14,8 +14,13 @@ PyNvVideoCodec==2.0.4
 # flashinfer-cubin is not on PyPI since 0.6.14; setup.py excludes it from
 # install_requires so the published wheel does not carry an unresolvable pin
 --extra-index-url https://flashinfer.ai/whl/
-flashinfer-python==0.6.18.post1
-flashinfer-cubin==0.6.18.post1
+# 0.6.18 predates flashinfer#5075 (sm120 sparse-MLA NaN-safe gathers) and no
+# 0.7.0 exists on PyPI; ship the built wheel as an asset of Lvllm release
+# lvllm-v2.5.0 (source: flashinfer main @ 24c30bdd).
+flashinfer-python @ https://github.com/guqiong96/Lvllm/releases/download/lvllm-v2.5.0/flashinfer_python-0.7.0-py3-none-any.whl
+# flashinfer-cubin deliberately NOT required: sparse MLA JIT-compiles from
+# source on first serve (nvcc required); the nightly cubin package predates
+# #5075 and must stay out.
 apache-tvm-ffi==0.1.11
 tilelang==0.1.12
 nvidia-cudnn-frontend>=1.19.1
