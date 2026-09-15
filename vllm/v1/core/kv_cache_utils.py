@@ -972,6 +972,81 @@ def estimate_max_model_len(
         vllm_config.model_config.max_model_len = original_max_model_len
 
 
+def _log_kv_size_breakdown(
+    vllm_config: VllmConfig,
+    kv_cache_groups: list[KVCacheGroupSpec],
+    available_memory: int,
+) -> None:
+    """Env-gated per-group breakdown of the startup KV check (VLLM_KV_SIZE_DEBUG).
+
+    Prints, per group: layer count, page bytes, per-request block count and the
+    bytes this model charges for it, plus a needed(mml) curve so the
+    sliding-window saturation (the reason `estimate_max_model_len` can be
+    nonsense) is visible. Also shows the difference between the pool model used
+    here (sum of per-group blocks x shared block bytes) and a shared-block-table
+    model (max of per-group blocks).
+    """
+    if not envs.VLLM_KV_SIZE_DEBUG:
+        return
+
+    def _safe(spec: KVCacheSpec, name: str, default: str = "-") -> str:
+        # Properties like tokens_per_state raise NotImplementedError on merged
+        # specs; getattr's default does not swallow property exceptions.
+        try:
+            return str(getattr(spec, name))
+        except Exception:
+            return default
+
+    bytes_per_block = _pool_bytes_per_block(kv_cache_groups)
+    lines = [
+        f"KV-SIZE avail={format_gib(available_memory)} GiB"
+        f" mml={vllm_config.model_config.max_model_len}"
+        f" inflight={vllm_config.max_in_flight_tokens}"
+        f" pool_block={bytes_per_block/2**20:.2f} MiB"
+    ]
+    sum_blocks = 0
+    max_blocks = 0
+    for group in kv_cache_groups:
+        spec = group.kv_cache_spec
+        n = len(group.layer_names)
+        if isinstance(spec, UniformTypeKVCacheSpecs):
+            pages = spec.max_memory_usage_pages(vllm_config)
+        else:
+            pages = cdiv(
+                spec.max_memory_usage_bytes(vllm_config), spec.page_size_bytes
+            )
+        sum_blocks += pages
+        max_blocks = max(max_blocks, pages)
+        lines.append(
+            f"  layers={n:3d} pages={pages:6d}"
+            f" page={spec.page_size_bytes/2**20:.2f} MiB"
+            f" tps={_safe(spec, 'tokens_per_state')}"
+            f" bs={spec.block_size}"
+            f" win={_safe(spec, 'sliding_window')}"
+            f" extra={_safe(spec, 'extra_retained_tokens')}"
+            f"  {type(spec).__name__}"
+        )
+    lines.append(
+        f"  needed(sum-model)={format_gib(bytes_per_block * sum_blocks)} GiB"
+        f"  needed(max-model)={format_gib(bytes_per_block * max_blocks)} GiB"
+    )
+    mml = vllm_config.model_config.max_model_len
+    curve = []
+    try:
+        for probe in (mml, mml // 2, mml // 8, mml // 64):
+            vllm_config.model_config.max_model_len = probe
+            curve.append(
+                (probe, _max_memory_usage_bytes_from_groups(vllm_config, kv_cache_groups))
+            )
+    finally:
+        vllm_config.model_config.max_model_len = mml
+    lines.append(
+        "  needed(mml) curve: "
+        + " | ".join(f"{p}->{format_gib(b)}" for p, b in curve)
+    )
+    logger.info("KV-SIZE breakdown:\n%s", "\n".join(lines))
+
+
 def check_enough_kv_cache_memory(
     vllm_config: VllmConfig,
     kv_cache_spec: dict[str, KVCacheSpec],
@@ -2705,9 +2780,13 @@ def get_kv_cache_configs(
         _auto_fit_max_model_len(vllm_config, projected_groups_per_worker, check_memory)
 
     # Check if the available memory is enough per worker.
+    _kv_size_logged = False
     for groups, avail_mem in zip(projected_groups_per_worker, check_memory):
         if not groups:
             continue
+        if envs.VLLM_KV_SIZE_DEBUG and not _kv_size_logged:
+            _log_kv_size_breakdown(vllm_config, groups, avail_mem)
+            _kv_size_logged = True
         _check_enough_kv_cache_memory(
             avail_mem,
             partial(_max_memory_usage_bytes_from_groups, vllm_config, groups),

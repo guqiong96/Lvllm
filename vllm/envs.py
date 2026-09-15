@@ -155,6 +155,9 @@ if TYPE_CHECKING:
     VLLM_ENABLE_V1_MULTIPROCESSING: bool = True
     VLLM_LOG_BATCHSIZE_INTERVAL: float = -1
     VLLM_PLE_CPU_OFFLOAD: bool = True
+    # Log a per-spec breakdown of the startup KV-size check (needed vs available
+    # and which spec family dominates it). Default off.
+    VLLM_KV_SIZE_DEBUG: bool = False
     VLLM_DISABLE_COMPILE_CACHE: bool = False
     VLLM_REPLICATE_EMBED: bool = False
     VLLM_USE_LAYERNAME: bool = True
@@ -2084,6 +2087,9 @@ environment_variables: dict[str, Callable[[], Any]] = {
     ),
     # Store n-gram embedding tables in pinned CPU memory for UVA lookup.
     "VLLM_PLE_CPU_OFFLOAD": lambda: bool(int(os.getenv("VLLM_PLE_CPU_OFFLOAD", "1"))),
+    # Dump a per-spec KV-size breakdown (needed vs available, grouped by spec
+    # family) when the startup KV check runs. Off by default.
+    "VLLM_KV_SIZE_DEBUG": lambda: bool(int(os.getenv("VLLM_KV_SIZE_DEBUG", "0"))),
     # Debug logging for --enable-mfu-metrics
     "VLLM_DEBUG_MFU_METRICS": lambda: bool(
         int(os.getenv("VLLM_DEBUG_MFU_METRICS", "0"))
