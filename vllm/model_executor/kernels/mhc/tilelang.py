@@ -60,13 +60,18 @@ def _hc_prenorm_gemm_outputs(
             _HC_PRENORM_GEMM_TILELANG_KERNEL,
         )
 
+        # K is derived from x, not from the caller's hc_mult: the broadcast
+        # first-layer variant feeds x=(T,H) with fn_broadcast=(n_out,H), so
+        # its stacked-K factor is 1 while hc_mult (used for everything else)
+        # stays the model's value. Same value as hc_mult whenever x is the
+        # full (T, hc_mult*H) stack.
         _HC_PRENORM_GEMM_TILELANG_KERNEL(
             x,
             fn,
             out,
             sqrsum,
             hidden_size,
-            hc_mult,
+            x.shape[1] // hidden_size,
         )
     return out, sqrsum
 
@@ -484,7 +489,11 @@ def mhc_pre_broadcast_tilelang(
         fn_broadcast,
         hidden_size=hidden_size,
         hc_mult=hc_mult,
-        use_tilelang_fallback=False,
+        # DeepGEMM's broadcast prenorm only exists on sm90+; on anything
+        # else the tilelang prenorm (K taken from x, see
+        # _hc_prenorm_gemm_outputs) is the route, matching how sglang
+        # treats the prenorm as an optional DeepGEMM off-ramp.
+        use_tilelang_fallback=True,
     )
     _MHC_PRE_BIG_FUSE_TILELANG_KERNEL(
         gemm_out_mul,

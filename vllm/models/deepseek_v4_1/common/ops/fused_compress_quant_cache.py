@@ -4,6 +4,10 @@
 
 import torch
 
+from vllm.model_executor.layers.quantization.utils.fp8_emulate import (
+    f32_to_e4m3fn_u8,
+    fp8_native_supported,
+)
 from vllm.platforms import current_platform
 from vllm.triton_utils import tl, triton
 
@@ -258,6 +262,7 @@ def rope_quant_insert(
             CACHE_BLOCK=kv_cache.shape[1],
             COMPRESS_RATIO=compress_ratio,
             SANITIZE_CACHE_NANS=_ON_GFX950,
+            emulate_fp8=not fp8_native_supported(),
             num_warps=4,
             **launch_kwargs,
         )
@@ -269,11 +274,12 @@ def rope_quant_insert(
     if store_fp8:
         assert fp8_scale is not None and fp8_scale.numel() == 1
         assert fp8_scale.dtype == torch.float32
+    emulate_fp8 = store_fp8 and not fp8_native_supported()
     _rope_plain_insert_kernel[(num_tokens,)](
         latent,
         positions,
         cos_sin_cache,
-        kv_cache,
+        kv_cache.view(torch.uint8) if emulate_fp8 else kv_cache,
         slot_mapping,
         fp8_scale if store_fp8 else None,
         COS_STRIDE=cos_sin_cache.stride(0),
@@ -282,6 +288,7 @@ def rope_quant_insert(
         CACHE_BLOCK=kv_cache.shape[1],
         COMPRESS_RATIO=compress_ratio,
         STORE_FP8=store_fp8,
+        emulate_fp8=emulate_fp8,
         num_warps=4,
         **launch_kwargs,
     )
@@ -299,6 +306,7 @@ def _rope_quant_insert_kernel(
     CACHE_BLOCK: tl.constexpr,
     COMPRESS_RATIO: tl.constexpr,
     SANITIZE_CACHE_NANS: tl.constexpr,
+    emulate_fp8: tl.constexpr = False,
 ):
     t = tl.program_id(0)
     slot = tl.load(cache_slots + t)
@@ -317,8 +325,14 @@ def _rope_quant_insert_kernel(
     amax = tl.maximum(tl.max(tl.abs(quant), 1), 1e-4)
     exponent = tl.ceil(tl.log2(amax * (1.0 / 448.0)))
     scaled = quant * tl.reshape(tl.exp2(-exponent), (8, 1))
-    fp8 = tl.clamp(scaled, -448.0, 448.0).to(tl.float8e4nv)
-    packed = tl.reshape(fp8.to(tl.uint8, bitcast=True), (512,))
+    # SM8x Triton cannot name fp8e4nv: encode the byte bit-wise (RNE, identical).
+    if emulate_fp8:
+        packed = tl.reshape(
+            f32_to_e4m3fn_u8(tl.clamp(scaled, -448.0, 448.0)), (512,)
+        )
+    else:
+        fp8 = tl.clamp(scaled, -448.0, 448.0).to(tl.float8e4nv)
+        packed = tl.reshape(fp8.to(tl.uint8, bitcast=True), (512,))
     tl.store(values + d, packed, d < 448)
     s = tl.arange(0, 8)
     max_encoded: tl.constexpr = 254.0 if SANITIZE_CACHE_NANS else 255.0
@@ -352,6 +366,7 @@ def _rope_plain_insert_kernel(
     CACHE_BLOCK: tl.constexpr,
     COMPRESS_RATIO: tl.constexpr,
     STORE_FP8: tl.constexpr,
+    emulate_fp8: tl.constexpr = False,
 ):
     t = tl.program_id(0)
     slot = tl.load(cache_slots + t)
@@ -378,6 +393,11 @@ def _rope_plain_insert_kernel(
     )
     if STORE_FP8:
         scaled = row.to(tl.float32) * (1.0 / tl.load(fp8_scale))
-        tl.store(dst + d, tl.clamp(scaled, -448.0, 448.0).to(tl.float8e4nv))
+        # SM8x Triton cannot name fp8e4nv (pointer included): the launcher
+        # passes a uint8 view and the byte is encoded bit-wise (RNE, identical).
+        if emulate_fp8:
+            tl.store(dst + d, f32_to_e4m3fn_u8(tl.clamp(scaled, -448.0, 448.0)))
+        else:
+            tl.store(dst + d, tl.clamp(scaled, -448.0, 448.0).to(tl.float8e4nv))
     else:
         tl.store(dst + d, row)

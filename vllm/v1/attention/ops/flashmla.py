@@ -9,6 +9,25 @@ from vllm.platforms import current_platform
 
 logger = init_logger(__name__)
 
+
+def sm8x_sparse_mla_enabled() -> bool:
+    """SM80/86/88 run DeepSeek-V4 sparse MLA through the Triton fallback path
+    (``vllm/models/deepseek_v4/nvidia/ops/sm8x_attn.py``) instead of the
+    sm90+ FlashMLA CUDA kernels.
+
+    Anchored to the group's *floor* capability, not this rank's: the KV
+    geometry that goes with the route (page size, and with it every worker's
+    cache spec) is decided once for the whole TP group, so per-rank answers
+    either fork the geometry or leave the strong card calling CUDA kernels its
+    sibling forced the group out of. One weak card puts the whole group on the
+    Triton path; a uniform group keeps its own native route.
+    """
+    cap = current_platform.group_capability_floor()
+    if cap is None:
+        return False
+    return cap.to_int() // 10 == 8
+
+
 if current_platform.is_cuda():
     try:
         import vllm._flashmla_C  # noqa: F401

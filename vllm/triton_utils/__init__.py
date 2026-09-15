@@ -23,7 +23,12 @@ else:
     gl = TritonLanguagePlaceholder()
     aggregate = TritonLanguagePlaceholder()
 
+from vllm.triton_utils.device_target import (
+    install_device_aligned_triton_targets,
+)
 from vllm.triton_utils.tensor_descriptor import use_tensor_descriptor
+
+install_device_aligned_triton_targets()
 
 LOG2E = 1.4426950408889634
 LOGE2 = 0.6931471805599453

@@ -24,6 +24,9 @@ from vllm.model_executor.layers.indexer_topk import (
     RADIX_TOPK_WORKSPACE_SIZE,
     get_indexer_topk,
 )
+from vllm.model_executor.layers.quantization.utils.fp8_emulate import (
+    fp8_native_supported,
+)
 from vllm.model_executor.layers.quantization.utils.quant_utils import (
     get_fp8_min_max,
 )
@@ -33,6 +36,7 @@ from vllm.utils.deep_gemm import (
     fp8_fp4_mqa_logits,
     fp8_fp4_paged_mqa_logits,
     has_deep_gemm,
+    use_sm8x_mqa_fallback,
 )
 from vllm.utils.import_utils import has_cutedsl
 from vllm.utils.torch_utils import (
@@ -887,7 +891,11 @@ class SparseAttnIndexer(CustomOp):
         self.dcp_rank = get_dcp_group().rank_in_group if self.dcp_world_size > 1 else 0
         self.use_pcp = parallel_config.prefill_context_parallel_size > 1
         self._cp_kv_cache_interleave_size: int | None = None
-        if current_platform.is_cuda() and not has_deep_gemm():
+        if (
+            current_platform.is_cuda()
+            and not has_deep_gemm()
+            and not use_sm8x_mqa_fallback()
+        ):
             raise RuntimeError(
                 "Sparse Attention Indexer CUDA op requires DeepGEMM support in "
                 "the current vLLM environment."
@@ -899,10 +907,23 @@ class SparseAttnIndexer(CustomOp):
                 _UNPACK_SEQ_TRITON_KERNEL,
             )
 
-            pack_dtype = torch.uint8 if use_fp4_cache else current_platform.fp8_dtype()
+            if use_fp4_cache:
+                pack_dtype: torch.dtype = torch.uint8
+                pack_pad: float | int = 0
+            elif fp8_native_supported():
+                pack_dtype = current_platform.fp8_dtype()
+                pack_pad = -float("inf")
+            else:
+                # SM8x: pack_seq_triton packs e4m3 bytes through the uint8
+                # path (see _FP8_NEG_MAX_BYTE); the key must match what the
+                # runtime actually launches.
+                from vllm.v1.attention.ops.common import _FP8_NEG_MAX_BYTE
+
+                pack_dtype = torch.uint8
+                pack_pad = _FP8_NEG_MAX_BYTE
             _PACK_SEQ_TRITON_KERNEL.register_warmup(
                 dtype=pack_dtype,
-                pad_value=0 if use_fp4_cache else -float("inf"),
+                pad_value=pack_pad,
             )
             _UNPACK_SEQ_TRITON_KERNEL.register_warmup()
 

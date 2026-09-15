@@ -38,6 +38,12 @@ def compile_cutedsl(
 ) -> Any:
     import cutlass.cute as cute
 
+    from vllm.utils.cutedsl_arch import pin_cutedsl_arch
+
+    # The DSL targets visible device 0 unless told otherwise; on a mixed-arch TP
+    # group that target is not the device running this kernel.
+    pin_cutedsl_arch()
+
     return cute.compile(
         entry,
         *args,

@@ -49,8 +49,13 @@ from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
 from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.models.utils import extract_layer_index
+from vllm.models.deepseek_v4_1.common.ops.stat_probe import (
+    int_probe_once,
+    stat_probe_once,
+)
 from vllm.models.deepseek_v4_1.common.rope import build_deepseek_v4_rope
 from vllm.models.deepseek_v4_1.compressor import DeepseekCompressor
+from vllm.platforms import current_platform
 from vllm.triton_utils import tl, triton
 from vllm.utils.multi_stream_utils import (
     execute_in_parallel,
@@ -88,6 +93,46 @@ def _indexer_k_cache_head_dim(index_head_dim: int, use_fp4_kv: bool) -> int:
     # NOTE(yifan): FP8 indexer cache uses the same layout as V3.2:
     # head_dim bytes = 128 fp8 + 4 fp32 scale = 132.
     return index_head_dim + index_head_dim // 128 * 4
+
+
+# SM120 (RTX 50 / GB10) has one hard page constraint per paged kernel family,
+# and v4.1's *mixed* compress_ratios ([0,0,2..,1..]) mean a single global block
+# size cannot satisfy all three at once on the packed BLHNC layout:
+#   * FlashInfer SM120 sparse-MLA decode: page == 64 states exactly.
+#   * DeepGEMM paged MQA (indexer), arch 12 + fp8: block_kv == 64 exactly.
+#   * BLHNC packs the indexer page inside the MLA block, so a block CANNOT be
+#     split into smaller kernel pages (no dense page to subdivide).
+# => every paged cache group must carry its OWN block = 64 * tokens_per_state,
+# so each holds exactly 64 states/page (num_states == 64 -> block_kv == 64) and
+# the kernel page equals the storage page (no split). Off SM120 -> None so the
+# group keeps the global block size (SWA=32, Hopper aligns to 64 globally).
+_SM120_PAGED_KERNEL_STATES = 64
+
+
+def _sm120_paged_block_size(tokens_per_state: int) -> int | None:
+    """Per-group block size pinning this cache to 64 states/page on SM120/121.
+
+    Returns None off SM120 (caller keeps the global block size). Group-floor
+    anchored: the page size is part of every worker's KV spec, so one pre-120
+    rank has to pull the whole group onto the global block size (and the Triton
+    route that goes with it) instead of this rank quietly pinning 64.
+    """
+    if not current_platform.is_cuda():
+        return None
+    floor = current_platform.group_capability_floor()
+    if floor is None or floor.to_int() // 10 != 12:
+        # Not every rank is SM12x (12.0/12.1 share the family), so the group
+        # keeps the global block size.
+        return None
+    block = _SM120_PAGED_KERNEL_STATES * max(1, int(tokens_per_state))
+    if envs.VLLM_DSV41_SM120_PATH_CHECKS:
+        # DeepGEMM/FlashInfer arch12 asserts block_kv == block //
+        # tokens_per_state == 64; anything else reintroduces the
+        # "block_kv=32 != 64" page-size crash this pinning exists to fix.
+        assert block % _SM120_PAGED_KERNEL_STATES == 0 and (
+            block // max(1, int(tokens_per_state)) == _SM120_PAGED_KERNEL_STATES
+        ), f"SM120 paged block {block} does not yield a 64-state page"
+    return block
 
 
 @triton.jit
@@ -446,6 +491,17 @@ class DeepseekV4Attention(nn.Module, AttentionLayerBase, ABC):
             self._uses_fp8_ds_mla_layout(), cache_config.cache_dtype, cache_config
         )
 
+        # Determine block_size based on GPU architecture for SM120/121 support.
+        # Defaults to 32 if platform info is unavailable (e.g., non-GPU CI).
+        try:
+            is_sm120_or_sm121 = current_platform.is_device_capability_family(
+                120
+            ) or current_platform.is_device_capability_family(121)
+            swa_block_size = 64 if is_sm120_or_sm121 else 32
+        except (AttributeError, RuntimeError):
+            # Fallback for non-GPU environments or when platform is unavailable
+            swa_block_size = 32
+
         self.swa_cache_layer = DeepseekV4SWACache(
             head_dim=self.head_dim,
             window_size=self.window_size,
@@ -453,7 +509,7 @@ class DeepseekV4Attention(nn.Module, AttentionLayerBase, ABC):
             prefix=f"{prefix}.swa_cache",
             cache_config=cache_config,
             backend_cls=self.swa_backend_cls,
-            block_size=32,
+            block_size=swa_block_size,
         )
 
         # The attention layer itself was already registered with the
@@ -563,6 +619,11 @@ class DeepseekV4Attention(nn.Module, AttentionLayerBase, ABC):
             hidden_states
         )
         qr, qr_scale, kv = self._split_qkv_and_norm(qr_kv)
+
+        stat_probe_once(f"L{self.layer_id}.attn_qrkv", qr_kv)
+        if isinstance(qr, torch.Tensor):
+            stat_probe_once(f"L{self.layer_id}.attn_qr", qr)
+        stat_probe_once(f"L{self.layer_id}.attn_kvr", kv)
 
         self._prepare_and_attn_fn(
             hidden_states,
@@ -677,6 +738,8 @@ class DeepseekV4Attention(nn.Module, AttentionLayerBase, ABC):
             q = self._wq_b_proj(qr, qr_scale).view(
                 -1, self.n_local_heads, self.head_dim
             )
+
+            stat_probe_once(f"L{self.layer_id}.attn_q", q)
             return self._fused_qnorm_rope_kv_insert(q, kv, positions, attn_metadata)
 
         index_q: torch.Tensor | None = None
@@ -695,6 +758,9 @@ class DeepseekV4Attention(nn.Module, AttentionLayerBase, ABC):
                 self.ln_events[1],
                 aux_stream,
             )
+
+            if latent is not None:
+                stat_probe_once(f"L{self.layer_id}.attn_latent", latent)
         else:
             q = project_query_and_cache_kv()
 
@@ -721,6 +787,12 @@ class DeepseekV4Attention(nn.Module, AttentionLayerBase, ABC):
         else:
             indexer_result = prepare_indexer()
         index_q, index_q_scale, index_weights_out = indexer_result
+
+        if indexer is not None and self.topk_indices_buffer is not None:
+            int_probe_once(
+                f"L{self.layer_id}.attn_topk",
+                self.topk_indices_buffer[: hidden_states.shape[0]],
+            )
 
         self._sparse_indexer_and_attn(
             hidden_states,
@@ -939,7 +1011,12 @@ class DeepseekV4Attention(nn.Module, AttentionLayerBase, ABC):
         # pages.
         uses_fp8_ds_mla_layout = self.kv_cache_dtype == "fp8_ds_mla"
         return MLAAttentionSpec(
-            block_size=vllm_config.cache_config.block_size,
+            # SM120: 64 * compress_ratio so the page holds exactly 64 states
+            # (FlashInfer decode wants a 64-state page); elsewhere global.
+            block_size=(
+                _sm120_paged_block_size(self.compress_ratio)
+                or vllm_config.cache_config.block_size
+            ),
             num_kv_heads=1,
             head_size=self.head_dim,
             dtype=torch.uint8 if uses_fp8_ds_mla_layout else self.kv_cache_torch_dtype,
@@ -993,7 +1070,13 @@ class DeepseekV4IndexerCache(torch.nn.Module, AttentionLayerBase):
         # tokens_per_state=1 for V3.2, >1 for DeepseekV4; same cache layout.
         uses_fp8_ds_mla_layout = vllm_config.cache_config.cache_dtype == "fp8_ds_mla"
         return MLAAttentionSpec(
-            block_size=self.cache_config.block_size,
+            # SM120: 64 * compress_ratio so the indexer page holds exactly 64
+            # states => DeepGEMM paged-MQA block_kv == 64 (arch 12 fp8 requires
+            # exactly 64); elsewhere global.
+            block_size=(
+                _sm120_paged_block_size(self.compress_ratio)
+                or self.cache_config.block_size
+            ),
             num_kv_heads=1,
             head_size=self.head_dim,
             dtype=self.dtype,

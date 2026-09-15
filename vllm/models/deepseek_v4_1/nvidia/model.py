@@ -77,7 +77,7 @@ from vllm.v1.worker.ubatching import dbo_current_ubatch_id
 
 from ..common.engram import EngramLayout, NgramHashState
 from ..common.mm_preprocess import IMAGE_SENTINEL_BASE_ID, image_sentinel_mask
-from .engram import Engram, gather_engram_hashes
+from .engram import Engram, gather_engram_hashes, load_deferred_engram_tables
 
 if typing.TYPE_CHECKING:
     from vllm.v1.attention.backends.mla.sparse_swa import DeepseekSparseSWAMetadata
@@ -113,6 +113,9 @@ class DeepseekV4MoE(DeepseekV4MoEBase):
         )
 
 
+_D41_BE_LOGGED = False
+
+
 def _select_dsv4_attn_cls(vllm_config: VllmConfig) -> type[DeepseekV4Attention]:
     """Pick the CUDA sparse-MLA attention class for the configured backend.
 
@@ -120,9 +123,52 @@ def _select_dsv4_attn_cls(vllm_config: VllmConfig) -> type[DeepseekV4Attention]:
     so map generic sparse-MLA choices to the DSv4-specialized attention class.
     Without an explicit backend, SM12 defaults to FlashInfer while the other
     CUDA arches keep the FlashMLA path.
+
+    The choice is anchored to the group's *floor* capability: the class decides
+    which kernel family runs, and the page geometry that family needs is
+    published once for the whole TP group. Answering per rank would have the
+    SM12x ranks run FlashInfer against geometry the SM8x ranks negotiated (or
+    the SM8x ranks call sm90+ CUDA kernels the group's own decision ruled out).
+    A group that is neither arch-uniform nor sm8x-capable has no common route,
+    so it is rejected here instead of faulting inside a kernel later.
     """
     backend = vllm_config.attention_config.backend
     device_capability = current_platform.get_device_capability()
+    floor = current_platform.group_capability_floor()
+    floor_family = -1 if floor is None else floor.to_int() // 10
+    rank_family = -1 if device_capability is None else device_capability.to_int() // 10
+    if floor_family >= 9 and rank_family != floor_family:
+        raise ValueError(
+            "DeepSeek V4.1 sparse MLA has no kernel path common to this tensor "
+            f"parallel group: the group floor is sm_{floor_family * 10}x but this "
+            f"rank is sm_{rank_family * 10}x. Run a homogeneous TP group, or put "
+            "an SM8x card in the group so every rank shares the SM8x Triton path."
+        )
+    global _D41_BE_LOGGED
+    if not _D41_BE_LOGGED:
+        _D41_BE_LOGGED = True
+        _chosen = (
+            "FLASHMLA(trtllm)" if backend in (
+                AttentionBackendEnum.FLASHMLA_SPARSE,
+                AttentionBackendEnum.FLASHMLA_SPARSE_DSV4,
+                AttentionBackendEnum.FLASHMLA_SPARSE_DSV41,
+            ) else "FLASHINFER-sm120" if (
+                backend in (
+                    AttentionBackendEnum.FLASHINFER_MLA_SPARSE_DSV4,
+                    AttentionBackendEnum.FLASHINFER_MLA_SPARSE_DSV41,
+                )
+                or (backend is None and floor_family == 12)
+            ) else "FLASHMLA-SM8x(triton)" if floor_family == 8
+            else "FLASHMLA(default)"
+        )
+        logger.warning(
+            "PATH_BE backend=%s cap=%s floor=%s -> %s",
+            getattr(backend, "name", repr(backend)),
+            None if device_capability is None
+            else (device_capability.major, device_capability.minor),
+            None if floor is None else (floor.major, floor.minor),
+            _chosen,
+        )
     if backend in (
         AttentionBackendEnum.FLASHINFER_MLA_SPARSE,
         AttentionBackendEnum.FLASHINFER_MLA_SPARSE_SM120,
@@ -136,7 +182,7 @@ def _select_dsv4_attn_cls(vllm_config: VllmConfig) -> type[DeepseekV4Attention]:
         AttentionBackendEnum.FLASHINFER_MLA_SPARSE_DSV4,
         AttentionBackendEnum.FLASHINFER_MLA_SPARSE_DSV41,
     ):
-        if device_capability is not None and device_capability.major == 12:
+        if floor_family == 12:
             return DeepseekV4FlashInferSM120Attention
         return DeepseekV4FlashInferMLAAttention
     if backend in (
@@ -146,7 +192,7 @@ def _select_dsv4_attn_cls(vllm_config: VllmConfig) -> type[DeepseekV4Attention]:
     ):
         return DeepseekV4FlashMLAAttention
 
-    if device_capability is not None and device_capability.major == 12:
+    if floor_family == 12:
         return DeepseekV4FlashInferSM120Attention
     return DeepseekV4FlashMLAAttention
 
@@ -177,6 +223,7 @@ class DeepseekV4DecoderLayer(nn.Module):
         config = vllm_config.model_config.hf_config
         self.hidden_size = config.hidden_size
         self.use_sequence_parallel = _use_sequence_parallel(vllm_config)
+        self._probe_layer_id = extract_layer_index(prefix)
 
         self.engram: Engram | None = None
         if engram_layout is not None:
@@ -364,9 +411,13 @@ class DeepseekV4DecoderLayer(nn.Module):
         if self.use_sequence_parallel:
             x = sp_all_gather(x)[: positions.shape[0]]
 
+        from ..common.ops.stat_probe import stat_probe_once
+
+        stat_probe_once(f"L{self._probe_layer_id}.attn_in", x)
         x = self.attn(positions, x, None)
         if self.use_sequence_parallel:
             x = sp_reduce_scatter(x)
+        stat_probe_once(f"L{self._probe_layer_id}.attn_out", x)
 
         residual = mhc_post_tilelang(x, residual, post_mix, res_mix)
         post_mix, res_mix, x, ffn_pre = mhc_pre_delayed_tilelang(
@@ -383,7 +434,9 @@ class DeepseekV4DecoderLayer(nn.Module):
             norm_weight=self.ffn_norm.weight,
             norm_eps=self.ffn_norm.variance_epsilon,
         )
+        stat_probe_once(f"L{self._probe_layer_id}.ffn_in", x)
         x = self.ffn(x, input_ids)
+        stat_probe_once(f"L{self._probe_layer_id}.moe_out", x)
         return x, residual, post_mix, res_mix, ffn_pre
 
 
@@ -551,6 +604,10 @@ class DeepseekV4Model(nn.Module, EagleModelMixin):
         else:
             assert intermediate_tensors is not None
             hidden_states = intermediate_tensors["hidden_states"]
+
+        from ..common.ops.stat_probe import stat_probe_once as _sp
+
+        _sp("embed_out", hidden_states)
 
         if self.use_mega_moe:
             input_ids = input_ids.to(torch.int64)
@@ -1116,6 +1173,16 @@ class DeepseekV41LLMForCausalLM(
         loaded_params = loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)
         self.process_weights_after_loading()
         return loaded_params
+
+    # The huge engram hash tables are skipped by the main sweep (read
+    # pre-filter in the safetensors iterator) and loaded by a dedicated
+    # post-load pass; see process_weights_after_loading / nvidia/engram.py.
+    weight_load_skip_patterns = (re.compile(r"engram\.embed\.(weight|scale)$"),)
+
+    def load_deferred_weights(self, model_config) -> None:
+        load_deferred_engram_tables(
+            self, model_config.model, self.weight_load_skip_patterns
+        )
 
     def process_weights_after_loading(self) -> None:
         self.model.finalize_mega_moe_weights()

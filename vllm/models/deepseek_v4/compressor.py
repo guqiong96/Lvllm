@@ -28,6 +28,7 @@ from vllm.v1.attention.backend import (
     CommonAttentionMetadata,
     MultipleOf,
 )
+from vllm.v1.attention.ops.flashmla import sm8x_sparse_mla_enabled
 from vllm.v1.attention.backends.utils import split_decodes_and_prefills
 from vllm.v1.kv_cache_interface import (
     KVCacheSpec,
@@ -317,7 +318,11 @@ class DeepseekCompressor(nn.Module):
                 head_dim=self.head_dim,
                 compress_ratio=self.compress_ratio,
             )
-            if current_platform.is_cuda() and self.head_dim == 512:
+            if (
+                current_platform.is_cuda()
+                and self.head_dim == 512
+                and not sm8x_sparse_mla_enabled()
+            ):
                 from vllm.models.deepseek_v4.nvidia.ops.sparse_attn_compress_cutedsl import (  # noqa: E501
                     _SPARSE_ATTN_COMPRESS_C128_BLOCK8_KERNEL,
                     _SPARSE_ATTN_COMPRESS_NORM_ROPE_STORE_C4_KERNEL,
@@ -443,7 +448,11 @@ class DeepseekCompressor(nn.Module):
         # cutedsl (head=512) accepts the full-cache flags; triton (indexer/AMD)
         # does not, so the two callables have different signatures.
         compress_norm_rope_store_fn: Any
-        if current_platform.is_cuda() and self.head_dim == 512:
+        if (
+            current_platform.is_cuda()
+            and self.head_dim == 512
+            and not sm8x_sparse_mla_enabled()
+        ):
             from .nvidia.ops.sparse_attn_compress_cutedsl import (
                 _SPARSE_ATTN_COMPRESSOR_CUTEDSL_KERNEL,
             )

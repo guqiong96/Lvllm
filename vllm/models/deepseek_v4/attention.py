@@ -447,7 +447,11 @@ class DeepseekV4Attention(nn.Module, AttentionLayerBase, ABC):
                     )
 
                     _COMPUTE_GLOBAL_TOPK_INDICES_AND_LENS_KERNEL.register_warmup()
-                    if has_cutedsl():
+                    from vllm.model_executor.layers.quantization.utils.fp8_emulate import (  # noqa: E501
+                        fp8_native_supported,
+                    )
+
+                    if has_cutedsl() and fp8_native_supported():
                         from vllm.models.deepseek_v4.nvidia.ops.dequant_gather_k_cutedsl import (  # noqa: E501
                             _DEQUANT_GATHER_K_CACHE_CUTEDSL_KERNEL,
                         )
@@ -943,7 +947,15 @@ class DeepseekV4Indexer(nn.Module):
         if vllm_config.kernel_config.enable_jit_warmup:
             from vllm.utils.import_utils import has_cutedsl
 
-            if current_platform.is_cuda() and has_cutedsl():
+            from vllm.model_executor.layers.quantization.utils.fp8_emulate import (
+                fp8_native_supported,
+            )
+
+            if (
+                current_platform.is_cuda()
+                and has_cutedsl()
+                and fp8_native_supported()
+            ):
                 from vllm.models.deepseek_v4.nvidia.ops.fused_indexer_q_cutedsl import (  # noqa: E501
                     _INDEXER_Q_FP8_KERNEL,
                     _INDEXER_Q_MXFP4_KERNEL,
@@ -1039,7 +1051,12 @@ class DeepseekV4Indexer(nn.Module):
         if vllm_config.kernel_config.enable_jit_warmup:
             from vllm.utils.import_utils import has_cutedsl
 
-            if not has_cutedsl() and not current_platform.is_xpu():
+            from vllm.model_executor.layers.quantization.utils.fp8_emulate import (
+                fp8_native_supported,
+            )
+
+            triton_indexer_q = not has_cutedsl() or not fp8_native_supported()
+            if triton_indexer_q and not current_platform.is_xpu():
                 from vllm.models.deepseek_v4.common.ops.fused_indexer_q import (
                     _FUSED_INDEXER_Q_ROPE_MXFP4_TRITON_KERNEL,
                     _FUSED_INDEXER_Q_ROPE_QUANT_TRITON_KERNEL,

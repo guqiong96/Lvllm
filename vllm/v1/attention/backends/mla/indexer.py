@@ -23,6 +23,7 @@ from vllm.triton_utils import tl, triton
 from vllm.utils.deep_gemm import (
     get_paged_mqa_logits_metadata,
     has_deep_gemm,
+    is_deep_gemm_supported,
     native_next_n_supported,
 )
 from vllm.utils.platform_utils import num_compute_units
@@ -64,12 +65,23 @@ def dsa_indexer_uses_fp4(vllm_config: VllmConfig) -> bool:
             f"sparse indexer (expected one of {DSA_INDEXER_KV_DTYPES})."
         )
     use_fp4 = kv_dtype == "mxfp4"
-    if use_fp4 and not current_platform.is_device_capability_family(100):
-        raise ValueError(
-            "indexer_kv_dtype='mxfp4' requires Blackwell datacenter GPUs "
-            "(sm_10x, e.g. B200/GB200); sm_120 (consumer Blackwell) and "
-            "earlier architectures are not supported."
-        )
+    if use_fp4:
+        # The MXFP4 indexer needs the packed FP4 conversion
+        # (cvt.rn.satfinite.e2m1x2.f32), available on Blackwell datacenter
+        # (sm_10x) and consumer (sm_12x) as an arch-accelerated/family feature.
+        # The CuTeDSL index-q kernel targets sm_1xxa (the cutlass DSL appends
+        # "a" for major>=9), so sm_120/sm_121 compile it (verified). is_family
+        # compares major only, so family(120) covers both sm_120 and sm_121.
+        # Mirrors sglang's enable_deepseek_v4_fp4_indexer gated by is_sm120.
+        if not (
+            current_platform.is_device_capability_family(100)
+            or current_platform.is_device_capability_family(120)
+        ):
+            raise ValueError(
+                "indexer_kv_dtype='mxfp4' requires Blackwell GPUs (sm_10x "
+                "datacenter or sm_12x consumer, e.g. B200/GB200/RTX 50); "
+                "earlier architectures are not supported."
+            )
     return use_fp4
 
 
@@ -260,6 +272,16 @@ class DeepseekV41IndexerBackend(DeepseekV4IndexerBackend):
 
     @staticmethod
     def get_supported_kernel_block_sizes() -> list[int | MultipleOf]:
+        if (
+            current_platform.is_device_capability_family(120)
+            or current_platform.is_device_capability_family(121)
+        ):
+            # v4.1 pins indexer caches per group to 64 * compress_ratio tokens
+            # so the paged-MQA kernel always sees a 64-row page (DeepGEMM on
+            # arch 12 + fp8 requires block_kv == 64). Accept any 64-multiple so
+            # the kernel page equals the storage page (no physical split, which
+            # the packed BLHNC layout cannot do).
+            return [MultipleOf(64)]
         return [64 if current_platform.is_device_capability_family(90) else 128]
 
 
@@ -709,6 +731,21 @@ def _supports_varlen_paged_mqa_logits() -> bool:
     )
 
 
+def _should_build_paged_mqa_logits_metadata(num_states: int) -> bool:
+    """Whether decode should fill DeepGEMM paged-MQA schedule metadata.
+
+    ``has_deep_gemm()`` is only "the package imported". The metadata helper
+    asserts 32 or 64 states (Hopper/Blackwell pages). A page whose
+    ``num_states`` resolves outside ``{32, 64}`` (e.g. a compress-128 page ->
+    2 states) trips that host assert, so only fill it for supported pages.
+    """
+    return (
+        current_platform.is_cuda()
+        and is_deep_gemm_supported()
+        and num_states in (32, 64)
+    )
+
+
 def _supports_flattened_device_query_lens() -> bool:
     return (
         current_platform.is_cuda()
@@ -721,12 +758,24 @@ def _supports_native_decode(next_n: int) -> bool:
     """Whether decode can pass `next_n` Q rows per request to the kernel
     instead of flattening to one single-token row per query, which re-reads
     the KV tile once per row.
+
+    Group-floor anchored: the answer selects the metadata layout and the CUDA
+    graph support level, both of which must be identical on every rank of a TP
+    group (a fork here means different capture iterations per rank). The weakest
+    card decides, so a mixed sm86+sm120 group flattens everywhere instead of
+    half the ranks replaying a different graph set.
     """
     if not (current_platform.is_cuda() and has_deep_gemm()):
         return next_n in (1, 2)
-    if current_platform.is_device_capability_family(100):
+    floor = current_platform.group_capability_floor()
+    family = -1 if floor is None else floor.to_int() // 10
+    if family == 10:
         return True
-    if current_platform.is_device_capability_family(90):
+    if family == 9:
+        return native_next_n_supported(next_n)
+    if family == 12:
+        # SM120 paged-MQA schedules any next_n via multi-atom tiles,
+        # like SM100; the wrapper's native_next_n_supported says True.
         return native_next_n_supported(next_n)
     return next_n in (1, 2)
 
@@ -866,21 +915,19 @@ class DeepseekV32IndexerMetadataBuilder(AttentionMetadataBuilder):
                 f"(compress_ratio={self.compress_ratio})."
             )
 
-        # Pre-allocate buffers for CUDA graph compatibility when
-        if self.compress_ratio > 1:
-            # compress_ratio > 1 (DeepseekV4)
-            # Compressed slot mapping output buffer
-            self.compressed_slot_mapping_buffer = torch.zeros(
-                (scheduler_config.max_num_batched_tokens,),
-                dtype=torch.int64,
-                device=self.device,
-            )
-            # Buffer for compressed seq_lens in decode path
-            self.expanded_seq_lens_buffer = torch.zeros(
-                (scheduler_config.max_num_batched_tokens,),
-                dtype=torch.int32,
-                device=self.device,
-            )
+        # Pre-allocate buffers for CUDA graph compatibility. The logical kernel
+        # page size is selected after builder construction, so ratio-1 layers
+        # can also need the remapped slot buffer.
+        self.compressed_slot_mapping_buffer = torch.zeros(
+            (scheduler_config.max_num_batched_tokens,),
+            dtype=torch.int64,
+            device=self.device,
+        )
+        self.expanded_seq_lens_buffer = torch.zeros(
+            (scheduler_config.max_num_batched_tokens,),
+            dtype=torch.int32,
+            device=self.device,
+        )
         self.indexer_decode_block_table_buffer: torch.Tensor | None = None
         self._max_num_batched_tokens = scheduler_config.max_num_batched_tokens
 
@@ -1175,15 +1222,22 @@ class DeepseekV32IndexerMetadataBuilder(AttentionMetadataBuilder):
         compressed_slot_mapping = slot_mapping
         compressed_seq_lens = seq_lens
         indexer_block_table = block_table
-        if self.compress_ratio > 1:
-            kernel_block_size = self.kernel_block_size
-            if (
-                kernel_block_size is not None
-                and self.kv_cache_spec.block_size != kernel_block_size
-                and self.kv_cache_spec.block_size % kernel_block_size == 0
-            ):
-                factor = self.kv_cache_spec.block_size // kernel_block_size
-                indexer_block_table = (block_table[:, ::factor] // factor).contiguous()
+        kernel_block_size = self.kernel_block_size or self.kv_cache_spec.block_size
+        if self.kv_cache_spec.block_size % kernel_block_size != 0:
+            raise ValueError(
+                "Indexer kernel block size must divide the storage block size: "
+                f"storage={self.kv_cache_spec.block_size}, "
+                f"kernel={kernel_block_size}."
+            )
+        block_factor = self.kv_cache_spec.block_size // kernel_block_size
+        if block_factor > 1:
+            # Split storage pages into the smaller logical pages required by the
+            # indexer kernel. This is needed for ratio-1 layers on SM12x too.
+            indexer_block_table = (
+                block_table[:, ::block_factor] // block_factor
+            ).contiguous()
+
+        if self.compress_ratio > 1 or block_factor > 1:
             padded_num_tokens = num_tokens
             if self.pcp_world_size > 1:
                 padded_num_tokens = slot_mapping.shape[0] // self.pcp_world_size
@@ -1192,7 +1246,7 @@ class DeepseekV32IndexerMetadataBuilder(AttentionMetadataBuilder):
                 query_start_loc,
                 seq_lens,
                 indexer_block_table,
-                self.kv_cache_spec.num_states,
+                kernel_block_size // self.compress_ratio,
                 self.compress_ratio,
                 out=self.compressed_slot_mapping_buffer,
             )
@@ -1412,26 +1466,17 @@ class DeepseekV32IndexerMetadataBuilder(AttentionMetadataBuilder):
                     )
                 )
 
-            if self.compress_ratio > 1:
-                kernel_block_size = self.kernel_block_size
-                if (
-                    kernel_block_size is not None
-                    and self.kv_cache_spec.block_size != kernel_block_size
-                    and self.kv_cache_spec.block_size % kernel_block_size == 0
-                ):
-                    factor = self.kv_cache_spec.block_size // kernel_block_size
-                    compressed = block_table[:, ::factor] // factor
-                    rows, cols = compressed.shape
-                    if self.indexer_decode_block_table_buffer is None:
-                        self.indexer_decode_block_table_buffer = torch.zeros(
-                            (self._max_num_batched_tokens, cols),
-                            dtype=torch.int32,
-                            device=self.device,
-                        )
-                    self.indexer_decode_block_table_buffer[:rows, :cols].copy_(
-                        compressed
+            if block_factor > 1:
+                compressed = block_table[:, ::block_factor] // block_factor
+                rows, cols = compressed.shape
+                if self.indexer_decode_block_table_buffer is None:
+                    self.indexer_decode_block_table_buffer = torch.zeros(
+                        (self._max_num_batched_tokens, cols),
+                        dtype=torch.int32,
+                        device=self.device,
                     )
-                    block_table = self.indexer_decode_block_table_buffer[:rows, :cols]
+                self.indexer_decode_block_table_buffer[:rows, :cols].copy_(compressed)
+                block_table = self.indexer_decode_block_table_buffer[:rows, :cols]
 
             # Flattening always returns a buffer view, including single-token
             # batches. Keep its address stable across varlen graph replays.
@@ -1464,12 +1509,14 @@ class DeepseekV32IndexerMetadataBuilder(AttentionMetadataBuilder):
             if seq_lens.dim() == 1:
                 seq_lens = seq_lens.unsqueeze(-1)
 
-            # DeepGEMM is required for the paged MQA logits on CUDA devices
+            # DeepGEMM paged MQA metadata helper asserts 32 or 64 states; the
+            # effective block is the kernel page split by the compress ratio.
             schedule_metadata = self.scheduler_metadata_buffer
-            if current_platform.is_cuda() and has_deep_gemm():
+            paged_mqa_block = kernel_block_size // self.compress_ratio
+            if _should_build_paged_mqa_logits_metadata(paged_mqa_block):
                 metadata = get_paged_mqa_logits_metadata(
                     seq_lens,
-                    self.kv_cache_spec.num_states,
+                    paged_mqa_block,
                     self.num_sms,
                     indices=decode_indices,
                 )

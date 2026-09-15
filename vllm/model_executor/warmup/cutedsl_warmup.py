@@ -104,6 +104,12 @@ def cutedsl_warmup() -> None:
         logger.debug("Skipping CuTeDSL warmup because no compile units were requested.")
         return
 
+    # Legacy providers call cute.compile directly, so they never pass through
+    # compile_cutedsl(); pin once here or they inherit dev0's arch.
+    from vllm.utils.cutedsl_arch import pin_cutedsl_arch
+
+    pin_cutedsl_arch()
+
     logger.info_once(
         "Warming up CuTeDSL compile_units=%d names=%s.",
         len(compile_units),

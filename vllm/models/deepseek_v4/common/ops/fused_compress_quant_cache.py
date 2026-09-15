@@ -26,6 +26,10 @@ from typing import Any
 
 import torch
 
+from vllm.model_executor.layers.quantization.utils.fp8_emulate import (
+    f32_to_e4m3fn_u8,
+    fp8_native_supported,
+)
 from vllm.model_executor.warmup.jit_warmup import kernel_launcher
 from vllm.model_executor.warmup.jit_warmup_triton_helper import (
     LaunchSpec,
@@ -138,6 +142,7 @@ def compress_norm_rope_store_triton(
         TOKEN_STRIDE=token_stride,
         SCALE_DIM=scale_dim,
         KV_BLOCK_STRIDE=kv_cache.stride(0),
+        emulate_fp8=not fp8_native_supported(),
         num_warps=num_warps,
         **kernel_kwargs,
         **pdl_kwargs,
@@ -183,6 +188,7 @@ def _fused_kv_compress_norm_rope_insert_sparse_attn(
     SCALE_DIM: tl.constexpr,  # 8 for DeepseekV4 (7 real + 1 pad)
     KV_BLOCK_STRIDE: tl.constexpr,
     SANITIZE_CACHE_NANS: tl.constexpr,
+    emulate_fp8: tl.constexpr = False,
 ):
     """Fused compress → RMSNorm → FP8 quant (nope) → RoPE → bf16 store (rope).
 
@@ -290,8 +296,12 @@ def _fused_kv_compress_norm_rope_insert_sparse_attn(
     inv_scales_col = tl.reshape(inv_scales, (N_QUANT_BLOCKS, 1))
     x_scaled = quant_2d * inv_scales_col
     x_clamped = tl.clamp(x_scaled, -FP8_MAX, FP8_MAX)
-    x_fp8 = x_clamped.to(tl.float8e4nv)
-    x_uint8 = x_fp8.to(tl.uint8, bitcast=True)
+    # SM8x Triton cannot name fp8e4nv: encode the byte bit-wise (RNE, identical).
+    if emulate_fp8:
+        x_uint8 = f32_to_e4m3fn_u8(x_clamped)
+    else:
+        x_fp8 = x_clamped.to(tl.float8e4nv)
+        x_uint8 = x_fp8.to(tl.uint8, bitcast=True)
     x_uint8_flat = tl.reshape(x_uint8, (TRITON_BLOCK_SIZE,))
 
     nope_mask = block < NOPE_HEAD_DIM
@@ -459,6 +469,7 @@ def _finalize_norm_rope_quant_store_sparse_attn(
     SCALE_DIM: tl.constexpr,
     KV_BLOCK_STRIDE: tl.constexpr,
     SANITIZE_CACHE_NANS: tl.constexpr,
+    emulate_fp8: tl.constexpr = False,
 ):
     """Stage 2: read compressed_kv[512] from scratch buffer, then
     RMSNorm + FP8 quant (nope) + RoPE + bf16 store
@@ -509,10 +520,14 @@ def _finalize_norm_rope_quant_store_sparse_attn(
     inv_scales = tl.exp2(-exponents)
     x_scaled = quant_2d * tl.reshape(inv_scales, (N_QUANT_BLOCKS, 1))
     x_clamped = tl.clamp(x_scaled, -FP8_MAX, FP8_MAX)
-    x_uint8 = tl.reshape(
-        x_clamped.to(tl.float8e4nv).to(tl.uint8, bitcast=True),
-        (TRITON_BLOCK_SIZE,),
-    )
+    # SM8x Triton cannot name fp8e4nv: encode the byte bit-wise (RNE, identical).
+    if emulate_fp8:
+        x_uint8 = tl.reshape(f32_to_e4m3fn_u8(x_clamped), (TRITON_BLOCK_SIZE,))
+    else:
+        x_uint8 = tl.reshape(
+            x_clamped.to(tl.float8e4nv).to(tl.uint8, bitcast=True),
+            (TRITON_BLOCK_SIZE,),
+        )
     tl.store(fp8_ptr + block, x_uint8, mask=block < NOPE_HEAD_DIM)
 
     scale_idx = tl.arange(0, N_QUANT_BLOCKS)
@@ -610,6 +625,7 @@ def _launch_two_stage_sparse_attn_compressor(
         SCALE_DIM=scale_dim,
         KV_BLOCK_STRIDE=kv_cache.stride(0),
         SANITIZE_CACHE_NANS=_ON_GFX950,
+        emulate_fp8=not fp8_native_supported(),
     )
 
 
@@ -743,6 +759,7 @@ def _fused_kv_compress_norm_rope_insert_indexer_attn(
     TOKEN_STRIDE: tl.constexpr,  # 128 for indexer
     SCALE_DIM: tl.constexpr,  # 4 for indexer (1 float32)
     KV_BLOCK_STRIDE: tl.constexpr,
+    emulate_fp8: tl.constexpr = False,
 ):
     """Fused compress → RMSNorm → RoPE → FP8 quant → store.
 
@@ -872,8 +889,12 @@ def _fused_kv_compress_norm_rope_insert_indexer_attn(
 
     x_scaled = result_bf16 * inv_scale
     x_clamped = tl.clamp(x_scaled, -FP8_MAX, FP8_MAX)
-    x_fp8 = x_clamped.to(tl.float8e4nv)
-    x_uint8 = x_fp8.to(tl.uint8, bitcast=True)
+    # SM8x Triton cannot name fp8e4nv: encode the byte bit-wise (RNE, identical).
+    if emulate_fp8:
+        x_uint8 = f32_to_e4m3fn_u8(x_clamped)
+    else:
+        x_fp8 = x_clamped.to(tl.float8e4nv)
+        x_uint8 = x_fp8.to(tl.uint8, bitcast=True)
 
     tl.store(fp8_ptr + block, x_uint8, mask=mask)
 
@@ -928,6 +949,7 @@ def _fused_kv_compress_norm_rope_insert_indexer_mxfp4_attn(
     TOKEN_STRIDE: tl.constexpr,  # HEAD_SIZE // 2 = 64 packed bytes/token
     SCALE_DIM: tl.constexpr,  # HEAD_SIZE // QUANT_BLOCK = 4 ue8m0 bytes/token
     KV_BLOCK_STRIDE: tl.constexpr,
+    emulate_fp8: tl.constexpr = False,  # unused for MXFP4 (signature parity)
 ):
     """Fused compress → RMSNorm → RoPE → MXFP4 quant → store.
 
@@ -1249,6 +1271,7 @@ class FusedKVCompressNormRopeInsertIndexerTritonKernel(
             quant_block=compile_key.quant_block,
             token_stride=compile_key.token_stride,
             scale_dim=compile_key.scale_dim,
+            emulate_fp8=not fp8_native_supported(),
         )
 
     @kernel_launcher
@@ -1277,7 +1300,12 @@ class FusedKVCompressNormRopeInsertIndexerTritonKernel(
         quant_block: int,
         token_stride: int,
         scale_dim: int,
+        emulate_fp8: bool | None = None,
     ) -> LaunchSpec:
+        if emulate_fp8 is None:
+            # Warmup passes the value explicitly; runtime callers rely on the
+            # implicit probe. None keeps both paths on the same expression.
+            emulate_fp8 = not fp8_native_supported()
         return (num_actual,), dict(
             kernel=(
                 _fused_kv_compress_norm_rope_insert_indexer_mxfp4_attn
@@ -1302,6 +1330,7 @@ class FusedKVCompressNormRopeInsertIndexerTritonKernel(
             TOKEN_STRIDE=token_stride,
             SCALE_DIM=scale_dim,
             KV_BLOCK_STRIDE=kv_cache.stride(0),
+            emulate_fp8=emulate_fp8,
             num_warps=1,
             **pdl_kwargs,
         )

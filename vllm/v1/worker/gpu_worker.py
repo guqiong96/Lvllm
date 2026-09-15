@@ -420,6 +420,13 @@ class Worker(WorkerBase):
             self.device = torch.device(f"cuda:{visible_device_index}")
             torch.accelerator.set_device_index(self.device)
 
+            # Pin CuTeDSL's compile arch while cutlass is still unimported, so
+            # the DSL builds its singleton with this rank's arch instead of
+            # probing visible device 0 (mixed-arch TP groups differ per rank).
+            from vllm.utils.cutedsl_arch import pin_cutedsl_arch
+
+            pin_cutedsl_arch()
+
             current_platform.check_if_supports_dtype(self.model_config.dtype)
 
             # Initialize the distributed environment BEFORE taking

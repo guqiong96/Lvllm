@@ -31,7 +31,16 @@ class DeepGemmMxfp8BmmLinearKernel(Mxfp8LinearKernel):
     ) -> tuple[bool, str | None]:
         if not current_platform.is_cuda() or not is_deep_gemm_supported():
             return False, "DeepGEMM BMM requires a supported CUDA device."
-        if not current_platform.is_device_capability_family(100):
+        # Same fp8_einsum the SM120 wo_a path already runs (recipe differs only
+        # in the K group: 32 vs 128); DeepGEMM ships arch 12 einsum cubins and
+        # JITs the rest, so the consumer Blackwell family qualifies too --
+        # mirrors support_deep_gemm() and the dsa_indexer_uses_fp4 gate.
+        # A missing arch12 (1,1,32) cubin fails closed at the first call, not
+        # silently.
+        if not (
+            current_platform.is_device_capability_family(100)
+            or current_platform.is_device_capability_family(120)
+        ):
             return False, "DeepGEMM MXFP8 BMM requires Blackwell."
         return True, None
 

@@ -577,8 +577,10 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
         from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
         from vllm.platforms import current_platform
         device = torch.cuda.current_device() if current_platform.is_cuda_alike() else "cpu"
+        new_tensor = torch.zeros
         if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
             device = "cpu"
+            new_tensor = torch.empty
         self.num_experts = num_experts
         weight_dtype = torch.uint8
         scale_dtype = torch.uint8
@@ -593,7 +595,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
 
         # Fused gate_up_proj (column parallel)
         w13_weight = torch.nn.Parameter(
-            torch.zeros(
+            new_tensor(
                 num_experts,
                 self.moe.w13_num_shards * intermediate_size_per_partition,
                 hidden_size // 2,
@@ -607,7 +609,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
         set_weight_attrs(w13_weight, {"weight_loader": weight_loader})
 
         w13_weight_scale = torch.nn.Parameter(
-            torch.zeros(
+            new_tensor(
                 num_experts,
                 self.moe.w13_num_shards * intermediate_size_per_partition,
                 hidden_size // mxfp4_block,
@@ -623,7 +625,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
 
         # down_proj (row parallel)
         w2_weight = torch.nn.Parameter(
-            torch.zeros(
+            new_tensor(
                 num_experts,
                 hidden_size,
                 intermediate_size_per_partition // 2,
@@ -637,7 +639,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
         set_weight_attrs(w2_weight, {"weight_loader": weight_loader})
 
         w2_weight_scale = torch.nn.Parameter(
-            torch.zeros(
+            new_tensor(
                 num_experts,
                 hidden_size,
                 intermediate_size_per_partition // mxfp4_block,

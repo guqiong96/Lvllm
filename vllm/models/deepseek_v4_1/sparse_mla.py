@@ -87,7 +87,17 @@ class DeepseekV4SparseMLABackend(AttentionBackend):
 
     @staticmethod
     def get_supported_kernel_block_sizes() -> list[int | MultipleOf]:
-        return [64 if current_platform.is_device_capability_family(90) else 128]
+        # Group-floor anchored: every worker publishes this list, so it must
+        # come out identical on every rank (see Platform.group_capability_floor).
+        floor = current_platform.group_capability_floor()
+        family = -1 if floor is None else floor.to_int() // 10
+        if family == 12:
+            # v4.1 pins each cache group to 64 * compress_ratio tokens on
+            # SM120/121 (see attention._sm120_paged_block_size) so the FlashInfer
+            # decode sees a 64-state page; accept any 64-multiple so the kernel
+            # page equals the storage page (no physical split on BLHNC).
+            return [MultipleOf(64)]
+        return [64 if family == 9 else 128]
 
     @staticmethod
     def get_builder_cls() -> type["DeepseekV4SparseMLAMetadataBuilder"]:
@@ -122,7 +132,10 @@ class DeepseekV4SparseMLABackend(AttentionBackend):
 
     @classmethod
     def supports_compute_capability(cls, capability: DeviceCapability) -> bool:
-        return capability.major in [9, 10]
+        # major==8: sm8x selects this backend for its metadata/KV layout, but
+        # runs attention through the Triton SM80 path in nvidia/flashmla.py
+        # (the FlashMLA CUDA kernels themselves stay sm90+ only).
+        return capability.major in [8, 9, 10]
 
 
 @dataclass

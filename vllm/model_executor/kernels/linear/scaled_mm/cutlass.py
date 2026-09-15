@@ -2,11 +2,13 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 
+import functools
 from collections.abc import Sequence
 
 import torch
 
 from vllm import _custom_ops as ops
+from vllm.logger import init_logger
 from vllm.model_executor.layers.quantization.input_quant_fp8 import QuantFP8
 from vllm.model_executor.layers.quantization.utils import replace_parameter
 from vllm.model_executor.layers.quantization.utils.quant_utils import (
@@ -28,6 +30,51 @@ from .ScaledMMLinearKernel import (
     Int8ScaledMMLinearKernel,
     Int8ScaledMMLinearLayerConfig,
 )
+
+logger = init_logger(__name__)
+
+_strided_guard_hits: set[tuple] = set()
+
+
+@functools.cache
+def _sm120_strided_gemm_bug() -> bool:
+    """vllm#56659: the SM120 blockwise CUTLASS dispatch (c3x .cuh) rebuilds
+    strides from the logical shape and misreads padded/strided views. True
+    whenever the shipped binary predates that fix on family 12.x."""
+    return current_platform.is_device_capability_family(120)
+
+
+_SM120_STRIDED_GEMM_BUG = _sm120_strided_gemm_bug
+
+
+def _sm120_stride_guard_hit(tag: str, t: torch.Tensor) -> None:
+    """Report each distinct strided layout once -- if this ever logs, the
+    SM120 GEMM would have been reading garbage without the guard."""
+    key = (tag, tuple(t.shape), tuple(t.stride()))
+    if key not in _strided_guard_hits:
+        _strided_guard_hits.add(key)
+        logger.warning(
+            "#56659 stride guard: packed SM120 blockwise GEMM operand %s "
+            "shape=%s stride=%s (would silently misread without packing).",
+            tag,
+            key[1],
+            key[2],
+        )
+
+
+def _pack_sm120_operands(
+    A: torch.Tensor, b_t: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Canonicalize to the packed layouts both pre/post-fix kernels agree on."""
+    if A.ndim >= 2 and (A.stride(-1) != 1 or A.stride(-2) != A.shape[-1]):
+        _sm120_stride_guard_hit("A", A)
+        A = A.contiguous()
+    if b_t.stride(0) != 1 or b_t.stride(1) != b_t.shape[0]:
+        _sm120_stride_guard_hit("B.T", b_t)
+        # materialize the column-major [N, K] the dispatch reads (row-major
+        # storage behind a transpose view), not a row-major copy.
+        b_t = b_t.t().contiguous().t()
+    return A, b_t
 
 
 class CutlassInt8ScaledMMLinearKernel(Int8ScaledMMLinearKernel):
@@ -317,9 +364,15 @@ class CutlassFp8BlockScaledMMKernel(Fp8BlockScaledMMLinearKernel):
         Bs: torch.Tensor,
     ) -> torch.Tensor:
         out_dtype = self.config.out_dtype
+        b = B.T
+        if _SM120_STRIDED_GEMM_BUG():
+            # Pack strided views: the SM120 kernel reads them per #56659's
+            # description (shape-rebuilt strides) until the .cuh fix ships;
+            # packed operands behave identically on both builds.
+            A, b = _pack_sm120_operands(A, b)
         return ops.cutlass_scaled_mm(
             A,
-            B.T,
+            b,
             out_dtype=out_dtype,
             scale_a=As,
             scale_b=Bs.T,
@@ -334,9 +387,12 @@ def cutlass_scaled_mm(
     block_size: list[int],
     output_dtype: torch.dtype = torch.float16,
 ) -> torch.Tensor:
+    b = B.T
+    if _SM120_STRIDED_GEMM_BUG():
+        A, b = _pack_sm120_operands(A, b)
     return ops.cutlass_scaled_mm(
         A,
-        B.T,
+        b,
         out_dtype=output_dtype,
         scale_a=As,
         scale_b=Bs.T,

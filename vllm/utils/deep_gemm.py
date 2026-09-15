@@ -149,6 +149,40 @@ def _missing(*_: Any, **__: Any) -> NoReturn:
     )
 
 
+@functools.cache
+def use_sm8x_mqa_fallback() -> bool:
+    """SM 8.x (Ampere/Ada) has no DeepGEMM cubins and no fp8 tensor cores.
+
+    Route the MQA-logits entry points (and their construction-time gates) to
+    the portable Triton/torch SM80 path in
+    ``vllm.models.deepseek_v4.nvidia.ops.sm8x_mqa``.
+    """
+    return (
+        current_platform.is_cuda()
+        and current_platform.has_device_capability(80)
+        and not current_platform.has_device_capability(90)
+    )
+
+
+def use_triton_paged_mqa() -> bool:
+    """Whether the *paged* MQA logits must use the portable Triton rowwise path.
+
+    SM 8.x always does (no DeepGEMM cubins). SM 120 does not need it any more:
+    v4.1 selects a 64-row kernel page on SM12x (see the
+    ``get_supported_kernel_block_sizes`` overrides and the block_factor page
+    split in ``DeepseekV4IndexerMetadataBuilder.build``), which keeps the
+    paged-MQA ``block_kv`` inside DeepGEMM's {32, 64}, so the paged indexer
+    stays on DeepGEMM there.
+    """
+    return use_sm8x_mqa_fallback()
+
+
+def _sm8x_mqa_fallbacks():
+    from vllm.models.deepseek_v4.nvidia.ops import sm8x_mqa
+
+    return sm8x_mqa
+
+
 _cublaslt_gemm_nt_impl: Callable[..., Any] | None = None
 _fp8_gemm_nt_impl: Callable[..., Any] | None = None
 _fp8_einsum_impl: Callable[..., Any] | None = None
@@ -544,6 +578,10 @@ def fp8_fp4_mqa_logits(
     Returns:
         Logits tensor of shape [M, N], dtype `torch.float32`.
     """
+    if q[1] is None and use_sm8x_mqa_fallback():
+        return _sm8x_mqa_fallbacks().fp8_mqa_logits_sm8x(
+            q[0], kv, weights, cu_seqlen_ks, cu_seqlen_ke, clean_logits
+        )
     _lazy_init()
     if _fp8_fp4_mqa_logits_impl is None:
         return _missing()
@@ -599,6 +637,13 @@ def get_paged_mqa_logits_metadata(
         Tensor of shape [slots + 1, 2] consumed by `fp8_fp4_paged_mqa_logits`
         to schedule work across SMs.
     """
+    if use_triton_paged_mqa():
+        # The Triton fallback ignores scheduling; return an empty sentinel so
+        # callers' buffer slicing / copy stay well-defined. Must keep the real
+        # [slots + 1, 2] rank: callers copy it into a 2-D buffer view
+        # (buffer[: metadata.shape[0]]), and a 1-D [0] source cannot broadcast
+        # into a [0, 2] target.
+        return torch.empty((0, 2), dtype=torch.int32, device=context_lens.device)
     _lazy_init()
     if _get_paged_mqa_logits_metadata_impl is None:
         return _missing()
@@ -650,6 +695,18 @@ def fp8_fp4_paged_mqa_logits(
         Logits tensor of shape [B * next_n, max_model_len], dtype
         `torch.float32`.
     """
+    if q[1] is None and use_triton_paged_mqa():
+        # sm8x Triton/torch path; scheduling metadata and the varlen
+        # request-index map are not needed (the rowwise kernel addresses
+        # block_tables/context_lens rows directly).
+        return _sm8x_mqa_fallbacks().fp8_paged_mqa_logits_sm8x(
+            q[0],
+            kv_cache,
+            weights,
+            context_lens,
+            block_tables,
+            max_model_len,
+        )
     _lazy_init()
     if _fp8_fp4_paged_mqa_logits_impl is None:
         return _missing()

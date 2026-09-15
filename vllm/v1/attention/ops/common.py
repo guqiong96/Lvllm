@@ -5,6 +5,9 @@ from typing import Any
 
 import torch
 
+from vllm.model_executor.layers.quantization.utils.fp8_emulate import (
+    fp8_native_supported,
+)
 from vllm.model_executor.warmup.jit_warmup import kernel_launcher
 from vllm.model_executor.warmup.jit_warmup_triton_helper import (
     LaunchSpec,
@@ -12,6 +15,11 @@ from vllm.model_executor.warmup.jit_warmup_triton_helper import (
     VllmTritonJitKernel,
 )
 from vllm.triton_utils import tl, triton
+
+# Byte the satfinite fp32->e4m3 cast stores for a -inf pad slot (-448.0);
+# downstream logits kernels mask padded slots, the value only matters for
+# byte-identity with the fp8-native target's pad.
+_FP8_NEG_MAX_BYTE = 254
 
 
 class PackSeqTritonKernel(VllmTritonJitKernel["PackSeqTritonKernel.CompileKey"]):
@@ -180,13 +188,21 @@ def pack_seq_triton(
         packed: [B, Lmax, ...] — packed tensor.
     """
     is_uint8 = x.dtype == torch.uint8
+    # Triton below SM89 cannot name fp8e4nv (pointer included): pack the raw
+    # bytes through the uint8 path instead and restore the dtype view at the
+    # end. Padded slots get the satfinite-cast byte of ``-inf`` (-448.0) so
+    # the result is byte-identical to what an fp8-native target stores.
+    emulate_fp8 = x.dtype == torch.float8_e4m3fn and not fp8_native_supported()
     if is_uint8:
         assert isinstance(pad_value, int) and 0 <= pad_value <= 255, (
             f"uint8 pack requires an integer pad in [0, 255], got {pad_value!r}"
         )
         pad_constexpr: int | float = int(pad_value)
+    elif emulate_fp8:
+        pad_constexpr = _FP8_NEG_MAX_BYTE
     else:
         pad_constexpr = float(pad_value)
+    kernel_dtype = torch.uint8 if is_uint8 or emulate_fp8 else x.dtype
 
     # Handle multi-dimensional input by reshaping to (N, -1)
     original_shape = x.shape
@@ -197,11 +213,13 @@ def pack_seq_triton(
     else:
         N, D = x.shape
         x_reshaped = x
+    if emulate_fp8:
+        x_reshaped = x_reshaped.view(torch.uint8)
 
-    B = lengths.numel()
+    B = lengths.shape[0]
     Lmax = int(lengths.max().item())
 
-    out = torch.empty((B, Lmax, D), device=x.device, dtype=x.dtype)
+    out = torch.empty((B, Lmax, D), device=x.device, dtype=kernel_dtype)
 
     lengths = lengths.int()
     _PACK_SEQ_TRITON_KERNEL(
@@ -212,13 +230,16 @@ def pack_seq_triton(
         D=D,
         Lmax=Lmax,
         pad_value=pad_constexpr,
-        pad_is_uint8=is_uint8,
+        pad_is_uint8=is_uint8 or emulate_fp8,
         block_t=block_t,
         block_d=block_d,
     )
 
     if len(original_shape) > 2:
         out = out.reshape((B, Lmax) + original_shape[1:])
+
+    if emulate_fp8:
+        out = out.view(torch.float8_e4m3fn)
 
     return out
 

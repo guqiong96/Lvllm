@@ -155,11 +155,15 @@ if TYPE_CHECKING:
     VLLM_ENABLE_V1_MULTIPROCESSING: bool = True
     VLLM_LOG_BATCHSIZE_INTERVAL: float = -1
     VLLM_PLE_CPU_OFFLOAD: bool = True
+    VLLM_ENGRAM_DROP_PAGE_CACHE: bool = True
+    VLLM_ENGRAM_DEFER_HOST_FILL: bool = True
+    VLLM_DSV41_SM120_PATH_CHECKS: bool = False
     # Log a per-spec breakdown of the startup KV-size check (needed vs available
     # and which spec family dominates it). Default off.
     VLLM_KV_SIZE_DEBUG: bool = False
-    VLLM_ENGRAM_DROP_PAGE_CACHE: bool = True
-    VLLM_ENGRAM_DEFER_HOST_FILL: bool = True
+    # Route the SM120 sparse-MLA decode through the SM8x Triton path (reads the
+    # 584B packed pool) for CUDA-vs-Triton cross-validation; default off.
+    VLLM_DSV41_SM8X_CROSSCHECK: bool = False
     VLLM_DISABLE_COMPILE_CACHE: bool = False
     VLLM_REPLICATE_EMBED: bool = False
     VLLM_USE_LAYERNAME: bool = True
@@ -2089,9 +2093,6 @@ environment_variables: dict[str, Callable[[], Any]] = {
     ),
     # Store n-gram embedding tables in pinned CPU memory for UVA lookup.
     "VLLM_PLE_CPU_OFFLOAD": lambda: bool(int(os.getenv("VLLM_PLE_CPU_OFFLOAD", "1"))),
-    # Dump a per-spec KV-size breakdown (needed vs available, grouped by spec
-    # family) when the startup KV check runs. Off by default.
-    "VLLM_KV_SIZE_DEBUG": lambda: bool(int(os.getenv("VLLM_KV_SIZE_DEBUG", "0"))),
     # sglang-style: once per process, drop the checkpoint page cache with
     # posix_fadvise(DONTNEED) before pre-faulting the pinned Engram host
     # table and when the table fill starts, so huge-page/pinned allocation
@@ -2104,6 +2105,19 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # one page-cache drop, so the pinned table faults into freed memory.
     "VLLM_ENGRAM_DEFER_HOST_FILL": lambda: bool(
         int(os.getenv("VLLM_ENGRAM_DEFER_HOST_FILL", "1"))
+    ),
+    # Assert the invariants the DSV4.1 SM120 dispatch paths assume (index rows
+    # prefix-filled + -1 padded, lens <= snapped width, 64-state page).
+    "VLLM_DSV41_SM120_PATH_CHECKS": lambda: bool(
+        int(os.getenv("VLLM_DSV41_SM120_PATH_CHECKS", "0"))
+    ),
+    # Dump a per-spec KV-size breakdown (needed vs available, grouped by spec
+    # family) when the startup KV check runs. Off by default.
+    "VLLM_KV_SIZE_DEBUG": lambda: bool(int(os.getenv("VLLM_KV_SIZE_DEBUG", "0"))),
+    # Cross-validate the SM120 sparse-MLA CUDA decode against the SM8x Triton
+    # path (packed 584B pool reader). Off by default; set to 1 to A/B outputs.
+    "VLLM_DSV41_SM8X_CROSSCHECK": lambda: bool(
+        int(os.getenv("VLLM_DSV41_SM8X_CROSSCHECK", "0"))
     ),
     # Debug logging for --enable-mfu-metrics
     "VLLM_DEBUG_MFU_METRICS": lambda: bool(

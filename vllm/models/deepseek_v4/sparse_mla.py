@@ -93,7 +93,10 @@ class DeepseekV4SparseMLABackend(AttentionBackend):
 
     @classmethod
     def supports_compute_capability(cls, capability: DeviceCapability) -> bool:
-        return capability.major in [9, 10]
+        # major==8: sm8x selects this backend for its metadata/KV layout, but
+        # runs attention through the Triton SM80 path in nvidia/flashmla.py
+        # (the FlashMLA CUDA kernels themselves stay sm90+ only).
+        return capability.major in [8, 9, 10]
 
 
 @dataclass

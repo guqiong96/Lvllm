@@ -131,6 +131,25 @@ class DeviceCapability(NamedTuple):
         return self.major * 10 + self.minor
 
 
+@functools.lru_cache(maxsize=8)
+def _capability_floor_cached(
+    cls: type["Platform"],
+    count: int,
+    current: DeviceCapability,
+) -> DeviceCapability | None:
+    # ``current`` is part of the key so a probe that starts answering
+    # differently (device enumeration, a patched capability in tests) cannot be
+    # shadowed by a floor cached from the old answers.
+    floor: DeviceCapability = current
+    for device_id in range(count):
+        cap = cls.get_device_capability(device_id)
+        if cap is None:
+            return None
+        if cap < floor:
+            floor = cap
+    return floor
+
+
 class Platform:
     _enum: PlatformEnum
     device_name: str
@@ -428,6 +447,27 @@ class Platform:
                 the argument accepted by torch.cuda.
         """
         return None
+
+    @classmethod
+    def group_capability_floor(cls) -> DeviceCapability | None:
+        """Lowest capability among the devices this process may use.
+
+        Capability probes default to visible device 0, so on a TP group that
+        spans architectures the strongest card answers for the weakest. That is
+        harmless for "which kernel can *this* rank run" but fatal for decisions
+        the group must agree on -- KV page geometry and the sparse-MLA route are
+        computed per worker and compared, and a per-rank fork either fails the
+        comparison or silently diverges numerics across ranks. Anchoring those
+        gates to the floor keeps every rank's answer identical while never
+        promising more than the weakest rank can execute. ``None`` means some
+        device is unanswerable, so callers must fail closed.
+        """
+        count_fn = getattr(cls, "device_count", None)
+        count = count_fn() if callable(count_fn) else 1
+        current = cls.get_device_capability()
+        if count < 2 or current is None:
+            return current
+        return _capability_floor_cached(cls, count, current)
 
     @classmethod
     def has_device_capability(

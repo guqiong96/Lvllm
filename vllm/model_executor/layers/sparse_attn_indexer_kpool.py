@@ -22,7 +22,7 @@ elif current_platform.is_rocm():
 else:
     from vllm.models.glm5next.nvidia.ops import kpool_compress as kpool_ops
 
-from vllm.utils.deep_gemm import has_deep_gemm
+from vllm.utils.deep_gemm import has_deep_gemm, use_sm8x_mqa_fallback
 from vllm.utils.torch_utils import (
     LayerNameType,
     _encode_layer_name,
@@ -915,7 +915,11 @@ class SparseAttnIndexerKpool(CustomOp):
         self.topk_indices_buffer = topk_indices_buffer
         self.skip_k_cache_insert = skip_k_cache_insert
         self.use_fp4_cache = use_fp4_cache
-        if current_platform.is_cuda() and not has_deep_gemm():
+        if (
+            current_platform.is_cuda()
+            and not has_deep_gemm()
+            and not use_sm8x_mqa_fallback()
+        ):
             raise RuntimeError(
                 "Sparse Attention Indexer CUDA op requires DeepGEMM to be installed."
             )

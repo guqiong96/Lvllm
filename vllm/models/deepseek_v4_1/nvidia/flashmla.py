@@ -9,6 +9,14 @@ from vllm.forward_context import get_forward_context
 from vllm.models.deepseek_v4.nvidia.ops.o_proj import (
     compute_fp8_einsum_recipe,
     deep_gemm_fp8_o_proj,
+    sm8x_dequant_wo_a_at_load,
+)
+from vllm.models.deepseek_v4.common.ops.sparse_mla_kernels import (
+    sparse_mla_fwd_with_sink,
+)
+from vllm.models.deepseek_v4.nvidia.ops.sm8x_attn import (
+    Sm8xAttnBuffers,
+    sm8x_decode_attention,
 )
 from vllm.models.deepseek_v4_1.attention import DeepseekV4Attention
 from vllm.models.deepseek_v4_1.common.ops import (
@@ -27,8 +35,21 @@ from vllm.v1.attention.backends.mla.sparse_swa import DeepseekSparseSWABackend
 from vllm.v1.attention.ops.flashmla import (
     flash_mla_sparse_fwd,
     flash_mla_with_kvcache,
+    sm8x_sparse_mla_enabled,
 )
 from vllm.v1.worker.workspace import current_workspace_manager
+
+def _is_sm8() -> bool:
+    """SM8x sparse-MLA route for this process, evaluated lazily.
+
+    Not a module-level constant: module import can run before the worker has
+    a settled CUDA context / device assignment, and the floor probe answers
+    differently then -- which forked the load-time wo_a patch (and with it the
+    whole group-must-agree route) to rank 0 only on a mixed-arch TP group.
+    ``sm8x_sparse_mla_enabled()`` is floor-anchored and cached, so every
+    evaluation after ``init_device`` returns the same answer on every rank.
+    """
+    return sm8x_sparse_mla_enabled()
 
 if TYPE_CHECKING:
     from vllm.v1.attention.backends.mla.sparse_swa import DeepseekSparseSWAMetadata
@@ -57,6 +78,8 @@ class DeepseekV4FlashMLAAttention(DeepseekV4Attention):
         self._einsum_recipe, self._tma_aligned_scales = compute_fp8_einsum_recipe(
             self._o_proj_block_size
         )
+        if _is_sm8():
+            sm8x_dequant_wo_a_at_load(self.wo_a)
 
     def _o_proj(self, o: torch.Tensor, positions: torch.Tensor) -> torch.Tensor:
         return deep_gemm_fp8_o_proj(
@@ -222,6 +245,31 @@ class DeepseekV4FlashMLAAttention(DeepseekV4Attention):
         if kv_cache is not None:
             kv_cache = kv_cache.unsqueeze(-2)
 
+        if _is_sm8():
+            # Triton SM80/86 path: single-pass combined dequant of the SWA +
+            # compressed candidates into gathered bf16, then bmm scores +
+            # sink-aware finish. No fp8e4nv types anywhere (uint8 byte-decode
+            # in-kernel), so it compiles on Ampere.
+            if not hasattr(self, "_sm8x_buffers"):
+                self._sm8x_buffers = Sm8xAttnBuffers()
+            sm8x_decode_attention(
+                self._sm8x_buffers,
+                q,
+                swa_cache,
+                swa_indices,
+                swa_lens,
+                swa_metadata.block_size,
+                None if swa_only else kv_cache,
+                None if swa_only else topk_indices,
+                None if swa_only else topk_lens,
+                0 if swa_only else attn_metadata.block_size // self.compress_ratio,
+                self.attn_sink,
+                self.scale,
+                output,
+                self.n_local_heads,
+            )
+            return
+
         # One FlashMLASchedMeta per layer type, shared across all same-type
         # layers within this decode step. The first forward call per type
         # triggers the in-kernel planner (allocating tile_scheduler_metadata
@@ -376,12 +424,27 @@ class DeepseekV4FlashMLAAttention(DeepseekV4Attention):
                 ),
                 max_image_tokens=self.max_image_tokens,
             )
-            flash_mla_sparse_fwd(
-                q=q[query_start:query_end],
-                kv=kv.view(-1, 1, q.shape[-1]),
-                indices=combined_indices.unsqueeze(1),
-                sm_scale=self.scale,
-                attn_sink=self.attn_sink,
-                topk_length=combined_lens,
-                out=output[query_start:query_end],
-            )
+            if _is_sm8():
+                # Triton flash-style sparse prefill over the gathered rows;
+                # same contract as flash_mla_sparse_fwd (flat row ids +
+                # per-query topk_length, -1 = padding).
+                sparse_mla_fwd_with_sink(
+                    q=q[query_start:query_end],
+                    kv=kv.view(-1, q.shape[-1]),
+                    indices=combined_indices,
+                    topk_length=combined_lens,
+                    scale=self.scale,
+                    attn_sink=self.attn_sink,
+                    output=output[query_start:query_end],
+                    num_heads=self.n_local_heads,
+                )
+            else:
+                flash_mla_sparse_fwd(
+                    q=q[query_start:query_end],
+                    kv=kv.view(-1, 1, q.shape[-1]),
+                    indices=combined_indices.unsqueeze(1),
+                    sm_scale=self.scale,
+                    attn_sink=self.attn_sink,
+                    topk_length=combined_lens,
+                    out=output[query_start:query_end],
+                )

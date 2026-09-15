@@ -18,9 +18,28 @@ from vllm.model_executor.warmup.jit_warmup_triton_helper import (
     TritonWarmupTensor,
     VllmTritonJitKernel,
 )
+from vllm.model_executor.layers.quantization.utils.fp8_emulate import (
+    fp8_native_supported,
+    fp8_triton_kernel_target_supported,
+    fp8_triton_target_arch,
+)
 from vllm.platforms import current_platform
 from vllm.triton_utils import tl, triton
+from vllm.triton_utils.device_target import bound_compile_arch
 from vllm.utils.torch_utils import direct_register_custom_op
+
+
+def fp8_quant_target_supported(device_index: int | None = None) -> bool:
+    """Whether this kernel's QUANTIZE variant can compile right now.
+
+    Anchored on the hardware capability of ``device_index`` first: below SM89
+    Triton cannot name ``fp8e4nv`` at all, so no compile-target answer may
+    override that. The target probes then only ever *remove* fp8 (binding or
+    override hazards on heterogeneous boxes).
+    """
+    if not fp8_native_supported(device_index):
+        return False
+    return fp8_triton_kernel_target_supported(_FUSED_INV_ROPE_FP8_QUANT_KERNEL.kernel)
 
 
 class FusedInvRopeFP8QuantKernel(
@@ -90,28 +109,30 @@ class FusedInvRopeFP8QuantKernel(
             tl.extra.cuda.gdc_wait()
         # Padding rows in the TMA-aligned scale buffer: fill with zero and skip quant.
         if pid_token >= num_tokens:
-            if not QUANTIZE:
-                return
-            if TMA_ALIGNED_SCALES:
-                packed_offsets = tl.arange(0, CHUNKS_PER_HEAD // 4)
-                scale_addr = (
-                    scale_ptr
-                    + g * scale_stride_group
-                    + pid_token
-                    + (head_in_group * (CHUNKS_PER_HEAD // 4) + packed_offsets)
-                    * scale_stride_k
-                )
-                tl.store(scale_addr, tl.zeros((CHUNKS_PER_HEAD // 4,), dtype=tl.int32))
-            else:
-                block_offsets = tl.arange(0, CHUNKS_PER_HEAD)
-                qb_indices = qb_start + block_offsets
-                scale_addrs = (
-                    scale_ptr
-                    + g * scale_stride_group
-                    + pid_token
-                    + qb_indices * scale_stride_k
-                )
-                tl.store(scale_addrs, tl.zeros((CHUNKS_PER_HEAD,), dtype=tl.float32))
+            if QUANTIZE:
+                if TMA_ALIGNED_SCALES:
+                    packed_offsets = tl.arange(0, CHUNKS_PER_HEAD // 4)
+                    scale_addr = (
+                        scale_ptr
+                        + g * scale_stride_group
+                        + pid_token
+                        + (head_in_group * (CHUNKS_PER_HEAD // 4) + packed_offsets)
+                        * scale_stride_k
+                    )
+                    tl.store(
+                        scale_addr, tl.zeros((CHUNKS_PER_HEAD // 4,), dtype=tl.int32)
+                    )
+                else:
+                    block_offsets = tl.arange(0, CHUNKS_PER_HEAD)
+                    qb_indices = qb_start + block_offsets
+                    scale_addrs = (
+                        scale_ptr
+                        + g * scale_stride_group
+                        + pid_token
+                        + qb_indices * scale_stride_k
+                    )
+                    zero = tl.zeros((CHUNKS_PER_HEAD,), dtype=tl.float32)
+                    tl.store(scale_addrs, zero)
             return
 
         input_base = o_ptr + pid_token * o_stride_token + global_head * o_stride_head
@@ -138,65 +159,60 @@ class FusedInvRopeFP8QuantKernel(
         rotated = tl.where(is_even, x_add, x_sub)
         x = tl.where(is_rope, rotated, x)
 
-        if not QUANTIZE:
-            out_base = (
-                out_ptr
-                + g * out_stride_group
-                + pid_token * out_stride_token
-                + qb_start * QUANT_GROUP_SIZE
-            )
-            tl.store(out_base + offsets, x)
-            return
-
-        x_2d = tl.reshape(tl.abs(x), (CHUNKS_PER_HEAD, QUANT_GROUP_SIZE))
-        block_absmax = tl.maximum(tl.max(x_2d, axis=1), eps)
-        scale_raw = block_absmax * (1.0 / fp8_max)
-        scales = tl.math.exp2(tl.ceil(tl.log2(scale_raw)))
-
-        scales_exp = tl.reshape(
-            tl.broadcast_to(
-                tl.reshape(scales, (CHUNKS_PER_HEAD, 1)),
-                (CHUNKS_PER_HEAD, QUANT_GROUP_SIZE),
-            ),
-            (HEAD_DIM,),
-        )
-        x_quant = tl.clamp(x / scales_exp, -fp8_max, fp8_max).to(tl.float8e4nv)
-
         out_base = (
             out_ptr
             + g * out_stride_group
             + pid_token * out_stride_token
             + qb_start * QUANT_GROUP_SIZE
         )
-        tl.store(out_base + offsets, x_quant)
+        # Positive-form branch on purpose: `if not QUANTIZE: return` does not
+        # prune the fallthrough at compile time, which would leave the
+        # fp8e4nv cast in the IR of the bf16 variant (fatal below SM89).
+        if QUANTIZE:
+            x_2d = tl.reshape(tl.abs(x), (CHUNKS_PER_HEAD, QUANT_GROUP_SIZE))
+            block_absmax = tl.maximum(tl.max(x_2d, axis=1), eps)
+            scale_raw = block_absmax * (1.0 / fp8_max)
+            scales = tl.math.exp2(tl.ceil(tl.log2(scale_raw)))
 
-        block_offsets = tl.arange(0, CHUNKS_PER_HEAD)
-        qb_indices = qb_start + block_offsets
-        if TMA_ALIGNED_SCALES:
-            scale_bits = scales.to(tl.int32, bitcast=True)
-            ue8m0_bytes = (scale_bits >> 23) & 0xFF
-            packed_val = tl.sum(
-                tl.reshape(ue8m0_bytes, (CHUNKS_PER_HEAD // 4, 4))
-                << (tl.arange(0, 4)[None, :] * 8),
-                axis=1,
+            scales_exp = tl.reshape(
+                tl.broadcast_to(
+                    tl.reshape(scales, (CHUNKS_PER_HEAD, 1)),
+                    (CHUNKS_PER_HEAD, QUANT_GROUP_SIZE),
+                ),
+                (HEAD_DIM,),
             )
-            packed_offsets = tl.arange(0, CHUNKS_PER_HEAD // 4)
-            scale_addr = (
-                scale_ptr
-                + g * scale_stride_group
-                + pid_token
-                + (head_in_group * (CHUNKS_PER_HEAD // 4) + packed_offsets)
-                * scale_stride_k
-            )
-            tl.store(scale_addr, packed_val)
+            x_quant = tl.clamp(x / scales_exp, -fp8_max, fp8_max).to(tl.float8e4nv)
+            tl.store(out_base + offsets, x_quant)
+
+            block_offsets = tl.arange(0, CHUNKS_PER_HEAD)
+            qb_indices = qb_start + block_offsets
+            if TMA_ALIGNED_SCALES:
+                scale_bits = scales.to(tl.int32, bitcast=True)
+                ue8m0_bytes = (scale_bits >> 23) & 0xFF
+                packed_val = tl.sum(
+                    tl.reshape(ue8m0_bytes, (CHUNKS_PER_HEAD // 4, 4))
+                    << (tl.arange(0, 4)[None, :] * 8),
+                    axis=1,
+                )
+                packed_offsets = tl.arange(0, CHUNKS_PER_HEAD // 4)
+                scale_addr = (
+                    scale_ptr
+                    + g * scale_stride_group
+                    + pid_token
+                    + (head_in_group * (CHUNKS_PER_HEAD // 4) + packed_offsets)
+                    * scale_stride_k
+                )
+                tl.store(scale_addr, packed_val)
+            else:
+                scale_addrs = (
+                    scale_ptr
+                    + g * scale_stride_group
+                    + pid_token
+                    + qb_indices * scale_stride_k
+                )
+                tl.store(scale_addrs, scales)
         else:
-            scale_addrs = (
-                scale_ptr
-                + g * scale_stride_group
-                + pid_token
-                + qb_indices * scale_stride_k
-            )
-            tl.store(scale_addrs, scales)
+            tl.store(out_base + offsets, x)
 
     def dispatch(  # type: ignore[override]
         self,
@@ -266,7 +282,9 @@ class FusedInvRopeFP8QuantKernel(
             quant_group_size=128,
             tma_aligned_scales=capability.major >= 10,
             launch_pdl=current_platform.is_arch_support_pdl(),
-            quantize=True,
+            # SM8x never launches the quantizing variant (o_proj dequantizes
+            # wo_a to bf16 there), and the fp8e4nv store cannot even compile.
+            quantize=fp8_quant_target_supported(),
         )
 
     def warmup_inputs(self, compile_key: CompileKey) -> dict[str, Any]:
@@ -451,6 +469,21 @@ def _fused_inv_rope_fp8_quant_kernel_impl(
     scale_inner: int,
     quantize: bool,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    tensor_dev = o.device.index if o.is_cuda else None
+    if quantize and not fp8_quant_target_supported(tensor_dev):
+        _bound = bound_compile_arch(
+            _FUSED_INV_ROPE_FP8_QUANT_KERNEL.kernel, tensor_dev
+        )
+        dev = torch.cuda.get_device_name(tensor_dev) if o.is_cuda else "cpu"
+        raise RuntimeError(
+            "fused_inv_rope_fp8_quant(quantize=True) would compile an fp8e4nv "
+            f"store for {dev} (native={fp8_native_supported(tensor_dev)}, "
+            f"target={fp8_triton_target_arch(tensor_dev)}, "
+            f"bound={_bound}, "
+            f"dev={tensor_dev} cur="
+            f"{torch.cuda.current_device() if o.is_cuda else None}); "
+            "callers must dequantize (see o_proj SM8x gate)."
+        )
     scale_dtype = torch.int32 if tma_aligned_scales else torch.float32
     out_buf = torch.empty(
         (n_groups, num_tokens, d),

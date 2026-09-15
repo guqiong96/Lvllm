@@ -31,7 +31,11 @@ from vllm.v1.attention.backends.mla.compressor_utils import (
     get_dspark_swa_index_width,
 )
 from vllm.v1.attention.backends.utils import split_decodes_and_prefills
-from vllm.v1.attention.ops.flashmla import FlashMLASchedMeta, get_mla_metadata
+from vllm.v1.attention.ops.flashmla import (
+    FlashMLASchedMeta,
+    get_mla_metadata,
+    sm8x_sparse_mla_enabled,
+)
 from vllm.v1.kv_cache_interface import (
     KVCacheSpec,
     MLAAttentionSpec,
@@ -841,6 +845,9 @@ class DeepseekSparseSWAMetadataBuilder(AttentionMetadataBuilder):
             or current_platform.is_rocm()
             or current_platform.is_xpu()
             or current_platform.is_device_capability_family(120)
+            # sm8x never calls flash_mla_with_kvcache (Triton SM80 path in
+            # deepseek_v4*/nvidia/flashmla.py), so no plan is needed.
+            or sm8x_sparse_mla_enabled()
         ):
             return out
         for layer_type in self._layer_types:

@@ -15,6 +15,10 @@ group-boundary tokens ``(position + 1) % compress_ratio == 0`` produce a key.
 
 import torch
 
+from vllm.model_executor.layers.quantization.utils.fp8_emulate import (
+    f32_to_e4m3fn_u8,
+    fp8_native_supported,
+)
 from vllm.platforms import current_platform
 from vllm.triton_utils import tl, triton
 
@@ -112,6 +116,7 @@ def indexer_k_norm_rope_store(
         SHUFFLE=shuffle,
         BLOCK_TILE_SIZE=_BLOCK_TILE_SIZE,
         HEAD_TILE_SIZE=_HEAD_TILE_SIZE,
+        emulate_fp8=not fp8_native_supported(),
         num_warps=1,
         **launch_kwargs,
     )
@@ -140,6 +145,7 @@ def _indexer_k_norm_rope_quant_store_kernel(
     SHUFFLE: tl.constexpr,
     BLOCK_TILE_SIZE: tl.constexpr,
     HEAD_TILE_SIZE: tl.constexpr,
+    emulate_fp8: tl.constexpr = False,
 ):
     token_idx = tl.program_id(0)
 
@@ -241,7 +247,11 @@ def _indexer_k_norm_rope_quant_store_kernel(
         exponent = tl.ceil(tl.log2(absmax * INV_FP8_MAX))
         inv_scale = tl.exp2(-exponent)
         x_clamped = tl.clamp(result_bf16 * inv_scale, -FP8_MAX, FP8_MAX)
-        x_uint8 = x_clamped.to(tl.float8e4nv).to(tl.uint8, bitcast=True)
+        # SM8x Triton cannot name fp8e4nv: encode the byte bit-wise (identical).
+        if emulate_fp8:
+            x_uint8 = f32_to_e4m3fn_u8(x_clamped)
+        else:
+            x_uint8 = x_clamped.to(tl.float8e4nv).to(tl.uint8, bitcast=True)
         if SHUFFLE:
             tiled = (
                 block // HEAD_TILE_SIZE * BLOCK_TILE_SIZE * HEAD_TILE_SIZE
