@@ -67,5 +67,9 @@ vllm-engine-core-client = { workspace = true, features = ["test-util"] }
 vllm-tokenizer = { workspace = true, features = ["test-utils"] }
 zeromq.workspace = true
 
+[build-dependencies]
+protox.workspace = true
+tonic-prost-build.workspace = true
+
 [lints]
 workspace = true
