@@ -13,6 +13,7 @@ LK_POWER_SAVING=1 \
 LVLLM_EMBEDDING_NUMA_ENABLED=1 \
 VLLM_USE_V2_MODEL_RUNNER=1 \
 FLASHINFER_CUDA_ARCH_LIST="8.6 12.0f" \
+LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=1024 \
 vllm serve ~/Models/Qwen3.8-Flash-Next-NVFP4 \
   --tensor-parallel-size 4 \
   --max-model-len 128000 \
@@ -22,4 +23,5 @@ vllm serve ~/Models/Qwen3.8-Flash-Next-NVFP4 \
   --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY"}' \
   --enable-prefix-caching --enable-chunked-prefill \
   --served-model-name Qwen3.8-Flash-Next \
-  --trust-remote-code
+  --trust-remote-code \
+  --host 0.0.0.0 --port 8070

@@ -29,4 +29,5 @@ vllm serve ~/Models/DeepSeek-V4.1-Flash \
   --enable-prefix-caching --enable-chunked-prefill \
   --enable-auto-tool-choice --trust-remote-code \
   --default-chat-template-kwargs '{"enable_thinking": false}' \
-  --speculative-config '{"method":"dspark","num_speculative_tokens":5,"draft_sample_method":"probabilistic"}'
+  --speculative-config '{"method":"dspark","num_speculative_tokens":5,"draft_sample_method":"probabilistic"}' \
+  --host 0.0.0.0 --port 8070
