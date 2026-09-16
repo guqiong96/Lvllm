@@ -12,8 +12,16 @@ helpers (select pools -> expand to tokens -> append tail).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Any
+
 import torch
 
+from vllm.model_executor.layers.quantization.utils.fp8_emulate import (
+    f32_to_e4m3fn_u8,
+)
+from vllm.model_executor.warmup.jit_warmup_triton_helper import VllmTritonJitKernel
+from vllm.platforms import current_platform
 from vllm.triton_utils import tl, triton
 
 # The GLM-5.3-Flash indexer head dimension is fixed at 128.
@@ -101,7 +109,11 @@ def _fwht_quant_kernel(
     scale = tl.exp2(tl.ceil(tl.log2(absmax * (1.0 / 448.0))))
     y = tl.minimum(tl.maximum(x / scale[:, None], -448.0), 448.0)
 
-    tl.store(qout_ptr + rows[:, None] * 128 + offs[None, :], y, mask=rmask[:, None])
+    tl.store(
+        qout_ptr + rows[:, None] * 128 + offs[None, :],
+        f32_to_e4m3fn_u8(y),
+        mask=rmask[:, None],
+    )
     tl.store(sout_ptr + rows, scale, mask=rmask)
 
 
@@ -121,14 +133,14 @@ def fwht128_quant_fp8(q: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     assert q.dtype == torch.bfloat16
     assert q.is_contiguous()
     n_rows = q.shape[0]
-    q_fp8 = torch.empty((n_rows, 128), dtype=torch.float8_e4m3fn, device=q.device)
+    q_u8 = torch.empty((n_rows, 128), dtype=torch.uint8, device=q.device)
     q_scale = torch.empty((n_rows, 1), dtype=torch.float32, device=q.device)
     if n_rows == 0:
-        return q_fp8, q_scale
+        return q_u8.view(torch.float8_e4m3fn), q_scale
     BLOCK_R = 32
     grid = (triton.cdiv(n_rows, BLOCK_R),)
-    _fwht_quant_kernel[grid](q, q_fp8, q_scale, n_rows, BLOCK_R=BLOCK_R, num_warps=2)
-    return q_fp8, q_scale
+    _fwht_quant_kernel[grid](q, q_u8, q_scale, n_rows, BLOCK_R=BLOCK_R, num_warps=2)
+    return q_u8.view(torch.float8_e4m3fn), q_scale
 
 
 # Fused pool compression and cache write.
@@ -136,7 +148,7 @@ def fwht128_quant_fp8(q: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
 
 @triton.jit
 def _kpool_softmax_rotate_write_cache_kernel(
-    buf_fp8_ptr,
+    buf_u8_ptr,
     buf_fp32_ptr,
     slot_k_ptr,
     slot_score_ptr,
@@ -243,13 +255,13 @@ def _kpool_softmax_rotate_write_cache_kernel(
             + S_OFFSET_NBYTES_IN_PAGE // 4
             + loc_token_offset_in_page
         )
-        tl.store(buf_fp8_ptr + out_k_offsets, quantized, mask=mask)
+        tl.store(buf_u8_ptr + out_k_offsets, f32_to_e4m3fn_u8(quantized), mask=mask)
         tl.store(buf_fp32_ptr + out_s_offset, scale, mask=do_write)
 
     if RETURN_COMPRESSED:
         tl.store(
             compressed_k_ptr + row * HEAD_DIM + offs,
-            quantized,
+            f32_to_e4m3fn_u8(quantized),
             mask=offs < HEAD_DIM,
         )
         tl.store(compressed_scale_ptr + row, scale)
@@ -307,14 +319,14 @@ def kpool_compress_and_write_cache(
             return (
                 torch.empty(
                     (0, head_dim),
-                    dtype=torch.float8_e4m3fn,
+                    dtype=torch.uint8,
                     device=slot_k.device,
-                ),
+                ).view(torch.float8_e4m3fn),
                 torch.empty((0,), dtype=torch.float32, device=slot_k.device),
             )
         return None
 
-    buf_fp8 = buf.view(torch.float8_e4m3fn)
+    buf_fp8 = buf  # uint8 bytes; the kernel encodes via f32_to_e4m3fn_u8
     buf_fp32 = buf.view(torch.float32)
     # bytes per page (last dim of kv_cache) viewed as uint8
     buf_numel_per_page = buf.stride(0)
@@ -323,7 +335,7 @@ def kpool_compress_and_write_cache(
     if return_compressed:
         compressed_k = torch.empty(
             (slot_k.shape[0], head_dim),
-            dtype=torch.float8_e4m3fn,
+            dtype=torch.uint8,
             device=slot_k.device,
         )
         compressed_scale = torch.empty(
@@ -361,8 +373,123 @@ def kpool_compress_and_write_cache(
     )
 
     if return_compressed:
-        return compressed_k, compressed_scale
+        return compressed_k.view(torch.float8_e4m3fn), compressed_scale
     return None
+
+
+class _KpoolPrefillWriteWarmup(VllmTritonJitKernel["_KpoolPrefillWriteWarmup.CompileKey"]):
+    """Warm the prefill cache-write kernel through the JIT-warmup registry.
+
+    The kernel only launches when a batch holds >= pool_size tokens. With
+    FULL_DECODE_ONLY capture sizes (decode bs <= max_num_seqs < pool_size)
+    and attention skipped in the profiling run, no stage before the
+    FlashInfer-autotune dummy run launches it, so its first Triton JIT lands
+    inside the autotune's synchronized region, where the per-rank compile
+    skew can hang TP startup on collectives. Compiling it here (a quiet,
+    collective-free drain) removes that window. This class never dispatches
+    at runtime -- the launcher calls the Triton kernel directly.
+    """
+
+    kernel = _kpool_softmax_rotate_write_cache_kernel
+
+    @dataclass(frozen=True)
+    class CompileKey:
+        cache_shape: tuple[int, ...]
+        cache_strides: tuple[int, ...]
+        pool_size: int
+        head_dim: int
+        round_scale: bool
+
+    def __init__(self) -> None:
+        # Warmup-only provider: skip the dispatch-tracing machinery that
+        # VllmJitKernel.__init__ installs for runtime dispatchers.
+        self._dispatch_trace = None
+        self._compiled_cache: dict[Any, Any] = {}
+
+    def dispatch(self, **kwargs: Any) -> Any:
+        raise NotImplementedError  # never dispatched; warmup-only provider
+
+    def warmup_inputs(self, compile_key: Any) -> dict[str, Any]:
+        raise NotImplementedError  # compile() launches real dummy tensors
+
+    def get_warmup_keys(self, *, vllm_config: Any) -> list[Any]:
+        if vllm_config.model_config is None:
+            return []
+        text_config = vllm_config.model_config.hf_text_config
+        pool_size = getattr(text_config, "index_kpool", 0) or 0
+        head_dim = getattr(text_config, "index_head_dim", 0) or 0
+        if pool_size <= 1 or head_dim <= 0:
+            return []
+        keys: list[Any] = []
+        seen: set[tuple] = set()
+        for layer in vllm_config.compilation_config.static_forward_context.values():
+            if getattr(layer, "_index_kpool", None) != pool_size:
+                continue
+            cache = getattr(layer, "kv_cache", None)
+            if cache is None or cache.numel() == 0:
+                # Cache tensors are bound before the jit-warmup drain; an
+                # unbound layer would mean that ordering changed.
+                continue
+            key = (
+                tuple(cache.shape),
+                tuple(cache.stride()),
+                pool_size,
+                head_dim,
+                True,  # scale_fmt is the constant "ue8m0" on this path
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            keys.append(_KpoolPrefillWriteWarmup.CompileKey(*key))
+        return keys
+
+    def compile(self, compile_key: CompileKey) -> None:
+        device = torch.device(current_platform.device_type)
+        buf = torch.empty_strided(
+            compile_key.cache_shape,
+            compile_key.cache_strides,
+            dtype=torch.uint8,
+            device=device,
+        )
+        n = compile_key.pool_size
+        pool, dim = compile_key.pool_size, compile_key.head_dim
+        slot_k = torch.zeros((n, pool, dim), dtype=torch.bfloat16, device=device)
+        slot_score = torch.zeros_like(slot_k)
+        ape = torch.zeros((pool, dim), dtype=torch.float32, device=device)
+        loc = torch.zeros((n,), dtype=torch.int64, device=device)
+        write_mask = torch.ones((n,), dtype=torch.bool, device=device)
+        compressed_k = torch.empty((n, dim), dtype=torch.uint8, device=device)
+        compressed_scale = torch.empty((n,), dtype=torch.float32, device=device)
+        _kpool_softmax_rotate_write_cache_kernel[(n,)](
+            buf,
+            buf.view(torch.float32),
+            slot_k,
+            slot_score,
+            ape,
+            loc,
+            write_mask,
+            compressed_k,
+            compressed_scale,
+            slot_k.stride(0),
+            slot_k.stride(1),
+            slot_score.stride(0),
+            slot_score.stride(1),
+            ape.stride(0),
+            PAGE_SIZE=buf.shape[1],
+            BUF_NUMEL_PER_PAGE=buf.stride(0),
+            POOL_SIZE=pool,
+            HEAD_DIM=dim,
+            S_OFFSET_NBYTES_IN_PAGE=buf.shape[1] * dim,
+            ROUND_SCALE=compile_key.round_scale,
+            HAS_WRITE_MASK=True,
+            RETURN_COMPRESSED=False,
+            WRITE_CACHE=True,
+            BLOCK_D=triton.next_power_of_2(dim),
+        )
+        torch.cuda.synchronize()
+
+
+kpool_prefill_write_warmup = _KpoolPrefillWriteWarmup()
 
 
 # Seed each request's incomplete pool into its paged tail during prefill.
@@ -434,12 +561,78 @@ def kpool_seed_tail_cache(
     )
 
 
+class _KpoolSeedTailWarmup(VllmTritonJitKernel["_KpoolSeedTailWarmup.CompileKey"]):
+    """Warm the prefill tail-seed kernel through the JIT-warmup registry.
+
+    Same hazard as ``_KpoolPrefillWriteWarmup``: ``kpool_seed_tail_cache``
+    only runs on a prefill batch, so with attention skipped during profiling
+    and only decode graphs captured, its first Triton JIT would otherwise land
+    inside the FlashInfer-autotune dummy run and hang TP startup on collectives
+    (seen live: rank0 stuck in cuModuleLoadData here while rank1 waited on the
+    autotuner's cross-rank OOM all_reduce). The kernel is a plain ``@triton.jit``
+    launched directly, so warm every scalar-``n`` specialization (``== 1``,
+    generic, divisible-by-16) that any token bucket can reach; the compiled
+    binaries then cover the whole autotune sweep. Dummy slots are all -1 so the
+    launch compiles the kernel but stores nothing. Never dispatched at runtime.
+    """
+
+    kernel = _kpool_tail_seed_kernel
+
+    @dataclass(frozen=True)
+    class CompileKey:
+        pool_size: int
+        head_dim: int
+
+    def __init__(self) -> None:
+        self._dispatch_trace = None
+        self._compiled_cache: dict[Any, Any] = {}
+
+    def dispatch(self, **kwargs: Any) -> Any:
+        raise NotImplementedError  # never dispatched; warmup-only provider
+
+    def warmup_inputs(self, compile_key: Any) -> dict[str, Any]:
+        raise NotImplementedError  # compile() launches real dummy tensors
+
+    def get_warmup_keys(self, *, vllm_config: Any) -> list[Any]:
+        if vllm_config.model_config is None:
+            return []
+        text_config = vllm_config.model_config.hf_text_config
+        pool_size = getattr(text_config, "index_kpool", 0) or 0
+        head_dim = getattr(text_config, "index_head_dim", 0) or 0
+        if pool_size <= 1 or head_dim <= 0:
+            return []
+        return [_KpoolSeedTailWarmup.CompileKey(pool_size, head_dim)]
+
+    def compile(self, compile_key: CompileKey) -> None:
+        device = torch.device(current_platform.device_type)
+        pool, dim = compile_key.pool_size, compile_key.head_dim
+        # Rows are seeded into the request's tail block; with every slot -1 the
+        # kernel returns per-program before touching memory, so the buffer size
+        # is irrelevant -- only the pointer dtype must match runtime.
+        tail = torch.zeros((1, 2, pool, dim), dtype=torch.bfloat16, device=device)
+        for n in (1, 2, 16):  # n-specialization classes: ==1, generic, %16==0
+            _kpool_tail_seed_kernel[(n,)](
+                torch.zeros((n, dim), dtype=torch.bfloat16, device=device),
+                torch.zeros((n, dim), dtype=torch.bfloat16, device=device),
+                torch.full((n,), -1, dtype=torch.int64, device=device),
+                tail,
+                n,
+                HEAD_DIM=dim,
+                KPOOL=pool,
+                BLOCK_D=triton.next_power_of_2(dim),
+            )
+        torch.cuda.synchronize()
+
+
+kpool_seed_tail_warmup = _KpoolSeedTailWarmup()
+
+
 # Update each request's tail during decode and write completed pools.
 
 
 @triton.jit
 def _kpool_decode_update_batched_kernel(
-    buf_fp8_ptr,
+    buf_u8_ptr,
     buf_fp32_ptr,
     tail_kv_ptr,
     tail_slot_mapping_ptr,  # [B, NEXT_N] int32
@@ -589,7 +782,7 @@ def _kpool_decode_update_batched_kernel(
                 + S_OFFSET_NBYTES_IN_PAGE // 4
                 + loc_token_offset_in_page
             )
-            tl.store(buf_fp8_ptr + out_k_offsets, quantized, mask=dim_mask)
+            tl.store(buf_u8_ptr + out_k_offsets, f32_to_e4m3fn_u8(quantized), mask=dim_mask)
             tl.store(buf_fp32_ptr + out_s_offset, scale)
 
         # Stash the current token AFTER any completion read so the completion
@@ -664,7 +857,7 @@ def kpool_decode_update_and_maybe_write_cache_batched(
 
     page_size = kv_cache.shape[1]
     buf = kv_cache
-    buf_fp8 = buf.view(torch.float8_e4m3fn)
+    buf_fp8 = buf  # uint8 bytes; the kernel encodes via f32_to_e4m3fn_u8
     buf_fp32 = buf.view(torch.float32)
 
     # The kernel indexes the int tensors as ``req * next_n + t`` (row-major),

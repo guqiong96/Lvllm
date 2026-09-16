@@ -295,6 +295,7 @@ def _flashinfer_autotune_skip_ops(runner: "GPUModelRunner") -> set[str] | None:
 
     from vllm.model_executor.kernels.linear import (
         FlashInferCuteDslNvFp4LinearKernel,
+        FlashInferCutlassNvFp4LinearKernel,
     )
 
     for module in runner.get_model().modules():
@@ -303,9 +304,26 @@ def _flashinfer_autotune_skip_ops(runner: "GPUModelRunner") -> set[str] | None:
             # CuTe-DSL mm_fp4 tuning JIT-compiles every tactic and its
             # fallback is already the heuristic; all mm_fp4 backends share
             # the "fp4_gemm" op name, so skip only when cute-dsl is selected.
-            if isinstance(kernel, FlashInferCuteDslNvFp4LinearKernel):
+            # The sm120 CUTLASS NVFP4 linear is skipped for a different reason:
+            # its ``choose_one`` runs a cross-rank timing all_reduce, but the
+            # generic autotune dummy run is also the first place the FlashInfer
+            # sparse-MLA sm120 prefill kernel is touched. That cold
+            # ``cuKernelGetFunction`` lazy-load needs the GPU quiet, while the
+            # sibling rank's in-flight fp4_gemm collective keeps it busy, so
+            # neither rank reaches the next collective (TP startup hang, seen on
+            # both the V1 and V2 runners). fp4_gemm tactic tuning gives no
+            # decode benefit on these MoE-host-resident sm120 models, so the
+            # heuristic fallback loses nothing.
+            if isinstance(
+                kernel,
+                (
+                    FlashInferCuteDslNvFp4LinearKernel,
+                    FlashInferCutlassNvFp4LinearKernel,
+                ),
+            ):
                 return {"fp4_gemm"}
     return None
+
 
 
 _FLASHINFER_BF16_AUTOTUNE_MAX_TOKENS = 32

@@ -42,7 +42,10 @@ class Glm5NextMultiTokenPredictorLayer(nn.Module):
         assert vllm_config.speculative_config is not None
         config = vllm_config.speculative_config.draft_model_config.hf_config
         self.config = config
-        quant_config = vllm_config.quant_config
+        # The checkpoint stores the MTP draft in BF16 (see the ``is_mtp_layer``
+        # note in ``Glm5NextDecoderLayer``); its SharedHead/embedding heads are
+        # unquantized too, so the whole draft is built with no quant method.
+        quant_config = None
 
         self.enorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.hnorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)

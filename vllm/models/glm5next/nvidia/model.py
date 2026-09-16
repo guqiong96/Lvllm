@@ -292,6 +292,16 @@ class Glm5NextDecoderLayer(nn.Module):
         quant_config = vllm_config.quant_config
         parallel_config = vllm_config.parallel_config
 
+        # The GLM-5.3-Flash checkpoint stores the MTP/nextn draft heads in
+        # BF16 -- the exporter quantized the ``num_hidden_layers`` base stack
+        # (fp4 experts) but left ``num_nextn_predict_layers`` unquantized (the
+        # modelopt ``ignore`` list stops at layer 44). Building the draft with
+        # the fp4 quant method would allocate packed w2/w13 params that the
+        # BF16 checkpoint tensors cannot fill (``512 must match 1024``), so the
+        # draft must be constructed unquantized.
+        if is_mtp_layer:
+            quant_config = None
+
         self.hidden_size = config.hidden_size
         self.layer_idx = layer_idx
         self.is_moe = config.is_moe

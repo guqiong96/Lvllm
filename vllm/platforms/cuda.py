@@ -437,7 +437,14 @@ class CudaPlatformBase(Platform):
         # index_kpool) is virtually split into pool pages, so block_size
         # must be a multiple of index_kpool times a legal pool page.
         page = min(PAGED_MQA_PAGE_SIZES)
-        if cls.is_device_capability_family(120):
+        # This is KV geometry the whole TP group must agree on, so anchor it to
+        # the group capability floor, not this rank's device. On a mixed group a
+        # per-rank family(120) answer forks the storage page (32 vs 64) and the
+        # cross-rank KV-spec comparison fails. The largest page only applies when
+        # every device is sm120; a mixed group (floor<12, e.g. +3090) runs the sm8x
+        # Triton indexer path, which wants the smallest page.
+        floor = cls.group_capability_floor()
+        if floor is not None and floor.to_int() // 10 == 12:
             # On sm120 the DeepGEMM paged-MQA kernel only accepts block_kv
             # 64 for the fp8 indexer cache, so align to the largest pool
             # page here to make the page split land on 64 not the min 32.

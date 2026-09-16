@@ -550,6 +550,11 @@ __global__ void concat_and_cache_ds_mla_kernel(
 
   // The last warp handles the RoPE part
   if (threadIdx.x >= 64) {
+    // NoPE models (pe_dim == 0) have no rope payload; the rope span keeps its
+    // pool bytes (the rope-free kernels never read it).
+    if (pe_dim == 0) {
+      return;
+    }
     // Each thread handles two elements of RoPE
     const int8_t pe_idx_start = (threadIdx.x - 64) * 2;
     const int64_t src_idx = token_idx * k_pe_stride + pe_idx_start;
@@ -934,7 +939,12 @@ void concat_and_cache_mla(
   if (kv_cache_dtype == "fp8_ds_mla") {
     STD_TORCH_CHECK(kv_lora_rank == 512,
                     "kv_lora_rank must be 512 for fp8_ds_mla");
-    STD_TORCH_CHECK(pe_dim == 64, "pe_dim must be 64 for fp8_ds_mla");
+    // pe_dim == 0 is the NoPE variant (e.g. GLM-5.3-Flash): the 512B fp8 NoPE
+    // payload + 4 fp32 tile scales stay byte-identical; the rope span
+    // [528:656) simply keeps its pool bytes and is never read by the
+    // rope-free members of the V32 kernel family.
+    STD_TORCH_CHECK(pe_dim == 64 || pe_dim == 0,
+                    "pe_dim must be 64 (or 0 for NoPE models) for fp8_ds_mla");
     STD_TORCH_CHECK(kv_cache.size(2) == 656 / kv_cache.element_size(),
                     "kv_cache.size(2) must be 656 bytes for fp8_ds_mla");
     STD_TORCH_CHECK(kv_c.element_size() == 2,

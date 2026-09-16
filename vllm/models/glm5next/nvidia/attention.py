@@ -30,7 +30,11 @@ from vllm.model_executor.models.deepseek_v2 import (
     yarn_get_mscale,
 )
 from vllm.model_executor.utils import maybe_disable_graph_partition
-from vllm.models.glm5next.nvidia.ops.kpool_compress import fwht128_quant_fp8
+from vllm.models.glm5next.nvidia.ops.kpool_compress import (
+    fwht128_quant_fp8,
+    kpool_prefill_write_warmup,
+    kpool_seed_tail_warmup,
+)
 from vllm.platforms import current_platform
 from vllm.transformers_utils.configs.glm5_next import Glm5NextConfig
 from vllm.utils.deep_gemm import PAGED_MQA_PAGE_SIZES
@@ -154,6 +158,11 @@ class Glm5NextIndexerCache(DeepseekV32IndexerCache):
             spec,
             storage_block_size=page_size * self._index_kpool,
         )
+
+    def get_attn_backend(self):
+        from vllm.v1.attention.backends.mla.indexer import Glm5NextIndexerBackend
+
+        return Glm5NextIndexerBackend
 
 
 class Glm5NextTailCache(DeepseekV32IndexerCache):
@@ -312,6 +321,14 @@ class Indexer(nn.Module):
             self.topk_indices_buffer,
             tail_cache=self.tail_cache,
         )
+        if vllm_config.kernel_config.enable_jit_warmup:
+            # Pre-compile the kpool prefill cache-write and tail-seed kernels.
+            # No earlier stage launches them (decode bs < index_kpool, profiling
+            # skips attention), so without this their first Triton JIT lands
+            # inside the FlashInfer-autotune dummy run and the per-rank compile
+            # skew can hang TP startup on collectives.
+            kpool_prefill_write_warmup.register_warmup()
+            kpool_seed_tail_warmup.register_warmup()
 
     def forward(
         self, hidden_states: torch.Tensor, qr: torch.Tensor, positions, rotary_emb
@@ -521,6 +538,32 @@ class Glm5NextMLAAttention(nn.Module):
 
         self.is_v32 = config.index_topk is not None
 
+        attn_backend = None
+        if self.is_v32 and current_platform.is_cuda():
+            from vllm.utils.torch_utils import is_quantized_kv_cache
+            from vllm.v1.attention.ops.flashmla import sm8x_sparse_mla_enabled
+
+            # The sm8x Triton route only serves a bf16 KV cache. An explicit
+            # fp8/fp4 request must stay on the normal (empty-pool) path so it
+            # fails closed with the standard "no valid backend" error instead of
+            # building this bf16 impl against a packed cache.
+            kv_dtype = getattr(cache_config, "cache_dtype", "auto")
+            sm8x_kv_ok = kv_dtype is None or not is_quantized_kv_cache(kv_dtype)
+            if sm8x_sparse_mla_enabled() and sm8x_kv_ok:
+                # No sm8x sparse-MLA entry exists in the platform candidate pool
+                # (all generic sparse-MLA backends are SM90+; the dsv4 enum is a
+                # model-driven marker). Bind the SM8x Triton backend explicitly so
+                # the DSA layers build on Ampere/Ada; KV stays bf16.
+                from vllm.v1.attention.backends.mla.flashmla_sparse_sm8x import (
+                    FlashMLASparseSM8XBackend,
+                )
+
+                attn_backend = FlashMLASparseSM8XBackend
+                logger.info_once(
+                    "GLM-5.3 DSA layers using the SM8x Triton sparse-MLA backend "
+                    "(capability floor 8.x); requires --kv-cache-dtype bfloat16."
+                )
+
         if self.is_v32:
             self.indexer_rope_emb: RotaryEmbedding | None = get_rope(
                 qk_rope_head_dim,
@@ -564,6 +607,7 @@ class Glm5NextMLAAttention(nn.Module):
             indexer_rotary_emb=self.indexer_rope_emb,
             is_sparse=self.is_v32,
             topk_indices_buffer=topk_indices_buffer,
+            attn_backend=attn_backend,
         )
 
         self.mla_attn = MultiHeadLatentAttentionWrapper(

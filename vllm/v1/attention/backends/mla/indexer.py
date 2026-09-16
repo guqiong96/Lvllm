@@ -285,6 +285,36 @@ class DeepseekV41IndexerBackend(DeepseekV4IndexerBackend):
         return [64 if current_platform.is_device_capability_family(90) else 128]
 
 
+class Glm5NextIndexerBackend(DeepseekV32IndexerBackend):
+    """Indexer backend for GLM-5.3-Flash (``glm5next``).
+
+    ``glm5next`` is a KDA(linear)+DSA hybrid, so the MLA/mamba page alignment
+    (platforms/interface.py) can inflate ``cache_config.block_size`` far past 64
+    (e.g. 4352). The base backend advertises only ``[64]``, so ``select_common_block_size``
+    has to physically split the inflated manager block into 64-row kernel pages —
+    which the packed BLHNC layout cannot do, silently yielding wrong addressing
+    and an illegal memory access in the DeepGEMM sm120 paged-MQA kernel
+    (``sm120_mqa_logits.hpp``). Mirror the in-tree ``DeepseekV41IndexerBackend``
+    rule: on arch 12 accept any 64-multiple so the kernel page equals the
+    storage page (``block_kv == 64``, what DeepGEMM requires for arch 12 + fp8
+    KV) and no split is attempted. Scoped to ``glm5next``; dsv4/dsv4.1 keep
+    their own backends and are unaffected.
+    """
+
+    @staticmethod
+    def get_name() -> str:
+        return "GLM5NEXT_INDEXER"
+
+    @staticmethod
+    def get_supported_kernel_block_sizes() -> list[int | MultipleOf]:
+        if (
+            current_platform.is_device_capability_family(120)
+            or current_platform.is_device_capability_family(121)
+        ):
+            return [MultipleOf(64)]
+        return [64]
+
+
 @dataclass(frozen=True)
 class PCPGlobalChunkPlan:
     """PCP packing for one indexer prefill chunk under PCP + DCP."""

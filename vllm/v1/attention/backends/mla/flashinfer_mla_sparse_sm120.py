@@ -215,6 +215,15 @@ class FlashInferMLASparseSM120Impl(SparseMLACommonImpl[FlashInferMLASparseMetada
             dtype=q.dtype,
         )
 
+        if self.qk_rope_head_dim == 0:
+            # NoPE member of the V32 family (GLM-5.3-Flash): the decode and
+            # prefill envelopes are only instantiated for 64-token pages.
+            # The inline-scale kernels address the cache as a flat token array
+            # with a runtime row stride (block_stride == page * row_stride),
+            # so re-paging a contiguous 656B-row pool to 64-token pages is an
+            # addressing identity; physical slot ids stay manager-level.
+            kv_cache = kv_cache.reshape(-1, 64, kv_cache.shape[-1])
+
         if self._workspace_buffer is None:
             self._workspace_buffer = _get_workspace_buffer(q.device)
 

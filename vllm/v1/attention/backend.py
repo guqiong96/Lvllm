@@ -1065,9 +1065,20 @@ class MLAAttentionImpl(AttentionImplBase[T], Generic[T]):
             return
         from vllm import _custom_ops as ops
 
+        k_pe = k_pe.squeeze(1)
+        if k_pe.shape[-1] == 0 and kv_cache_dtype in (
+            "fp8_ds_mla",
+            "nvfp4_ds_mla",
+        ):
+            # NoPE MLA (pe_dim == 0, e.g. GLM-5.3-Flash): the ds_mla writer
+            # kernels keep the fixed 656B row geometry and a 64-wide rope
+            # span. Zero-filling the rope span is numerically exact for the
+            # rope-free kernel members, which never read those bytes.
+            k_pe = k_pe.new_zeros((*k_pe.shape[:-1], 64))
+
         ops.concat_and_cache_mla(
             kv_c_normed,
-            k_pe.squeeze(1),
+            k_pe,
             kv_cache,
             slot_mapping.flatten(),
             kv_cache_dtype=kv_cache_dtype,
