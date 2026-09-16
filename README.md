@@ -18,10 +18,11 @@ plus **SM80/86/89 adaptation** and **SM120 tuning/fixes** for popular new models
 | DeepSeek-V4.1-Flash | ✅ new | ✅ new | ✅ new | ✅ native | ✅ native | ✅ fixed | ✅ dspark |
 | DeepSeek-V4-Flash (0731) | ✅ new | ✅ new | ✅ new | ✅ native | ✅ native | ✅ native | ✅ dspark |
 | Qwen3.8-Flash-Next | ✅ new | ✅ new | ✅ new | ✅ native | ✅ native | ✅ new | ✅ MTP |
-| GLM-5.3-Flash | ready | ready | ready | native | native | ready | — |
+| GLM-5.3-Flash | ✅ new | ✅ new | ✅ new | ✅ native | ✅ native | ✅ fixed | — |
 
-`native` = upstream vLLM · `new` / `fixed` = done by this Lvllm release · `ready` = code done,
-pending weights to validate. Full per-model hardware tables, benchmarks and CLI: **[`RELEASE_NOTES.md`](./RELEASE_NOTES.md)**.
+`native` = upstream vLLM · `new` = support added by this Lvllm release · `fixed` = upstream path
+corrected by this Lvllm release. Full per-model hardware tables, benchmarks and CLI:
+**[`RELEASE_NOTES.md`](./RELEASE_NOTES.md)**.
 
 ### Previously verified (lk_moe hybrid) models
 
@@ -49,7 +50,7 @@ DeepSeek-V4.x, **MTP** for Qwen3.8. `—` = not applicable. Full hardware tables
 | DeepSeek-V4.1-Flash | 25 / 32–37 | 27 / 26–40 | 22 / 24–34 |
 | DeepSeek-V4-Flash (0731) | 28 / up to 44.8 | 30.6–31.1 / 36–43 | 30.5–33.6 / 38–43.5 |
 | Qwen3.8-Flash-Next | — | 45 / — | 40.3–40.6 / up to 78 |
-| GLM-5.3-Flash | ready | ready | ready |
+| GLM-5.3-Flash | 20.8 / — | 22–23 / — | 22.4 / — |
 
 ### Reference hardware
 
@@ -87,6 +88,7 @@ commands/
   dsv4_0731_serve_tp2_{3090,5060ti}[_dspark].sh   dsv4_0731_serve_tp4[_dspark].sh   # DeepSeek-V4-Flash 0731
   dsv41_serve_tp2_3090_dspark.sh                                                     # DeepSeek-V4.1-Flash
   qwen38_serve_tp2_{3090,5060ti}[_mtp].sh          qwen38_serve_tp4[_mtp].sh         # Qwen3.8-Flash-Next
+  glm53_serve_tp2_{3090,5060ti}[_plain].sh         glm53_serve_tp4.sh                # GLM-5.3-Flash (--kv-cache-dtype bfloat16 on sm8x)
 ```
 
 Each script is a complete, self-contained `vllm serve …` (env + args). Pick by model and GPU

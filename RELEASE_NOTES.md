@@ -10,12 +10,11 @@
 | DeepSeek-V4.1-Flash | ✅ new | ✅ new | ✅ new | ✅ native | ✅ native | ✅ fixed here | ✅ dspark |
 | DeepSeek-V4-Flash (0731) | ✅ new | ✅ new | ✅ new | ✅ native | ✅ native | ✅ native | ✅ dspark |
 | Qwen3.8-Flash-Next | ✅ new | ✅ new | ✅ new | ✅ native | ✅ native | ✅ new | ✅ MTP |
-| GLM-5.3-Flash | ready | ready | ready | native | native | ready | — |
+| GLM-5.3-Flash | ✅ new | ✅ new | ✅ new | ✅ native | ✅ native | ✅ fixed here | — |
 
 - **native** — done by upstream vLLM.
-- **new** — done by this Lvllm release.
-- **fixed here** — done by this Lvllm release.
-- **ready** — done by this Lvllm release, pending weights on the reference machine.
+- **new** — support added by this Lvllm release.
+- **fixed here** — upstream path corrected by this Lvllm release.
 
 ## Installation
 
@@ -87,7 +86,21 @@ Measured (single request, greedy):
 |------|-----------|
 | GPUs | 2× RTX 3090 + 2× RTX 5060 Ti (mixed SM86/SM120), or 2× same-arch |
 | CPU | 2× AMD EPYC 7642 48-Core (96c/192t total, NPS4 ⇒ 8 NUMA nodes), `LK_THREADS=48` |
-| Host RAM | machine 1 TiB DDR4-3200 (16-channel, 8 per socket); model requirement TBD (no weights on the reference machine yet) |
+| Host RAM | machine 1 TiB DDR4-3200 (16-channel, 8 per socket); model ~190 GiB / 33 shards (nv-community NVFP4), MoE host-resident |
+
+Launch: [`commands/glm53_serve_tp2_5060ti_plain.sh`](./commands/glm53_serve_tp2_5060ti_plain.sh) (SM120 plain) /
+[`commands/glm53_serve_tp4.sh`](./commands/glm53_serve_tp4.sh) (mixed TP4; `--kv-cache-dtype
+bfloat16` selects the SM8x Triton sparse-MLA path). SM86/SM89 reach a bf16 KV cache via the
+new SM8x sparse-MLA backend. MTP draft is present but shows no net gain over plain, so the
+default scripts stay plain.
+
+Measured (single request, greedy):
+
+| Setup | Plain decode | MTP |
+|-------|--------------|-----|
+| 2× RTX 5060 Ti (SM120, TP2) | 20.8 t/s | — (no net gain) |
+| 2× RTX 3090 (SM86, TP2) | 22–23 t/s | — |
+| 2× RTX 3090 + 2× RTX 5060 Ti (mixed, TP4) | 22.4 t/s | — |
 
 ## See also
 
