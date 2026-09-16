@@ -18,7 +18,7 @@ plus **SM80/86/89 adaptation** and **SM120 tuning/fixes** for popular new models
 | DeepSeek-V4.1-Flash | ✅ new | ✅ new | ✅ new | ✅ native | ✅ native | ✅ fixed | ✅ dspark |
 | DeepSeek-V4-Flash (0731) | ✅ new | ✅ new | ✅ new | ✅ native | ✅ native | ✅ native | ✅ dspark |
 | Qwen3.8-Flash-Next | ✅ new | ✅ new | ✅ new | ✅ native | ✅ native | ✅ new | ✅ MTP |
-| GLM-5.3-Flash | ✅ new | ✅ new | ✅ new | ✅ native | ✅ native | ✅ fixed | — |
+| GLM-5.3-Flash | ✅ new | ✅ new | ✅ new | ✅ native | ✅ native | ✅ fixed | ✅ MTP |
 
 `native` = upstream vLLM · `new` = support added by this Lvllm release · `fixed` = upstream path
 corrected by this Lvllm release. Full per-model hardware tables, benchmarks and CLI:
