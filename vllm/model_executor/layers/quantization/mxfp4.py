@@ -580,7 +580,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
         new_tensor = torch.zeros
         if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
             device = "cpu"
-            new_tensor = torch.empty
+            new_tensor = torch.zeros
         self.num_experts = num_experts
         weight_dtype = torch.uint8
         scale_dtype = torch.uint8
