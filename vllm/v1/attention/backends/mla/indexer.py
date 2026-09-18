@@ -1276,7 +1276,13 @@ class DeepseekV32IndexerMetadataBuilder(AttentionMetadataBuilder):
                 query_start_loc,
                 seq_lens,
                 indexer_block_table,
-                kernel_block_size // self.compress_ratio,
+                # The sliced table above is in storage-block units
+                # (kernel_block_size * block_factor tokens per column), so the
+                # compressed page size must use the same units. Using the raw
+                # kernel block size here halves the column pitch and reads the
+                # table out of bounds once pos // kernel_block_size exceeds the
+                # sliced width (past 131,328 tokens for block_size=128).
+                (kernel_block_size * block_factor) // self.compress_ratio,
                 self.compress_ratio,
                 out=self.compressed_slot_mapping_buffer,
             )

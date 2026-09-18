@@ -985,6 +985,14 @@ class KpoolTailSpec(SlidingWindowSpec):
         return all(isinstance(spec, KpoolTailSpec) for spec in kv_cache_specs.values())
 
     @property
+    def uses_slot_mapping(self) -> bool:
+        # One circular block per request: the generic paged slot-mapping kernel
+        # would index the block table of this spec at pos // block_size, far
+        # past its single column. The KpoolTailMetadataBuilder emits its own
+        # pool-granular mapping instead (same contract as CircularBufferSpec).
+        return False
+
+    @property
     def prefix_cacheable(self) -> bool:
         return False
 
