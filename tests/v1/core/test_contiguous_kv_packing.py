@@ -20,6 +20,7 @@ from vllm.v1.core.kv_cache_manager import KVCacheManager
 from vllm.v1.core.kv_cache_utils import (
     _get_kv_cache_bytes_per_block,
     _get_packed_kv_cache_groups,
+    _indexer_only_entry,
     _pool_bytes_per_block,
     generate_scheduler_kv_cache_config,
     get_kv_cache_config_from_groups,
@@ -651,3 +652,111 @@ class TestCompressorRingGroup:
             scheduler_block_size=128,
         )
         assert len(manager.coordinator.single_type_managers) == len(groups)
+
+
+class TestUnpackIndexerGate:
+    """VLLM_DSV4_UNPACK_INDEXER (Xid31 ab70 diagnostic): indexer cache layers
+    are carved out of the packed block (stride0 == the packed block) into a
+    dense region of their own pages appended after the interleaved region.
+    The block budget, divisor and num_blocks are unchanged; the interleaved
+    stride shrinks by the lifted indexer bytes."""
+
+    @staticmethod
+    def _dsv4_like_groups(n_mla=2, n_idx=2):
+        mla = {
+            f"model.layers.{i}.self_attn.attn": _mla(512) for i in range(n_mla)
+        }
+        idx = {
+            f"model.layers.{i}.self_attn.indexer.k_cache": _mla(132)
+            for i in range(n_idx)
+        }
+        return [_uniform_group({**mla, **idx})], mla, idx
+
+    def test_gate_off_stays_packed(self, monkeypatch):
+        monkeypatch.delenv("VLLM_DSV4_UNPACK_INDEXER", raising=False)
+        groups, mla, idx = self._dsv4_like_groups()
+        config = get_kv_cache_config_from_groups(
+            _mock_vllm_config("BLHNC"), groups, MEMORY
+        )
+        mla_tensor, idx_tensor = config.kv_cache_tensors
+        packed = _get_kv_cache_bytes_per_block(groups)
+        assert idx_tensor.block_stride == packed
+        assert _pool_bytes_per_block(groups) == packed
+
+    def test_gate_on_carves_a_dense_indexer_region(self, monkeypatch):
+        monkeypatch.setenv("VLLM_DSV4_UNPACK_INDEXER", "1")
+        groups, mla, idx = self._dsv4_like_groups()
+        packed = _get_kv_cache_bytes_per_block(groups)
+        idx_page = next(iter(idx.values())).page_size_bytes
+        extra = len(idx) * idx_page
+
+        config = get_kv_cache_config_from_groups(
+            _mock_vllm_config("BLHNC"), groups, MEMORY
+        )
+        # Same budget: divisor, num_blocks and pool size unchanged.
+        assert config.num_blocks == MEMORY // packed
+        assert _pool_bytes_per_block(groups) == packed
+        assert {t.size for t in config.kv_cache_tensors} == {packed * config.num_blocks}
+
+        mla_tensor, idx_tensor = config.kv_cache_tensors
+        # Non-indexer pages shift into the slimmer interleaved block.
+        assert (mla_tensor.offset, mla_tensor.layer_stride) == (
+            0,
+            next(iter(mla.values())).page_size_bytes,
+        )
+        assert mla_tensor.block_stride == packed - extra
+        # Indexer: natural page stride, dense region after the interleaved one.
+        assert idx_tensor.block_stride == idx_page
+        assert idx_tensor.layer_stride == idx_page * config.num_blocks
+        assert idx_tensor.offset == (packed - extra) * config.num_blocks
+        assert (
+            idx_tensor.offset + len(idx) * idx_page * config.num_blocks
+            == idx_tensor.size
+        )
+
+        views = _bind(config, "BLHNC")
+        assert {views[name].stride(0) for name in idx} == {idx_page}
+        assert {views[name].stride(0) for name in mla} == {packed - extra}
+        for i, name in enumerate(idx):
+            views[name][0].fill_(i + 1)
+        for name in mla:
+            assert (views[name][0].to(torch.int32) == 0).all()
+        for i, name in enumerate(idx):
+            assert (views[name][0].to(torch.int32) == i + 1).all()
+        # Packed writes to MLA blocks stay inside the interleaved region and
+        # never touch the indexer tail region.
+        for name in mla:
+            views[name][config.num_blocks - 1].fill_(9)
+        for i, name in enumerate(idx):
+            assert (views[name][0].to(torch.int32) == i + 1).all()
+
+    def test_gate_on_spreads_indexer_across_groups(self, monkeypatch):
+        """Indexer pages living in one group while a heavier indexer-free
+        group sets the packing: the interleaved stride must follow the
+        NON-indexer max, and the divisor pays for the indexer union."""
+        monkeypatch.setenv("VLLM_DSV4_UNPACK_INDEXER", "1")
+        g1 = {
+            "model.layers.0.self_attn.attn": _mla(512),
+            "model.layers.1.self_attn.attn": _mla(512),
+            "model.layers.0.self_attn.indexer.k_cache": _mla(132),
+            "model.layers.1.self_attn.indexer.k_cache": _mla(132),
+        }
+        g2 = {
+            f"mla_free.{i}": _mla(512) for i in range(3)
+        }
+        groups = [_uniform_group(g1), _uniform_group(g2)]
+        idx_page = _mla(132).page_size_bytes
+        mla_page = _mla(512).page_size_bytes
+        config = get_kv_cache_config_from_groups(
+            _mock_vllm_config("BLHNC"), groups, MEMORY
+        )
+        stride = 3 * mla_page
+        divisor = stride + 2 * idx_page
+        assert config.num_blocks == MEMORY // divisor
+        assert _pool_bytes_per_block(groups) == divisor
+        idx_tensor = next(
+            t for t in config.kv_cache_tensors if _indexer_only_entry(t.layers)
+        )
+        assert idx_tensor.block_stride == idx_page
+        assert idx_tensor.offset == stride * config.num_blocks
+        assert idx_tensor.offset + 2 * idx_page * config.num_blocks == idx_tensor.size

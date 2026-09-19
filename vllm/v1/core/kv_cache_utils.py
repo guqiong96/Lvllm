@@ -1192,7 +1192,80 @@ def _pool_bytes_per_block(kv_cache_groups: list[KVCacheGroupSpec]) -> int:
     `available_memory` into `num_blocks`. Used to compute the effective KV cache
     capacity once `num_gpu_blocks_override` is applied.
     """
-    return _get_kv_cache_bytes_per_block(kv_cache_groups)
+    bytes_per_block = _get_kv_cache_bytes_per_block(kv_cache_groups)
+    extra = _unpacked_indexer_bytes_per_block(kv_cache_groups)
+    if extra == 0:
+        return bytes_per_block
+    # Mirror the unpacked divisor of get_kv_cache_config_from_groups (the
+    # diagnostic knob resolves to a block-outermost layout for the models
+    # that register indexer cache layers).
+    max_non_indexer = max(
+        sum(
+            spec.page_size_bytes * len(layer_names)
+            for spec, layer_names in _spec_entries_of_group(group)
+            if not _indexer_only_entry(layer_names)
+        )
+        for group in kv_cache_groups
+        if not group.host_resident and group.layer_names
+    )
+    return max(bytes_per_block, max_non_indexer + extra)
+
+
+# ---- VLLM_DSV4_UNPACK_INDEXER (diagnostic, Xid31 ab70) ----------------------
+# Layer-name shapes registered by the DeepSeek-V4 / V4.1 indexer caches.
+_INDEXER_CACHE_LAYER_SUFFIXES = (".indexer", ".indexer.k_cache")
+
+
+def _is_indexer_cache_layer(layer_name: str) -> bool:
+    return layer_name.endswith(_INDEXER_CACHE_LAYER_SUFFIXES)
+
+
+def _indexer_only_entry(layer_names: Sequence[str]) -> bool:
+    return bool(layer_names) and all(
+        _is_indexer_cache_layer(name) for name in layer_names
+    )
+
+
+def _spec_entries_of_group(
+    group: KVCacheGroupSpec,
+) -> list[tuple[KVCacheSpec, list[str]]]:
+    layers_by_spec: defaultdict[KVCacheSpec, list[str]] = defaultdict(list)
+    if isinstance(group.kv_cache_spec, UniformTypeKVCacheSpecs):
+        for layer_name, spec in group.kv_cache_spec.kv_cache_specs.items():
+            layers_by_spec[spec].append(layer_name)
+    elif group.layer_names:
+        layers_by_spec[group.kv_cache_spec].extend(group.layer_names)
+    return list(layers_by_spec.items())
+
+
+def _unpacked_indexer_bytes_per_block(
+    kv_cache_groups: list[KVCacheGroupSpec],
+) -> int:
+    """Per-block bytes of indexer pages lifted out of the packed block.
+
+    Zero unless the `VLLM_DSV4_UNPACK_INDEXER` diagnostic gate is on and the
+    model registers indexer cache layers in pure-indexer spec entries. Those
+    bytes stay inside the same block budget: the interleaved (block-outermost)
+    stride shrinks by this amount and a dense indexer region of the same
+    size is appended after the interleaved region, so the pool size, the
+    divisor and num_blocks are unchanged.
+    """
+    if os.environ.get("VLLM_DSV4_UNPACK_INDEXER") != "1":
+        return 0
+    total = 0
+    seen: set[str] = set()
+    for group in kv_cache_groups:
+        if group.host_resident:
+            continue
+        for spec, layer_names in _spec_entries_of_group(group):
+            if not _indexer_only_entry(layer_names):
+                continue
+            for layer_name in layer_names:
+                if layer_name in seen:
+                    continue
+                seen.add(layer_name)
+                total += spec.page_size_bytes
+    return total
 
 
 def get_uniform_page_size(kv_cache_specs: Iterable[KVCacheSpec]) -> int:
@@ -1822,9 +1895,56 @@ def get_kv_cache_config_from_groups(
     bytes_per_block = _get_kv_cache_bytes_per_block(kv_cache_groups)
     interleaved_block_stride = bytes_per_block if layout.is_block_outermost else None
 
-    num_blocks = available_memory // bytes_per_block
+    indexer_extra = _unpacked_indexer_bytes_per_block(kv_cache_groups)
+    unpack_indexer = indexer_extra > 0 and layout.is_block_outermost
+    if os.environ.get("VLLM_DSV4_UNPACK_INDEXER") == "1" and indexer_extra == 0:
+        logger.warning(
+            "VLLM_DSV4_UNPACK_INDEXER is set but no indexer cache layers "
+            "(names ending in %s) were found; nothing unpacked.",
+            _INDEXER_CACHE_LAYER_SUFFIXES,
+        )
+    elif os.environ.get("VLLM_DSV4_UNPACK_INDEXER") == "1" and not unpack_indexer:
+        logger.warning(
+            "VLLM_DSV4_UNPACK_INDEXER is set but the resolved KV cache layout "
+            "(%s) already stores indexer pages outside the packed block; "
+            "unpacking is a no-op for this run.",
+            layout.name,
+        )
+
+    # Carve-out: every group drops its indexer pages from the packed block,
+    # so the interleaved stride only has to fit each group's NON-indexer
+    # packing; the dense indexer region of the union of indexer pages follows
+    # it. Indexer layers can be spread across groups with different mixes, so
+    # the divisor is stride + union, which is >= the packed bytes_per_block.
+    divisor = bytes_per_block
+    if unpack_indexer:
+        interleaved_block_stride = max(
+            sum(
+                spec.page_size_bytes * len(layer_names)
+                for spec, layer_names in _spec_entries_of_group(group)
+                if not _indexer_only_entry(layer_names)
+            )
+            for group in kv_cache_groups
+            if not group.host_resident and group.layer_names
+        )
+        divisor = interleaved_block_stride + indexer_extra
+    num_blocks = available_memory // divisor
     num_blocks = may_override_num_blocks(vllm_config, num_blocks)
-    size = bytes_per_block * num_blocks
+    size = divisor * num_blocks
+    if unpack_indexer:
+        logger.info(
+            "[VLLM_DSV4_UNPACK_INDEXER] indexer unpacked: lifted=%d B/block, "
+            "interleaved stride %d -> %d B, indexer region=[%d, %d), "
+            "num_blocks=%d (divisor %d B/block vs packed %d B)",
+            indexer_extra,
+            bytes_per_block,
+            interleaved_block_stride,
+            interleaved_block_stride * num_blocks,
+            size,
+            num_blocks,
+            divisor,
+            bytes_per_block,
+        )
 
     # Groups alias from byte 0. Spec regions are laid out differently:
     #
@@ -1838,6 +1958,11 @@ def get_kv_cache_config_from_groups(
     # group 1: | C [ blk 0 | blk 1 | ... ] | D [ blk 0 | blk 1 | ... ] |
 
     kv_cache_tensors = []
+    indexer_region_base = (
+        interleaved_block_stride if interleaved_block_stride is not None
+        else bytes_per_block
+    ) * num_blocks
+    indexer_region_cursor = indexer_region_base
     for group in kv_cache_groups:
         group_spec = group.kv_cache_spec
         layers_by_spec: defaultdict[KVCacheSpec, list[str]] = defaultdict(list)
@@ -1849,18 +1974,32 @@ def get_kv_cache_config_from_groups(
 
         byte_offset = 0
         for spec, layer_names in layers_by_spec.items():
-            layer_stride, block_stride, _, _, _ = compute_layout_strides(
-                spec,
-                num_blocks,
-                len(layer_names),
-                layout,
-                fixed_strides=(None, interleaved_block_stride, None, None, None),
-            )
-            offset = (
-                byte_offset
-                * max(layer_stride, spec.page_size_bytes)
-                // spec.page_size_bytes
-            )
+            if unpack_indexer and _indexer_only_entry(layer_names):
+                # Unpacked: a dense region of this tensor's own pages after
+                # the (now slimmer) interleaved region. The indexer's reader
+                # and store kernels derive everything from stride(0) plus
+                # the page-constant value/scale split, so no model-side
+                # change is needed (vllm-ds4 reference: stride0 == page).
+                layer_stride = spec.page_size_bytes * num_blocks
+                block_stride = spec.page_size_bytes
+                offset = indexer_region_cursor
+                indexer_region_cursor += (
+                    len(layer_names) * spec.page_size_bytes * num_blocks
+                )
+            else:
+                layer_stride, block_stride, _, _, _ = compute_layout_strides(
+                    spec,
+                    num_blocks,
+                    len(layer_names),
+                    layout,
+                    fixed_strides=(None, interleaved_block_stride, None, None, None),
+                )
+                offset = (
+                    byte_offset
+                    * max(layer_stride, spec.page_size_bytes)
+                    // spec.page_size_bytes
+                )
+                byte_offset += len(layer_names) * spec.page_size_bytes
             kv_cache_tensors.append(
                 KVCacheTensor(
                     size=size,
@@ -1870,7 +2009,6 @@ def get_kv_cache_config_from_groups(
                     offset=offset,
                 )
             )
-            byte_offset += len(layer_names) * spec.page_size_bytes
 
     return KVCacheConfig(
         num_blocks=num_blocks,
