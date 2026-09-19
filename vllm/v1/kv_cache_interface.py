@@ -845,8 +845,15 @@ class SlidingWindowSpec(AttentionSpec):
         assert vllm_config.parallel_config.decode_context_parallel_size == 1, (
             "DCP not support sliding window."
         )
+        # Startup sizing answers "can ONE max-length request be served", so the
+        # chunked-prefill transient is charged at one step's worth of tokens
+        # (max_num_batched_tokens), not the whole pipeline's in-flight window:
+        # a single request never has more than one batch of its own tokens
+        # unsettled. Concurrency transients stay covered by the runtime
+        # admission gate, which still uses VllmConfig.max_in_flight_tokens
+        # (vllm-ds4 parity, kv_cache_interface.SlidingWindowSpec there).
         max_blocks = self.max_admission_blocks_per_request(
-            max_in_flight_tokens=vllm_config.max_in_flight_tokens,
+            max_in_flight_tokens=vllm_config.scheduler_config.max_num_batched_tokens,
             max_model_len=vllm_config.model_config.max_model_len,
         )
         return max_blocks * self.page_size_bytes

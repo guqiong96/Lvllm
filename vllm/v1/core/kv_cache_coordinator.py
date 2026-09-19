@@ -178,6 +178,7 @@ class KVCacheCoordinator(ABC):
         num_local_computed_tokens: int,
         num_tokens_main_model: int,
         apply_admission_cap: bool = False,
+        skip_capped_groups: bool = False,
     ) -> int:
         """
         Get the number of device blocks needed to be allocated for the request.
@@ -200,12 +201,25 @@ class KVCacheCoordinator(ABC):
                 per-request admission cap (SWA / chunked-local). Set only by
                 the full-sequence admission gate; per-step allocation must
                 leave it False so the predictor matches `allocate_new_blocks`.
+            skip_capped_groups: If True, count only the groups WITHOUT a
+                recycling-aware cap (full-attention / encoder groups). Used
+                by the full-sequence gate to tell "the non-recycling part of
+                this sequence genuinely does not fit" (reject) apart from
+                "only the recycling groups' window+in-flight peak exceeds
+                the pool" (a smaller chunk lowers the peak; let the chunked
+                path and the block-feasibility shrink schedule it).
 
         Returns:
             The number of blocks to allocate.
         """
         num_blocks_to_allocate = 0
         for i, manager in enumerate(self.single_type_managers):
+            if (
+                skip_capped_groups
+                and getattr(manager, "_max_admission_blocks_per_request", None)
+                is not None
+            ):
+                continue
             if isinstance(manager, CrossAttentionManager):
                 # For cross-attention, we issue a single static allocation
                 # of blocks based on the number of encoder input tokens.

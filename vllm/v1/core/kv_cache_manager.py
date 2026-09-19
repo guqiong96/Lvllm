@@ -506,7 +506,29 @@ class KVCacheManager:
             )
             required_blocks = num_blocks_to_allocate + watermark_blocks
             if required_blocks > self.block_pool.get_num_free_blocks():
-                return None
+                # Distinguish a real overflow from a fine-grained-group
+                # livelock. Recycling-aware groups (sliding window / state
+                # caches) enter the gate with their window+in-flight peak,
+                # whose in-flight term scales with the chunk size: for fine
+                # block sizes that peak can exceed the pool even though every
+                # smaller chunk fits. Rejecting would retry the same request
+                # every step forever. Fall through to the chunked path only
+                # if the NON-recycling groups' full-sequence demand still
+                # fits, so over-admission of plain full-attention models
+                # keeps being rejected exactly as before.
+                uncapped = self.coordinator.get_num_blocks_to_allocate(
+                    request_id=request.request_id,
+                    num_tokens=full_num_tokens,
+                    new_computed_blocks=new_computed_block_list,
+                    num_encoder_tokens=num_encoder_tokens,
+                    total_computed_tokens=total_computed_tokens,
+                    num_local_computed_tokens=num_local_computed_tokens,
+                    num_tokens_main_model=full_num_tokens,
+                    apply_admission_cap=True,
+                    skip_capped_groups=True,
+                )
+                if uncapped + watermark_blocks > self.block_pool.get_num_free_blocks():
+                    return None
 
         num_tokens_main_model = total_computed_tokens + num_new_tokens
         num_tokens_need_slot = min(

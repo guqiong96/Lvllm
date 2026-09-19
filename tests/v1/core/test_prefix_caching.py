@@ -4976,6 +4976,66 @@ def test_can_fit_full_sequence_full_attention_still_gates_oversized():
     assert manager.allocate_slots(req, block_size, full_sequence_must_fit=True) is None
 
 
+def test_can_fit_full_sequence_fine_grained_swa_falls_through_to_chunk():
+    """A fine-grained recycling group must not starve at the full-MLA gate.
+
+    Its window+in-flight admission cap (which scales with the in-flight
+    token budget) can exceed the pool even though every smaller chunk fits,
+    so the gate must fall through to the chunked path whenever the
+    non-recycling groups' full-sequence demand fits (DeepSeek-V4 mixed-TP
+    state-cache starvation: any prompt past the in-flight term stayed
+    unschedulable forever).
+    """
+    full_block_size = 8
+    swa_block_size = 4
+    sliding_window = 8  # tokens
+    max_in_flight_tokens = 16
+    max_model_len = 64 * full_block_size
+    num_blocks = 18  # 17 usable
+
+    config = KVCacheConfig(
+        num_blocks=num_blocks,
+        kv_cache_tensors=[],
+        kv_cache_groups=[
+            KVCacheGroupSpec(
+                ["layer_full"],
+                FullAttentionSpec(
+                    block_size=full_block_size,
+                    num_kv_heads=1,
+                    head_size=1,
+                    dtype=torch.float32,
+                ),
+            ),
+            KVCacheGroupSpec(
+                ["layer_swa"],
+                SlidingWindowSpec(
+                    block_size=swa_block_size,
+                    num_kv_heads=1,
+                    head_size=1,
+                    dtype=torch.float32,
+                    sliding_window=sliding_window,
+                ),
+            ),
+        ],
+    )
+    manager = make_kv_cache_manager(
+        config,
+        max_model_len=max_model_len,
+        max_in_flight_tokens=max_in_flight_tokens,
+        enable_caching=True,
+        hash_block_size=swa_block_size,
+    )
+
+    # Full-attention demand (16) fits the pool, but the capped SWA demand
+    # (cdiv(min(7 + 16, 512) / 4) + 1 = 7) pushes the gate total (23) over
+    # the 17 usable blocks.
+    prompt_len = 16 * full_block_size
+    req = make_request("fine-grained", list(range(prompt_len)), 4, sha256)
+
+    blocks = manager.allocate_slots(req, 16, full_sequence_must_fit=True)
+    assert blocks is not None
+
+
 def test_can_fit_full_sequence_hisparse_caps_resident_pages():
     manager = make_hisparse_kv_cache_manager(
         num_blocks=11,

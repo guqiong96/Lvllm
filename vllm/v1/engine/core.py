@@ -97,6 +97,22 @@ from vllm.version import __version__ as VLLM_VERSION
 logger = init_logger(__name__)
 
 
+def _kv_step_trace(event: str, **fields) -> None:
+    from vllm import envs
+
+    if not envs.VLLM_KV_SIZE_DEBUG:
+        return
+    try:
+        with open("/tmp/opencode/kv_steps.log", "a") as f:
+            f.write(
+                f"{time.time():.3f} pid={os.getpid()} {event} "
+                + " ".join(f"{k}={v}" for k, v in fields.items())
+                + "\n"
+            )
+    except OSError:
+        pass
+
+
 HANDSHAKE_TIMEOUT_MINS = 5
 
 _R = TypeVar("_R")  # Return type for collective_rpc
@@ -236,6 +252,12 @@ class EngineCore:
             self.step if self.batch_queue is None else self.step_with_batch_queue
         )
         self.async_scheduling = vllm_config.scheduler_config.async_scheduling
+        _kv_step_trace(
+            "eng_init",
+            mcb=self.batch_queue_size,
+            async_scheduling=int(bool(self.async_scheduling)),
+            batch_q=int(self.batch_queue is not None),
+        )
 
         self.aborts_queue = queue.Queue[list[str]]()
 
@@ -598,6 +620,10 @@ class EngineCore:
         if not self.scheduler.has_requests():
             return {}, False
         scheduler_output = self.scheduler.schedule(self._should_throttle_prefills())
+        _t_sched = time.time()
+        _kv_step_trace(
+            "eng_sched", total=scheduler_output.total_num_scheduled_tokens
+        )
         future = self.model_executor.execute_model(scheduler_output, non_block=True)
         grammar_output = self.scheduler.get_grammar_bitmask(scheduler_output)
         with (
@@ -607,6 +633,7 @@ class EngineCore:
             model_output = future.result()
             if model_output is None:
                 model_output = self.model_executor.sample_tokens(grammar_output)
+        _kv_step_trace("eng_exec", dt_ms=f"{(time.time() - _t_sched) * 1000:.0f}")
 
         # Before processing the model output, process any aborts that happened
         # during the model execution.
@@ -1441,6 +1468,7 @@ class EngineCoreProc(EngineCore):
                     logger.debug("EngineCore waiting for work.")
                     waited = True
             block = self.process_input_queue_block
+            _kv_step_trace("eng_wait_input", block=int(block))
             try:
                 req = self.input_queue.get(block=block)
                 self._handle_client_request(*req)

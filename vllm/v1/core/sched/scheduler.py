@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from dataclasses import replace
 from typing import Any
 
+from vllm import envs
 from vllm.compilation.cuda_graph import CUDAGraphStat
 from vllm.config import KVEventsConfig, VllmConfig
 from vllm.distributed.ec_transfer.ec_connector.base import (
@@ -559,6 +560,29 @@ class Scheduler(SchedulerInterface):
             num_new_tokens -= self.num_prefill_lookahead - remaining
         return max(num_new_tokens, 0)
 
+    def _kv_step_trace(self, event: str, **fields: Any) -> None:
+        """Step-level trace for the KV chunking probe (VLLM_KV_SIZE_DEBUG=1).
+
+        Appends timestamped lines to ``/tmp/opencode/kv_steps.log``; used to
+        tell a shrunken prefill chunk apart from a genuinely slow per-step
+        worker path on long requests.
+        """
+        if not envs.VLLM_KV_SIZE_DEBUG:
+            return
+        import os
+        import threading
+
+        line = (
+            f"{time.time():.3f} pid={os.getpid()} tid={threading.get_ident() % 100000} "
+            f"step={self.current_step} seq={self.sched_step_seq} "
+            f"{event} " + " ".join(f"{k}={v}" for k, v in fields.items()) + "\n"
+        )
+        try:
+            with open("/tmp/opencode/kv_steps.log", "a") as f:
+                f.write(line)
+        except OSError:
+            pass
+
     def schedule(self, throttle_prefills: bool = False) -> SchedulerOutput:
         self.current_step += 1
         # NOTE(woosuk) on the scheduling algorithm:
@@ -725,6 +749,7 @@ class Scheduler(SchedulerInterface):
                 continue
 
             # Schedule newly needed KV blocks for the request.
+            defer_self_prefill = False
             with record_function_or_nullcontext("schedule: allocate_slots"):
                 while True:
                     new_blocks = self.kv_cache_manager.allocate_slots(
@@ -752,6 +777,21 @@ class Scheduler(SchedulerInterface):
                         )
                     else:
                         preempted_req = self.running[-1]
+
+                    if (
+                        preempted_req == request
+                        and request.is_prefill_chunk
+                        and request.num_in_flight_tokens > 0
+                    ):
+                        # The only victim is this prefill itself and its own
+                        # in-flight step will free blocks when it settles
+                        # (async scheduling allocates the next chunk before
+                        # the current one is accounted). Skip this step
+                        # instead of preempting self: a self-preempt resets
+                        # num_computed_tokens and recomputes the whole
+                        # prefill every step (livelock on tight pools).
+                        defer_self_prefill = True
+                        break
 
                     # A deferred free will not help with immediate allocation.
                     if not self._request_blocks_can_be_freed(preempted_req):
@@ -797,6 +837,20 @@ class Scheduler(SchedulerInterface):
 
             if new_blocks is None:
                 # Cannot schedule this request.
+                self._kv_step_trace(
+                    "running_alloc_fail",
+                    req=request.request_id,
+                    want=num_new_tokens,
+                    computed=request.num_computed_tokens,
+                    total=request.num_tokens,
+                    free=self.kv_cache_manager.block_pool.get_num_free_blocks(),
+                    defer=int(defer_self_prefill),
+                )
+                if defer_self_prefill:
+                    # Wait for the in-flight chunk to settle instead of
+                    # preempting self (see the alloc loop).
+                    req_index += 1
+                    continue
                 break
 
             # Schedule the request.
@@ -1172,13 +1226,73 @@ class Scheduler(SchedulerInterface):
                 )
 
                 if new_blocks is None:
-                    # The request cannot be scheduled.
+                    # Block-capacity feedback: the chunk size was picked from
+                    # the token budget alone, but per-token block cost is
+                    # governed by the finest-grained cache groups (small
+                    # sliding-window block sizes). Shrink to the largest
+                    # block-feasible chunk and retry once; without this the
+                    # scheduler retries the same infeasible chunk every step
+                    # (livelock on long prefills with tight pools).
+                    if (
+                        not load_kv_async
+                        and not pad_spec_decode
+                        and not request.has_encoder_inputs
+                        and num_new_tokens > 1
+                        and request.num_tokens - num_computed_tokens
+                        > num_new_tokens
+                    ):
+                        shrunk = self._largest_block_feasible_chunk(
+                            request,
+                            num_computed_tokens,
+                            num_new_tokens - 1,
+                            reserved_blocks,
+                        )
+                        shrunk = self._reserve_prefill_lookahead(
+                            request, num_computed_tokens, shrunk
+                        )
+                        self._kv_step_trace(
+                            "waiting_shrink",
+                            req=request.request_id,
+                            want=num_new_tokens,
+                            shrunk=shrunk,
+                            computed=num_computed_tokens,
+                            total=request.num_tokens,
+                            reserved=reserved_blocks,
+                            free=self.kv_cache_manager.block_pool.get_num_free_blocks(),
+                        )
+                        if shrunk > 0:
+                            num_new_tokens = shrunk
+                            new_blocks = (
+                                self.kv_cache_manager.allocate_slots(
+                                    request,
+                                    num_new_tokens,
+                                    num_new_computed_tokens=(
+                                        num_new_local_computed_tokens
+                                    ),
+                                    new_computed_blocks=new_computed_blocks,
+                                    num_lookahead_tokens=(
+                                        effective_lookahead_tokens
+                                    ),
+                                    num_external_computed_tokens=(
+                                        num_external_computed_tokens
+                                    ),
+                                    delay_cache_blocks=load_kv_async,
+                                    num_encoder_tokens=0,
+                                    full_sequence_must_fit=(
+                                        self.scheduler_reserve_full_isl
+                                    ),
+                                    reserved_blocks=reserved_blocks,
+                                    has_scheduled_reqs=bool(self.running),
+                                )
+                            )
+                    if new_blocks is None:
+                        # The request cannot be scheduled.
 
-                    # NOTE: we need to untouch the request from the encode cache
-                    # manager
-                    if request.has_encoder_inputs:
-                        self.encoder_cache_manager.free(request)
-                    break
+                        # NOTE: we need to untouch the request from the encode
+                        # cache manager
+                        if request.has_encoder_inputs:
+                            self.encoder_cache_manager.free(request)
+                        break
 
                 # KVTransfer: the connector uses this info to determine
                 # if a load is needed. Note that
@@ -1404,6 +1518,19 @@ class Scheduler(SchedulerInterface):
             scheduled_encoder_input_stats = self._make_scheduled_encoder_input_stats(
                 scheduled_encoder_inputs
             )
+
+        self._kv_step_trace(
+            "step_out",
+            total=total_num_scheduled_tokens,
+            nreqs=len(num_scheduled_tokens),
+            nbig=sum(1 for n in num_scheduled_tokens.values() if n > 1),
+            big=",".join(
+                str(n) for n in sorted(num_scheduled_tokens.values(), reverse=True)[:8]
+            ),
+            preempt=len(preempted_reqs),
+            running=len(self.running),
+            waiting=len(self.waiting),
+        )
 
         scheduler_output = SchedulerOutput(
             scheduled_new_reqs=new_reqs_data,
@@ -2927,6 +3054,44 @@ class Scheduler(SchedulerInterface):
             num_tokens_main_model=full_num_tokens,
             apply_admission_cap=True,
         )
+
+    def _largest_block_feasible_chunk(
+        self,
+        request: Request,
+        num_computed_tokens: int,
+        hi: int,
+        reserved_blocks: int,
+    ) -> int:
+        """Largest prefill chunk (in tokens, <= hi) whose block demand fits
+        the free pool, ignoring the token budget. Pure probe; returns 0 if
+        even one token does not fit. Fine-grained groups (small sliding-window
+        block sizes) make block cost grow faster than the token budget shrinks,
+        so a chunk chosen by tokens alone can be block-infeasible while a
+        smaller chunk is not; without this probe the scheduler would retry the
+        same infeasible chunk every step (livelock)."""
+        free = self.kv_cache_manager.block_pool.get_num_free_blocks()
+        if free <= reserved_blocks:
+            return 0
+        lo = 0
+        while lo < hi:
+            mid = lo + (hi - lo + 1) // 2
+            probe = self.kv_cache_manager.coordinator.get_num_blocks_to_allocate(
+                request_id=request.request_id,
+                num_tokens=num_computed_tokens + mid,
+                new_computed_blocks=(
+                    self.kv_cache_manager.empty_kv_cache_blocks.blocks
+                ),
+                num_encoder_tokens=0,
+                total_computed_tokens=0,
+                num_local_computed_tokens=0,
+                num_tokens_main_model=num_computed_tokens + mid,
+                apply_admission_cap=True,
+            )
+            if probe <= free - reserved_blocks:
+                lo = mid
+            else:
+                hi = mid - 1
+        return lo
 
     def _inflight_prefill_reserved_blocks(self) -> int:
         """Num blocks in-flight prefills still need to finish (their reservation)."""
