@@ -17,7 +17,7 @@ PyNvVideoCodec==2.0.4
 # 0.6.18 predates flashinfer#5075 (sm120 sparse-MLA NaN-safe gathers) and no
 # 0.7.0 exists on PyPI; ship the built wheel as an asset of Lvllm release
 # lvllm-v2.5.0 (source: flashinfer main @ 24c30bdd).
-flashinfer-python @ https://github.com/guqiong96/Lvllm/releases/download/lvllm-v2.5.0/flashinfer_python-0.7.0-py3-none-any.whl
+flashinfer-python @ https://github.com/guqiong96/Lvllm/releases/download/lvllm-v2.5.1/flashinfer_python-0.7.0-py3-none-any.whl
 # flashinfer-cubin deliberately NOT required: sparse MLA JIT-compiles from
 # source on first serve (nvcc required); the nightly cubin package predates
 # #5075 and must stay out.
