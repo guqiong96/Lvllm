@@ -1211,7 +1211,12 @@ def _pool_bytes_per_block(kv_cache_groups: list[KVCacheGroupSpec]) -> int:
     return max(bytes_per_block, max_non_indexer + extra)
 
 
-# ---- VLLM_DSV4_UNPACK_INDEXER (diagnostic, Xid31 ab70) ----------------------
+# ---- VLLM_DSV4_UNPACK_INDEXER (Xid31 fix, on by default) --------------------
+# Unpacking lifts indexer pages out of the block-outermost interleave (the
+# stride0~1MB packing that triggers FAULT_PDE on Blackwell with deep reused
+# page tables) into a dense tail region of the same block budget. Non-indexer
+# models are unaffected; VLLM_DSV4_UNPACK_INDEXER=0 restores the packed
+# layout as an explicit escape hatch.
 # Layer-name shapes registered by the DeepSeek-V4 / V4.1 indexer caches.
 _INDEXER_CACHE_LAYER_SUFFIXES = (".indexer", ".indexer.k_cache")
 
@@ -1243,14 +1248,15 @@ def _unpacked_indexer_bytes_per_block(
 ) -> int:
     """Per-block bytes of indexer pages lifted out of the packed block.
 
-    Zero unless the `VLLM_DSV4_UNPACK_INDEXER` diagnostic gate is on and the
-    model registers indexer cache layers in pure-indexer spec entries. Those
-    bytes stay inside the same block budget: the interleaved (block-outermost)
-    stride shrinks by this amount and a dense indexer region of the same
-    size is appended after the interleaved region, so the pool size, the
-    divisor and num_blocks are unchanged.
+    Zero unless unpacking is active (default on; `VLLM_DSV4_UNPACK_INDEXER=0`
+    opts out) and the model registers indexer cache layers in pure-indexer
+    spec entries. Those bytes stay inside the same block budget: the
+    interleaved (block-outermost) stride shrinks by this amount and a dense
+    indexer region of the same size is appended after the interleaved region,
+    so the pool size and num_blocks are unchanged for the block-count
+    arithmetic (divisor becomes slimmed stride + union).
     """
-    if os.environ.get("VLLM_DSV4_UNPACK_INDEXER") != "1":
+    if os.environ.get("VLLM_DSV4_UNPACK_INDEXER", "1") == "0":
         return 0
     total = 0
     seen: set[str] = set()
@@ -1897,15 +1903,20 @@ def get_kv_cache_config_from_groups(
 
     indexer_extra = _unpacked_indexer_bytes_per_block(kv_cache_groups)
     unpack_indexer = indexer_extra > 0 and layout.is_block_outermost
-    if os.environ.get("VLLM_DSV4_UNPACK_INDEXER") == "1" and indexer_extra == 0:
+    if os.environ.get("VLLM_DSV4_UNPACK_INDEXER", "1") == "0":
         logger.warning(
-            "VLLM_DSV4_UNPACK_INDEXER is set but no indexer cache layers "
+            "VLLM_DSV4_UNPACK_INDEXER=0: indexer pages stay packed into the "
+            "block-outermost interleave (Xid31 FAULT_PDE escape hatch)."
+        )
+    elif os.environ.get("VLLM_DSV4_UNPACK_INDEXER") == "1" and indexer_extra == 0:
+        logger.warning(
+            "VLLM_DSV4_UNPACK_INDEXER=1 but no indexer cache layers "
             "(names ending in %s) were found; nothing unpacked.",
             _INDEXER_CACHE_LAYER_SUFFIXES,
         )
     elif os.environ.get("VLLM_DSV4_UNPACK_INDEXER") == "1" and not unpack_indexer:
         logger.warning(
-            "VLLM_DSV4_UNPACK_INDEXER is set but the resolved KV cache layout "
+            "VLLM_DSV4_UNPACK_INDEXER=1 but the resolved KV cache layout "
             "(%s) already stores indexer pages outside the packed block; "
             "unpacking is a no-op for this run.",
             layout.name,
@@ -2256,9 +2267,19 @@ def _get_packed_kv_cache_groups(
     )
 
     def num_groups_for(spec: UniformTypeKVCacheSpecs, balanced: bool) -> int:
-        if balanced and repeats_per_group is not None:
-            return cdiv(spec.get_max_layers_per_page_size(), repeats_per_group)
-        return 1
+        if not (balanced and repeats_per_group is not None):
+            return 1
+        if isinstance(spec.first_spec, MLAAttentionSpec):
+            # Never pattern-split MLA buckets. Every split replicates its own
+            # block table over the SAME token columns, so a column pays one
+            # block id per split while the per-block bytes (the full tuple)
+            # stay constant: capacity collapses to the sum-of-groups model.
+            # One group keeps one block id per column, the tuple is paid once
+            # (vllm-ds4 single-group layout), and per-request reservations
+            # shrink with it.
+            logger.info_once("Packed grouping: MLA bucket kept as a single group.")
+            return 1
+        return cdiv(spec.get_max_layers_per_page_size(), repeats_per_group)
 
     def widest_group_bytes(page_size_layers: dict[int, list[str]], n: int) -> int:
         """Page bytes of the largest of the n groups a bucket splits into."""
@@ -2465,6 +2486,18 @@ def get_kv_cache_groups(
     if hisparse_groups := get_hisparse_kv_cache_groups(vllm_config, kv_cache_spec):
         return hisparse_groups
 
+    if envs.VLLM_KV_SIZE_DEBUG:
+        for name, spec in kv_cache_spec.items():
+            logger.info(
+                "KV-SIZE spec %-52s %-26s bs=%d page=%.3f MiB tps=%s win=%s",
+                name,
+                type(spec).__name__,
+                spec.block_size,
+                spec.page_size_bytes / 2**20,
+                getattr(spec, "tokens_per_state", "-"),
+                getattr(spec, "sliding_window", "-"),
+            )
+
     if is_kv_cache_spec_uniform(kv_cache_spec):
         # KV cache of all layers are the same, which is true for
         # most models. Allocate the same amount of memory for
@@ -2580,10 +2613,25 @@ def update_kv_cache_capacity(
     vllm_config.cache_config.kv_cache_size_tokens = num_tokens
     vllm_config.cache_config.kv_cache_max_concurrency = max_concurrency
     max_model_len = vllm_config.model_config.max_model_len
+    # `concurrency x mml` is an aggregate-slots figure that reads as nonsense
+    # for hybrid models (the finest group dominates it). Log the two numbers
+    # that actually answer "what can this pool serve": total bytes, and the
+    # longest single request that fits end to end (needed(mml) is monotonic
+    # since the startup sizing dropped the pipeline in-flight term, so this
+    # inversion is trustworthy).
+    pool_bytes = kv_cache_config.num_blocks * _pool_bytes_per_block(
+        kv_cache_config.kv_cache_groups
+    )
+    max_serving_len = _estimate_max_model_len_from_groups(
+        vllm_config, kv_cache_config.kv_cache_groups, pool_bytes
+    )
     logger.info_once(
-        "GPU KV cache size: %s tokens, "
+        "GPU KV cache size: %.2f GiB (%d blocks); "
+        "single-request max servable length: %s tokens; "
         "Maximum concurrency for %s tokens per request: %.2fx",
-        f"{num_tokens:,}",
+        pool_bytes / 2**30,
+        kv_cache_config.num_blocks,
+        f"{max_serving_len:,}",
         f"{max_model_len:,}",
         max_concurrency,
     )
@@ -2872,6 +2920,27 @@ def get_kv_cache_configs(
     # hybrid models when disable_hybrid_kv_cache_manager is enabled.
     # After this call, merged_kv_cache_specs may be modified in-place.
     global_kv_cache_groups = get_kv_cache_groups(vllm_config, merged_kv_cache_specs)
+
+    if envs.VLLM_KV_SIZE_DEBUG:
+        for gid, group in enumerate(global_kv_cache_groups):
+            gspec = group.kv_cache_spec
+            inner = getattr(gspec, "kv_cache_specs", None)
+            logger.info(
+                "KV-SIZE group %d: %d layers spec=%s bs=%d%s",
+                gid,
+                len(group.layer_names),
+                type(gspec).__name__,
+                gspec.block_size,
+                (
+                    " pages="
+                    + ",".join(
+                        f"{type(s).__name__[:6]}:{s.page_size_bytes >> 20}KiB"
+                        for s in dict.fromkeys(inner.values())
+                    )
+                    if inner is not None
+                    else ""
+                ),
+            )
 
     # If original_max_model_len was -1, automatically
     # determine the maximum model length that fits in available GPU memory.

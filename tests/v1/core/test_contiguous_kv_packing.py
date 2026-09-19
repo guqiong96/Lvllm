@@ -655,11 +655,12 @@ class TestCompressorRingGroup:
 
 
 class TestUnpackIndexerGate:
-    """VLLM_DSV4_UNPACK_INDEXER (Xid31 ab70 diagnostic): indexer cache layers
-    are carved out of the packed block (stride0 == the packed block) into a
-    dense region of their own pages appended after the interleaved region.
-    The block budget, divisor and num_blocks are unchanged; the interleaved
-    stride shrinks by the lifted indexer bytes."""
+    """Xid31 fix, on by default: indexer cache layers are carved out of the
+    packed block (stride0 == the packed block) into a dense region of their
+    own pages appended after the interleaved region. The block budget is
+    unchanged; the interleaved stride shrinks by the lifted indexer bytes and
+    the divisor pays for the union. VLLM_DSV4_UNPACK_INDEXER=0 restores the
+    packed layout (escape hatch)."""
 
     @staticmethod
     def _dsv4_like_groups(n_mla=2, n_idx=2):
@@ -672,8 +673,22 @@ class TestUnpackIndexerGate:
         }
         return [_uniform_group({**mla, **idx})], mla, idx
 
-    def test_gate_off_stays_packed(self, monkeypatch):
-        monkeypatch.delenv("VLLM_DSV4_UNPACK_INDEXER", raising=False)
+    def test_default_unpacks(self):
+        groups, mla, idx = self._dsv4_like_groups()
+        packed = _get_kv_cache_bytes_per_block(groups)
+        idx_page = next(iter(idx.values())).page_size_bytes
+        extra = len(idx) * idx_page
+
+        config = get_kv_cache_config_from_groups(
+            _mock_vllm_config("BLHNC"), groups, MEMORY
+        )
+        assert config.num_blocks == MEMORY // packed
+        mla_tensor, idx_tensor = config.kv_cache_tensors
+        assert mla_tensor.block_stride == packed - extra
+        assert idx_tensor.block_stride == idx_page
+
+    def test_gate_0_stays_packed(self, monkeypatch):
+        monkeypatch.setenv("VLLM_DSV4_UNPACK_INDEXER", "0")
         groups, mla, idx = self._dsv4_like_groups()
         config = get_kv_cache_config_from_groups(
             _mock_vllm_config("BLHNC"), groups, MEMORY
