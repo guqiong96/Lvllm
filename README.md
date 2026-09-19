@@ -112,6 +112,7 @@ bash commands/dsv4_0731_serve_tp4_dspark.sh
 | `LVLLM_GPU_RESIDENT_MOE_LAYERS` | none | expert layers in VRAM, e.g. `0`, `0-1,9` |
 | `LVLLM_ENABLE_NUMA_INTERLEAVE` | `1` | avoid NUMA node OOM |
 | `LK_POWER_SAVING` | `0` | `1` = CPU power saving |
+| `VLLM_DSV4_UNPACK_INDEXER` | `0` | DeepSeek-V4.x: carve indexer pages out of the interleaved KV pool (mixed-arch TP prefix-reuse crash workaround) |
 
 On a **mixed-arch host** add `FLASHINFER_CUDA_ARCH_LIST="<all ranks>"` (e.g. `"8.6 12.0f"`).
 
@@ -128,7 +129,7 @@ On a **mixed-arch host** add `FLASHINFER_CUDA_ARCH_LIST="<all ranks>"` (e.g. `"8
 ## Install
 
 ```bash
-pip install https://github.com/guqiong96/Lvllm/releases/download/lvllm-v2.5.0/lvllm-2.5.0-cp312-cp312-manylinux_2_34_x86_64.whl
+pip install https://github.com/guqiong96/Lvllm/releases/download/lvllm-v2.5.1/lvllm-2.5.1-cp312-cp312-manylinux_2_34_x86_64.whl
 # deps (incl. the bundled FlashInfer wheel with the SM120 sparse-MLA fix) resolve automatically
 ```
 
@@ -137,7 +138,7 @@ From source (needs GCC ≥ 13 for `<format>`):
 ```bash
 git clone https://github.com/guqiong96/Lvllm.git && cd Lvllm
 for d in /opt/rh/gcc-toolset-{14,13}/enable; do [ -f "$d" ] && source "$d" && break; done   # RHEL/Rocky
-VLLM_VERSION_OVERRIDE="2.5.0" CMAKE_BUILD_TYPE=Release pip install -e . --no-build-isolation
+VLLM_VERSION_OVERRIDE="2.5.1" CMAKE_BUILD_TYPE=Release pip install -e . --no-build-isolation
 ```
 
 ---

@@ -1,4 +1,38 @@
-# Release Notes — lvllm-v2.5.0
+# Release Notes
+
+## lvllm-v2.5.1 (2026-09-19)
+
+**Base:** lvllm-v2.5.0 · **Release Type:** patch (crash fix + diagnostics + scripts)
+
+### Fixes
+
+- **DeepSeek-V4.x mixed-arch TP prefix-reuse crash (Xid31 `FAULT_PDE`)** — under block-outermost
+  interleaved KV packing, indexer pages packed with a ≈1 MB `stride0` faulted on Blackwell page
+  tables on SM120 ranks once prefix reuse reached the same block depth. The new
+  `VLLM_DSV4_UNPACK_INDEXER=1` gate carves indexer layers out of the interleaved pool into a
+  dense tail region (natural per-page `stride0`); MLA/compressor groups keep interleaving.
+  Zero effect unless the env is set. Validated on the exact crash seed under both guarded
+  (blocking) and production (FULL-graph) timings, plus GSM8K 100/100 on SM120 TP2. (PR #111)
+
+### Diagnostics (all default-off)
+
+- `VLLM_SM8X_GUARD` host-side bound assertions on SM8x block/slot tables (downgrades a hard PDE
+  fault to a catchable `RuntimeError` with the offending slot), plus `GEOM`/`TOUCH`/`BTW`
+  geometry probes, `VLLM_TILELANG_SKIP_ROCM_TARGET_DETECT` (tilelang hip-detector fork-exec
+  hang under sanitizers) and `VLLM_DSV41_FORCE_SM8X_FLOOR`.
+
+### Scripts / config
+
+- v4.1 parsers in `config.yaml`, TP4 serve tweaks, and a DeepSeek-V4 SM120 A/B serve script.
+
+### Regression
+
+- `test_contiguous_kv_packing` 26 passed · same-seed soak crash points (r2 ≈22.1k tokens,
+  r12 compression point) green · GSM8K first 100, greedy: **100/100**.
+
+---
+
+# lvllm-v2.5.0
 
 **Base Version:** vllm commit 71888f507a (`upstream/main`, 2026-09-14) + lk_moe
 **Release Type:** Feature release (Lvllm)
