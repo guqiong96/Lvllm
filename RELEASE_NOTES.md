@@ -21,6 +21,16 @@
   `-inf`-outside-window contract preserved; BLOCK_N auto-drops 256→128 on small-smem devices).
   Reference parity ≤6e-7 relative in-window.
 
+### Model checkpoints
+
+- **Qwen3.8-Flash-Next (NVFP4)**: the validated checkpoint is
+  [`RadixArk/Qwen3.8-Flash-Next-NVFP4`](https://www.modelscope.cn/models/RadixArk/Qwen3.8-Flash-Next-NVFP4)
+  (also on Hugging Face; modelopt 0.46.0 release build — MoE/attention NVFP4, MTP draft
+  left BF16, FP8 n-gram PLE table handled by the byte-gather path). Same-named third-party
+  *mixed* dev builds that quantize the MTP draft to FP8 are not yet supported on SM80/86
+  (no FP8 MoE backend for the draft there; scheduled for 2.5.2 — until then disable MTP or
+  use the RadixArk checkpoint).
+
 ### Diagnostics (all default-off)
 
 - `VLLM_SM8X_GUARD` host-side bound assertions on SM8x block/slot tables (downgrades a hard PDE
