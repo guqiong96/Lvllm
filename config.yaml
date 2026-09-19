@@ -3,9 +3,10 @@ served-model-name: "DeepSeek-V4.1-Flash"
 host: "0.0.0.0"
 port: 8070
 tensor-parallel-size: 4
-max-model-len: 65536
-max_num_batched_tokens: 8192
-gpu-memory-utilization: 0.95
+max-model-len: 65536 
+max_num_batched_tokens: 4096
+gpu-memory-utilization: 0.85
+# kv-cache-memory-bytes: "3840M" 
 trust-remote-code: true
 dtype: "bfloat16"
 max_num_seqs: 2
@@ -18,8 +19,9 @@ tokenizer-mode: "deepseek_v41"
 tool-call-parser: "deepseek_v41"
 reasoning-parser: "deepseek_v41"
 kv-cache-dtype: "fp8_ds_mla"
-speculative-config: '{"method":"dspark","num_speculative_tokens":5,"draft_sample_method":"probabilistic"}'
+speculative-config: '{"method":"dspark","num_speculative_tokens":5,"draft_sample_method":"probabilistic"}'  
 default-chat-template-kwargs: '{"enable_thinking": false}'
+disable-custom-all-reduce: true
 
 # model: "/home/guqiong/Models/Qwen3.8-Flash-Next-NVFP4"
 # served-model-name: "Qwen3.8-Flash-Next-NVFP4"
