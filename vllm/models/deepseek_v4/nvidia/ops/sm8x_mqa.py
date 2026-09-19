@@ -397,6 +397,221 @@ def fp8_paged_mqa_logits_sm8x(
     )
 
 
+@triton.jit
+def _fp8_mqa_logits_prefill_kernel(
+    q_ptr,
+    k_ptr,
+    scale_ptr,
+    weights_ptr,
+    cu_seqlen_ks_ptr,
+    cu_seqlen_ke_ptr,
+    logits_ptr,
+    num_q: tl.constexpr,
+    seq_len_kv: tl.constexpr,
+    num_heads: tl.constexpr,
+    head_dim: tl.constexpr,
+    stride_qm: tl.constexpr,
+    stride_qh: tl.constexpr,
+    stride_qd: tl.constexpr,
+    stride_kn: tl.constexpr,
+    stride_kd: tl.constexpr,
+    stride_wm: tl.constexpr,
+    stride_wh: tl.constexpr,
+    stride_lm: tl.constexpr,
+    stride_ln: tl.constexpr,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    BLOCK_D: tl.constexpr,
+    USE_BF16_DOT: tl.constexpr,
+):
+    """Tiled non-paged MQA logits for prefill indexers (SM80/SM86 Ampere).
+
+    Ported from vllm-ds4 ``sm12x_mqa.py::_fp8_mqa_logits_kernel``. Each
+    program owns a ``[BLOCK_M, BLOCK_N]`` logits tile and loops over heads;
+    Q/K arrive as uint8 e4m3 bytes (Ampere lacks fp8e4nv) and decode
+    in-kernel; ``tl.dot`` runs at ``input_precision="tf32"``. Positions
+    outside each row's ``[cu_seqlen_ks, cu_seqlen_ke)`` window store
+    ``-inf`` so windowed top-k can run unmasked.
+    """
+    pid_m = tl.program_id(0)
+    pid_n = tl.program_id(1)
+    offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+    offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+    offs_d = tl.arange(0, BLOCK_D)
+
+    valid_m = offs_m < num_q
+    valid_n = offs_n < seq_len_kv
+    seq_start = tl.load(cu_seqlen_ks_ptr + offs_m, mask=valid_m, other=0)
+    seq_end = tl.load(cu_seqlen_ke_ptr + offs_m, mask=valid_m, other=0)
+    seq_mask = (offs_n[None, :] >= seq_start[:, None]) & (
+        offs_n[None, :] < seq_end[:, None]
+    )
+
+    logits = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
+    scale = tl.load(scale_ptr + offs_n, mask=valid_n, other=0.0)
+
+    # With one D block the K tile is loop-invariant: load and software-decode
+    # it ONCE for all heads (the uint8->f32 decode is the VALU bottleneck;
+    # re-running it per head made the head loop ~64x more VALU than tensor
+    # core work). Otherwise keep the per-d0 reload.
+    if BLOCK_D >= head_dim:
+        k_tile = e4m3fn_u8_to_f32(
+            tl.load(
+                k_ptr + offs_n[None, :] * stride_kn + offs_d[:, None] * stride_kd,
+                mask=valid_n[None, :] & (offs_d[:, None] < head_dim),
+                other=0,
+            )
+        )
+        if USE_BF16_DOT:
+            # e4m3 values are exactly representable in bf16 (4-bit mantissa),
+            # so the product is still exact; bf16 MMA doubles Ampere TC rate.
+            k_tile = k_tile.to(tl.bfloat16)
+        for h in tl.range(0, num_heads):
+            q = e4m3fn_u8_to_f32(
+                tl.load(
+                    q_ptr
+                    + offs_m[:, None] * stride_qm
+                    + h * stride_qh
+                    + offs_d[None, :] * stride_qd,
+                    mask=valid_m[:, None] & (offs_d[None, :] < head_dim),
+                    other=0,
+                )
+            )
+            if USE_BF16_DOT:
+                scores = tl.dot(q.to(tl.bfloat16), k_tile)
+            else:
+                scores = tl.dot(q, k_tile, input_precision="tf32")
+            weighted = tl.maximum(scores * scale[None, :], 0.0)
+            weight = tl.load(
+                weights_ptr + offs_m * stride_wm + h * stride_wh,
+                mask=valid_m,
+                other=0.0,
+            )
+            logits += weighted * weight[:, None]
+    else:
+        for h in tl.range(0, num_heads):
+            scores = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
+            for d0 in tl.range(0, head_dim, BLOCK_D):
+                d = d0 + offs_d
+                q = e4m3fn_u8_to_f32(
+                    tl.load(
+                        q_ptr
+                        + offs_m[:, None] * stride_qm
+                        + h * stride_qh
+                        + d[None, :] * stride_qd,
+                        mask=valid_m[:, None] & (d[None, :] < head_dim),
+                        other=0,
+                    )
+                )
+                k = e4m3fn_u8_to_f32(
+                    tl.load(
+                        k_ptr
+                        + offs_n[:, None] * stride_kn
+                        + d[None, :] * stride_kd,
+                        mask=valid_n[:, None] & (d[None, :] < head_dim),
+                        other=0,
+                    )
+                )
+                scores += tl.dot(q, tl.trans(k), input_precision="tf32")
+            weighted = tl.maximum(scores * scale[None, :], 0.0)
+            weight = tl.load(
+                weights_ptr + offs_m * stride_wm + h * stride_wh,
+                mask=valid_m,
+                other=0.0,
+            )
+            logits += weighted * weight[:, None]
+
+    store_mask = valid_m[:, None] & valid_n[None, :]
+    logits = tl.where(seq_mask & store_mask, logits, float("-inf"))
+    tl.store(
+        logits_ptr + offs_m[:, None] * stride_lm + offs_n[None, :] * stride_ln,
+        logits,
+        mask=store_mask,
+    )
+
+
+# Wide K tiles keep the per-program K re-stream down (BN=256 was ~1.4x of
+# BN=128 on sm86); fall back one notch on devices whose dynamic shared
+# memory cannot hold the K stage. Winner cached per resolved device index.
+_MQA_LOGITS_BN_CANDIDATES = (256, 128)
+_mqa_logits_bn_by_device: dict[int, int] = {}
+
+
+def fp8_mqa_logits_sm8x_triton(
+    q: torch.Tensor,
+    kv: tuple[torch.Tensor, torch.Tensor],
+    weights: torch.Tensor,
+    cu_seqlen_ks: torch.Tensor,
+    cu_seqlen_ke: torch.Tensor,
+) -> torch.Tensor:
+    """SM80/SM86 Triton non-paged MQA logits (prefill indexer fast path)."""
+    k_values, k_scales = kv
+    num_q, num_heads, head_dim = q.shape
+    seq_len_kv = k_values.shape[0]
+    # Ampere lacks the fp8e4nv type; the kernel decodes e4m3 from uint8.
+    q_u8 = q.view(torch.uint8)
+    k_u8 = k_values.view(torch.uint8)
+    scale_1d = k_scales.reshape(-1)
+    logits = torch.empty((num_q, seq_len_kv), device=q.device, dtype=torch.float32)
+    if num_q == 0 or seq_len_kv == 0:
+        return logits
+
+    block_d = 128 if head_dim >= 128 else 64
+    device_idx = q.device.index if q.device.index is not None else 0
+    from triton.runtime.errors import OutOfResources
+
+    cached_bn = _mqa_logits_bn_by_device.get(device_idx)
+    candidates = (cached_bn,) if cached_bn else _MQA_LOGITS_BN_CANDIDATES
+    for block_n in candidates:
+        try:
+            _fp8_mqa_logits_prefill_kernel[
+                (triton.cdiv(num_q, 16), triton.cdiv(seq_len_kv, block_n))
+            ](
+                q_u8,
+                k_u8,
+                scale_1d,
+                weights,
+                cu_seqlen_ks,
+                cu_seqlen_ke,
+                logits,
+                num_q,
+                seq_len_kv,
+                num_heads,
+                head_dim,
+                q_u8.stride(0),
+                q_u8.stride(1),
+                q_u8.stride(2),
+                k_u8.stride(0),
+                k_u8.stride(1),
+                weights.stride(0),
+                weights.stride(1),
+                logits.stride(0),
+                logits.stride(1),
+                BLOCK_M=16,
+                BLOCK_N=block_n,
+                BLOCK_D=block_d,
+                USE_BF16_DOT=True,
+                num_warps=4,
+            )
+        except Exception as err:
+            if block_n == _MQA_LOGITS_BN_CANDIDATES[-1]:
+                raise
+            from vllm.logger import init_logger
+
+            init_logger(__name__).warning_once(
+                "SM8x prefill-MQA BLOCK_N=%d exceeds shared memory on "
+                "device %d (%s); using BLOCK_N=%d.",
+                block_n,
+                device_idx,
+                err.__class__.__name__,
+                _MQA_LOGITS_BN_CANDIDATES[1],
+            )
+            continue
+        _mqa_logits_bn_by_device[device_idx] = block_n
+        return logits
+    raise AssertionError("unreachable")
+
+
 def fp8_mqa_logits_torch(
     q: torch.Tensor,
     k_values: torch.Tensor,
@@ -458,7 +673,31 @@ def fp8_mqa_logits_sm8x(
     cu_seqlen_ke: torch.Tensor,
     clean_logits: bool = False,
 ) -> torch.Tensor:
+    """Dispatch non-paged (prefill) MQA logits to the tiled Triton kernel,
+    falling back to the chunked torch reference when pre-conditions are
+    unmet. The Triton kernel always writes -inf outside each row's
+    ``[ks, ke)`` window; every consumer top-k is window-bounded, so this
+    matches the DeepGEMM contract regardless of ``clean_logits``."""
     k_values, k_scales = kv
+    head_dim = q.shape[2]
+    if (
+        q.dtype == torch.float8_e4m3fn
+        and k_values.dtype == torch.float8_e4m3fn
+        and head_dim % 64 == 0
+    ):
+        return fp8_mqa_logits_sm8x_triton(
+            q, kv, weights, cu_seqlen_ks, cu_seqlen_ke
+        )
+    from vllm.logger import init_logger
+
+    init_logger(__name__).warning_once(
+        "SM8x non-paged-MQA falling back to the torch reference path "
+        "(q.dtype=%s, k.dtype=%s, head_dim=%s). Expect a large per-step "
+        "prefill latency.",
+        q.dtype,
+        k_values.dtype,
+        head_dim,
+    )
     return fp8_mqa_logits_torch(
         q,
         k_values,

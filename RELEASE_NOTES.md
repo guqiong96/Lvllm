@@ -14,6 +14,13 @@
   Zero effect unless the env is set. Validated on the exact crash seed under both guarded
   (blocking) and production (FULL-graph) timings, plus GSM8K 100/100 on SM120 TP2. (PR #111)
 
+- **DeepSeek-V4 prefill indexer slow torch path on SM80/86** — the non-paged MQA-logits entry
+  point always ran the chunked torch reference (`.float()` dequant of the whole K buffer,
+  fp32 matmul chunks), capping prefill and adding multi-GB transient allocations. It now
+  dispatches to a tiled Triton kernel (uint8 e4m3 decode once per K tile, exact bf16 MMA,
+  `-inf`-outside-window contract preserved; BLOCK_N auto-drops 256→128 on small-smem devices).
+  Reference parity ≤6e-7 relative in-window.
+
 ### Diagnostics (all default-off)
 
 - `VLLM_SM8X_GUARD` host-side bound assertions on SM8x block/slot tables (downgrades a hard PDE
