@@ -127,6 +127,21 @@ def test_config_args(parser_with_config, cli_config_file):
     assert args.trust_remote_code
 
 
+def test_config_false_bool_reaches_dash_no_flag(tmp_path):
+    # `some_flag: false` must set the option to False even when the key uses
+    # underscores while the option is registered as --no-some-flag; silently
+    # dropping it left the auto-derived default in place (async_scheduling bug).
+    parser = FlexibleArgumentParser()
+    parser.add_argument("serve")
+    parser.add_argument("model_tag", nargs="?")
+    parser.add_argument("--config", type=str)
+    parser.add_argument("--some-flag", action=BooleanOptionalAction, default=None)
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(yaml.dump({"some_flag": False}))
+    args = parser.parse_args(["serve", "mymodel", "--config", str(cfg)])
+    assert args.some_flag is False
+
+
 def test_config_file(parser_with_config):
     with pytest.raises(FileNotFoundError):
         parser_with_config.parse_args(

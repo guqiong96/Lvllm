@@ -588,12 +588,39 @@ class FlexibleArgumentParser(ArgumentParser):
             )
             raise ex
 
+        def _option_registered(option: str) -> bool:
+            # `--config` expansion runs on the top-level parser, but the
+            # options usually live on a subparser (e.g. `vllm serve`), so
+            # also search every subparser's option table.
+            if option in self._option_string_actions:
+                return True
+            for action in self._actions:
+                if isinstance(action, argparse._SubParsersAction):
+                    if any(
+                        option in sub._option_string_actions
+                        for sub in action.choices.values()
+                    ):
+                        return True
+            return False
+
         for key, value in config.items():
             if isinstance(value, bool):
                 if value:
                     processed_args.append("--" + key)
-                elif (no_key := f"--no-{key}") in self._option_string_actions:
-                    processed_args.append(no_key)
+                else:
+                    no_key = f"--no-{key}"
+                    no_key_dashed = "--no-" + key.replace("_", "-")
+                    if _option_registered(no_key):
+                        processed_args.append(no_key)
+                    elif _option_registered(no_key_dashed):
+                        processed_args.append(no_key_dashed)
+                    else:
+                        logger.warning(
+                            "Config key %r is false but the parser has no "
+                            "--no-%s flag; it will keep its default.",
+                            key,
+                            key,
+                        )
             elif isinstance(value, list):
                 if value:
                     processed_args.append("--" + key)
