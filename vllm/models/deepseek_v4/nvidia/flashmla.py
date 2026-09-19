@@ -24,6 +24,10 @@ from vllm.models.deepseek_v4.nvidia.ops.sm8x_attn import (
     Sm8xAttnBuffers,
     sm8x_decode_attention,
 )
+from vllm.models.deepseek_v4.nvidia.ops.sm8x_sparse_mla_prefill import (
+    sm8x_tiled_prefill_enabled,
+    sm8x_tiled_sparse_mla_prefill,
+)
 from vllm.models.deepseek_v4.sparse_mla import (
     DeepseekV4FlashMLABackend,
     DeepseekV4FlashMLAMetadata,
@@ -429,19 +433,34 @@ class DeepseekV4FlashMLAAttention(DeepseekV4Attention):
                 max_image_tokens=self.max_image_tokens,
             )
             if _is_sm8():
-                # Triton flash-style sparse prefill over the gathered rows;
-                # same contract as flash_mla_sparse_fwd (flat row ids +
-                # per-query topk_length, -1 = padding).
-                sparse_mla_fwd_with_sink(
-                    q=q[query_start:query_end],
-                    kv=kv.view(-1, q.shape[-1]),
-                    indices=combined_indices,
-                    topk_length=combined_lens,
-                    scale=self.scale,
-                    attn_sink=self.attn_sink,
-                    output=output[query_start:query_end],
-                    num_heads=self.n_local_heads,
-                )
+                if sm8x_tiled_prefill_enabled():
+                    # Tiled port (query chunk x topk chunk x head block):
+                    # each gathered KV row is loaded once per 8 heads instead
+                    # of once per (query, head). Same contract as below.
+                    sm8x_tiled_sparse_mla_prefill(
+                        q=q[query_start:query_end],
+                        kv_flat=kv.view(-1, q.shape[-1]),
+                        indices=combined_indices,
+                        lens=combined_lens,
+                        scale=self.scale,
+                        attn_sink=self.attn_sink,
+                        output=output[query_start:query_end],
+                        num_heads=self.n_local_heads,
+                    )
+                else:
+                    # Triton flash-style sparse prefill over the gathered rows;
+                    # same contract as flash_mla_sparse_fwd (flat row ids +
+                    # per-query topk_length, -1 = padding).
+                    sparse_mla_fwd_with_sink(
+                        q=q[query_start:query_end],
+                        kv=kv.view(-1, q.shape[-1]),
+                        indices=combined_indices,
+                        topk_length=combined_lens,
+                        scale=self.scale,
+                        attn_sink=self.attn_sink,
+                        output=output[query_start:query_end],
+                        num_heads=self.n_local_heads,
+                    )
             else:
                 flash_mla_sparse_fwd(
                     q=q[query_start:query_end],
