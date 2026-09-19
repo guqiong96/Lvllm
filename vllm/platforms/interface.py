@@ -467,6 +467,12 @@ class Platform:
         current = cls.get_device_capability()
         if count < 2 or current is None:
             return current
+        if os.environ.get("VLLM_DSV41_FORCE_SM8X_FLOOR") == "1":
+            # DIAGNOSTIC ONLY (ab66): pretend the group floor is Ampere so the
+            # full sm8x Triton path (attention + indexer + o_proj + compressor)
+            # runs on Blackwell hardware, to isolate "packed sm8x page x sm120"
+            # from the mixed-TP4 confound. Never set in production.
+            return DeviceCapability(8, 6)
         return _capability_floor_cached(cls, count, current)
 
     @classmethod

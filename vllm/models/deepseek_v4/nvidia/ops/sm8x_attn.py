@@ -22,6 +22,8 @@ from vllm.models.deepseek_v4.common.ops.sparse_mla_kernels import (
     matmul_sparse_mla_attention_with_sink,
 )
 
+from ._sm8x_guard import guard_slot_table
+
 # Read from inside @triton.jit bodies, so they must be constexpr globals.
 _FP8_DIM = tl.constexpr(448)
 _TOKEN_BYTES = 576  # 448 fp8 + 64*2 bf16 rope
@@ -151,6 +153,15 @@ def dequantize_combined_slots(
         if comp_cache is not None
         else 0
     )
+    # Catch a stale / out-of-range candidate slot (would fault with Xid31
+    # FAULT_PDE) before launching, when VLLM_SM8X_GUARD=1. No-op otherwise.
+    guard_slot_table(
+        swa_indices, swa_lens, swa_cache.shape[0] * swa_block_size, "SWA"
+    )
+    if comp_indices is not None:
+        guard_slot_table(
+            comp_indices, comp_lens, comp_cache.shape[0] * comp_block_size, "comp"
+        )
     _dequantize_combined_slots_kernel[(num_tokens, k_swa + k_comp)](
         combined_kv,
         valid_buf,

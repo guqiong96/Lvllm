@@ -157,6 +157,12 @@ def use_sm8x_mqa_fallback() -> bool:
     the portable Triton/torch SM80 path in
     ``vllm.models.deepseek_v4.nvidia.ops.sm8x_mqa``.
     """
+    if os.environ.get("VLLM_DSV41_FORCE_SM8X_FLOOR") == "1":
+        # DIAGNOSTIC ONLY (ab66): pair with the group_capability_floor override so
+        # the paged-MQA rowwise kernel also runs on Blackwell in a pure-sm120 TP2
+        # run (device 0 is sm120 there, so the capability test alone would pick
+        # DeepGEMM and never exercise the packed sm8x page reader).
+        return True
     return (
         current_platform.is_cuda()
         and current_platform.has_device_capability(80)

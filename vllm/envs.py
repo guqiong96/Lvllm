@@ -164,6 +164,12 @@ if TYPE_CHECKING:
     # Route the SM120 sparse-MLA decode through the SM8x Triton path (reads the
     # 584B packed pool) for CUDA-vs-Triton cross-validation; default off.
     VLLM_DSV41_SM8X_CROSSCHECK: bool = False
+    # Guard the SM8x sparse-MLA path's block/candidate tables against stale /
+    # out-of-range physical slots (reads a freed page -> Xid31 FAULT_PDE). When
+    # on, the Python launchers raise a catchable error (pinpointing the
+    # offending slot) instead of letting the Triton kernels fault the GPU. Off
+    # by default; the per-launch host sync is debug-only.
+    VLLM_SM8X_GUARD: bool = False
     VLLM_DISABLE_COMPILE_CACHE: bool = False
     VLLM_REPLICATE_EMBED: bool = False
     VLLM_USE_LAYERNAME: bool = True
@@ -2119,6 +2125,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
     "VLLM_DSV41_SM8X_CROSSCHECK": lambda: bool(
         int(os.getenv("VLLM_DSV41_SM8X_CROSSCHECK", "0"))
     ),
+    "VLLM_SM8X_GUARD": lambda: bool(int(os.getenv("VLLM_SM8X_GUARD", "0"))),
     # Debug logging for --enable-mfu-metrics
     "VLLM_DEBUG_MFU_METRICS": lambda: bool(
         int(os.getenv("VLLM_DEBUG_MFU_METRICS", "0"))

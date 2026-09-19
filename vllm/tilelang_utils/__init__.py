@@ -4,12 +4,27 @@
 from __future__ import annotations
 
 import functools
+import os
 from collections.abc import Callable
 from functools import cache
 from typing import TYPE_CHECKING, Any
 
 from vllm.platforms import current_platform
 from vllm.utils.import_utils import has_tilelang
+
+
+def _diag_skip_rocm_target_detect() -> None:
+    """Diagnostic: drop tilelang's ROCm target detector so target resolution
+    never spawns `which hipcc`. Under compute-sanitizer's tree launcher that
+    fork-exec handshake can wedge the whole TP group. CUDA detector uses
+    CUDA_HOME + torch (no subprocess), per-rank arch detection unaffected.
+    """
+    if os.environ.get("VLLM_TILELANG_SKIP_ROCM_TARGET_DETECT") != "1":
+        return
+    import tilelang.backend.target as _tt
+
+    _tt._TARGET_DETECTORS.pop("hip", None)
+
 
 if TYPE_CHECKING or current_platform.is_cuda():
     if not has_tilelang():
@@ -19,6 +34,8 @@ if TYPE_CHECKING or current_platform.is_cuda():
         )
     import tilelang
     import tilelang.language as T
+
+    _diag_skip_rocm_target_detect()
 else:
     tilelang = None  # type: ignore[assignment]
     T = None  # type: ignore[assignment]

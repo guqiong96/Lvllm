@@ -19,6 +19,8 @@ from vllm.model_executor.layers.quantization.utils.fp8_emulate import (
 )
 from vllm.triton_utils import tl, triton
 
+from ._sm8x_guard import geometry_probe, guard_block_table
+
 
 def _view_packed_fp8_paged_mqa_kv_cache(
     kv_cache: torch.Tensor,
@@ -258,6 +260,16 @@ def fp8_paged_mqa_logits_rowwise_triton(
         context_lens_2d = context_lens_2d.expand(batch_size, next_n).contiguous()
     block_n = 128
     grid = (num_rows, triton.cdiv(token_count, block_n))
+    # Catch a stale / out-of-range block id (would fault with Xid31 FAULT_PDE)
+    # before launching, when VLLM_SM8X_GUARD=1. No-op otherwise.
+    guard_block_table(
+        page_table,
+        context_lens_2d,
+        block_size,
+        kv_values.shape[0],
+        cache=(kv_values, kv_scale),
+    )
+    geometry_probe(kv_values, kv_scale, page_table, context_lens_2d)
     _fp8_paged_mqa_logits_rowwise_kernel[grid](
         q,
         kv_values,
