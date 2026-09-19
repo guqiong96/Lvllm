@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # Qwen3.6-35B-A3B-FP8 · 4 GPUs (2x3090 + 2x5060Ti), TP4, plain decode.
-# Mixed-arch host: FLASHINFER_CUDA_ARCH_LIST must cover every rank arch.
 CUDA_DEVICE_ORDER=PCI_BUS_ID \
 CUDA_VISIBLE_DEVICES=0,1,2,3 \
 LVLLM_MOE_NUMA_ENABLED=1 \
@@ -11,7 +10,6 @@ LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=128 \
 LVLLM_GPU_PREFETCH_WINDOW=1 \
 LVLLM_GPU_RESIDENT_MOE_LAYERS=0-1 \
 LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
-FLASHINFER_CUDA_ARCH_LIST="8.6 12.0f" \
 vllm serve /home/guqiong/Models/Qwen3.6-35B-A3B-FP8 \
     --host 0.0.0.0 \
     --port 8070 \

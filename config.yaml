@@ -14,9 +14,9 @@ compilation_config.mode: "VLLM_COMPILE"
 enable_prefix_caching: true
 enable-chunked-prefill: true
 enable-auto-tool-choice: true
-tokenizer-mode: "deepseek_v4"
-tool-call-parser: "deepseek_v4"
-reasoning-parser: "deepseek_v4"
+tokenizer-mode: "deepseek_v41"
+tool-call-parser: "deepseek_v41"
+reasoning-parser: "deepseek_v41"
 kv-cache-dtype: "fp8_ds_mla"
 speculative-config: '{"method":"dspark","num_speculative_tokens":5,"draft_sample_method":"probabilistic"}'
 default-chat-template-kwargs: '{"enable_thinking": false}'

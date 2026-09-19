@@ -2,12 +2,10 @@
 # GLM-5.3-Flash-NVFP4 - 4 GPUs (2x3090 + 2x5060 Ti), TP4 mixed, plain decode (no MTP).
 # Mixed-arch: the group capability floor is 8.x, so every rank runs the sm8x
 # Triton sparse-MLA backend (bf16 KV) and the kpool block alignment anchors to
-# the floor (cuda.py:440). FLASHINFER_CUDA_ARCH_LIST must cover both arches.
 # KV budget = smallest rank (16G 5060Ti); keep mml/mnb small (hetero).
 CUDA_DEVICE_ORDER=PCI_BUS_ID \
 CUDA_VISIBLE_DEVICES=0,1,2,3 \
 FLASHINFER_DISABLE_VERSION_CHECK=1 \
-FLASHINFER_CUDA_ARCH_LIST="8.6 12.0f" \
 VLLM_USE_V2_MODEL_RUNNER=1 \
 LVLLM_MOE_NUMA_ENABLED=1 \
 LK_THREADS=48 \

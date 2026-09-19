@@ -22,9 +22,9 @@ vllm serve ~/Models/DeepSeek-V4.1-Flash \
   --gpu-memory-utilization 0.95 \
   --dtype bfloat16 \
   --kv-cache-dtype fp8_ds_mla \
-  --tokenizer-mode deepseek_v4 \
-  --tool-call-parser deepseek_v4 \
-  --reasoning-parser deepseek_v4 \
+  --tokenizer-mode deepseek_v41 \
+  --tool-call-parser deepseek_v41 \
+  --reasoning-parser deepseek_v41 \
   --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","mode":"VLLM_COMPILE"}' \
   --enable-prefix-caching --enable-chunked-prefill \
   --enable-auto-tool-choice --trust-remote-code \

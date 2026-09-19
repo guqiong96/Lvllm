@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # DeepSeek-V4-Flash (0731) · 4 GPUs (2×3090 + 2×5060 Ti), TP4, dspark.
-# FLASHINFER_CUDA_ARCH_LIST must cover every rank's arch (mixed-arch host).
 # ⚠ SM8x ranks on the V4 path are NOT yet validated in this tree (mHC fix
 # landed, but the fp8 blockwise DeepGEMM gate answers per-rank ⇒ mixed
 # groups can still fork the SF layout). Homogeneous runs are the tested ones.
@@ -8,7 +7,6 @@
 CUDA_DEVICE_ORDER=PCI_BUS_ID \
 CUDA_VISIBLE_DEVICES=0,1,2,3 \
 FLASHINFER_DISABLE_VERSION_CHECK=1 \
-FLASHINFER_CUDA_ARCH_LIST="8.6 12.0f" \
 LVLLM_MOE_NUMA_ENABLED=1 \
 LK_THREADS=48 \
 OMP_NUM_THREADS=1 \
