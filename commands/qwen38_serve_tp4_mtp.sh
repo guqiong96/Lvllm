@@ -13,7 +13,7 @@ LVLLM_EMBEDDING_NUMA_ENABLED=1 \
 VLLM_USE_V2_MODEL_RUNNER=1 \
 LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=2048 \
 LVLLM_GPU_RESIDENT_MOE_LAYERS=0 \
-vllm serve ~/Models/Qwen3.8-Flash-Next-NVFP4 \
+vllm serve ~/Models/Qwen3.8-Flash-Next-NVFP4-W4A16-4o6-FP8 \
   --host 0.0.0.0 \
   --port 8070 \
   --tensor-parallel-size 4 \
