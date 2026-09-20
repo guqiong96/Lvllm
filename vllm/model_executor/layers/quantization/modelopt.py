@@ -2196,7 +2196,13 @@ class KFp8Block128(QuantKeyScheme):
         if role is not WEIGHT:
             self.reject(role)
         layer.weight = Parameter(layer.weight.data, requires_grad=False)
-        s = layer.weight_scale
+        # getattr: after the 2-D-convention normalization the FormatScheme
+        # keeps only weight_scale_inv, so there is nothing left to squeeze —
+        # re-reading it here would resurrect a stale weight_scale parameter.
+        s = getattr(layer, "weight_scale", None)
+        if s is None:
+            return
+        s = s.data
         if s.dim() == 4:
             s = s.squeeze(1).squeeze(-1)  # [ob,1,ib,1] -> [ob,ib]
         elif s.dim() != 2:
@@ -2429,6 +2435,68 @@ class _Fp8PbWoPartialBlock(FormatScheme):
 _PB_WO_PARTIAL_BLOCK = _Fp8PbWoPartialBlock()
 
 
+class _Fp8PbWoScaleInv(_Fp8PbWoPartialBlock):
+    """FP8_PB_WO checkpoints shipping DeepSeek-style 2-D ``weight_scale_inv``
+    (ceiling-divided block grid) instead of ModelOpt's 4-D ``weight_scale``
+    (#54126; the serialization split of #50617's FP8_PB). Post-processed
+    modelopt+postproc exports use this layout.
+
+    Both conventions are dequant multipliers on the same 128x128 block grid,
+    so register both scale parameters with sentinels, let the one the
+    checkpoint actually fills win, and delete the loser. Exactly one name
+    survives because kernels that support both read ``weight_scale_inv``
+    with priority, and the FP8 Marlin prepare/apply pair writes and reads
+    whichever single name the layer exposes.
+    """
+
+    _CONV_ATTR = "_pbwo_scale_convention"
+
+    def extra_weights(self, layer, shapes, ctx, wl) -> None:
+        QuantKeyScheme.register_params(
+            layer,
+            "weight_scale_inv",
+            (
+                cdiv(shapes.output_size_per_partition, 128),
+                shapes.input_size_per_partition // 128,
+            ),
+            torch.float32,
+            BlockQuantScaleParameter,
+            wl,
+            input_dim=1,
+            output_dim=0,
+            init=FP8_SCALE_SENTINEL,
+        )
+
+    def post_process(self, layer) -> None:
+        if not hasattr(layer, self._CONV_ATTR):
+            inv_loaded = not torch.all(
+                layer.weight_scale_inv == FP8_SCALE_SENTINEL
+            )
+            wo_scale = getattr(layer, "weight_scale", None)
+            wo_loaded = wo_scale is not None and not torch.all(
+                wo_scale == FP8_SCALE_SENTINEL
+            )
+            if inv_loaded and wo_loaded:
+                raise ValueError(
+                    f"{layer.prefix}: checkpoint provides both FP8_PB_WO "
+                    "scale conventions (weight_scale and weight_scale_inv)"
+                )
+            if not inv_loaded and not wo_loaded:
+                raise ValueError(
+                    f"{layer.prefix}: no FP8_PB_WO block scale loaded "
+                    "(neither weight_scale nor weight_scale_inv)"
+                )
+            if inv_loaded:
+                del layer.weight_scale
+            else:
+                del layer.weight_scale_inv
+            setattr(layer, self._CONV_ATTR, True)
+        super().post_process(layer)
+
+
+_PB_WO_SCALE_INV = _Fp8PbWoScaleInv()
+
+
 class _DropInputScale(FormatScheme):
     """Interim: register then drop a W4A16 checkpoint's on-disk input_scale.
 
@@ -2517,6 +2585,9 @@ class ModelOptLinearMethod(LinearMethodBase):
         layer.logical_widths = output_partition_sizes
         layer.input_size_per_partition = input_size_per_partition
         layer.output_size_per_partition = sum(output_partition_sizes)
+        # Contract of the legacy ModelOpt linear methods, read by the FP8
+        # Marlin fallback's prepare (sm8x block-FP8 W8A16 path).
+        layer.orig_dtype = params_dtype
         # Humming reads both off the layer in
         # prepare_humming_linear_layer_config. LinearBase sets them itself;
         # ParallelLMHead does not, so supply them here.
@@ -2611,14 +2682,15 @@ def resolve(algo: str, subcfg, prefix: str):
     if algo == "FP8_PB_WO":
         # PbWo: 128x128 block-static weight, dynamic per-block activation (W8A8).
         # The block kernel's post-load runs here; CompressedTensors block-FP8
-        # is the reference for this path. The FormatScheme pads a non-128 output
-        # width to a block boundary and trims the output back (#53132) -- a no-op
-        # for the common block-aligned case.
+        # is the reference for this path. The FormatScheme accepts both scale
+        # serializations (4-D weight_scale / 2-D weight_scale_inv), and pads a
+        # non-128 output width to a block boundary and trims the output back
+        # (#53132) -- a no-op for the common block-aligned case.
         ctx = CkptCtx()
         return (
             QuantSpec(weight=kFp8Static128BlockSym, activation=kFp8Dynamic128Sym),
             ctx,
-            _PB_WO_PARTIAL_BLOCK,
+            _PB_WO_SCALE_INV,
         )
     if algo == "MXFP8":
         # MXFP8: block(32) e4m3 weight + e8m0 scale, dynamic activation.

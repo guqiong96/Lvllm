@@ -935,6 +935,102 @@ def test_modelopt_fp8_pb_wo_hides_output_padding(monkeypatch):
     assert kernel.apply_weights.call_args.kwargs["bias"] is None
 
 
+def _pbwo_scale_inv_method(monkeypatch):
+    """Generic FP8_PB_WO method + _PB_WO_SCALE_INV format scheme, block-aligned
+    512x256 (no partial-block padding in play)."""
+    from vllm.config.quantization import QuantSpec
+    from vllm.model_executor.layers.quantization import modelopt as mo
+    from vllm.model_executor.layers.quantization.utils.quant_utils import (
+        kFp8Dynamic128Sym,
+        kFp8Static128BlockSym,
+    )
+
+    kernel = Mock()
+    monkeypatch.setattr(mo, "init_fp8_linear_kernel", Mock(return_value=kernel))
+    monkeypatch.setattr(mo, "expose_input_quant_key", lambda layer, k: None)
+
+    method = ModelOptLinearMethod.__new__(ModelOptLinearMethod)
+    method.spec = QuantSpec(weight=kFp8Static128BlockSym, activation=kFp8Dynamic128Sym)
+    method.ctx = mo.CkptCtx()
+    method.fmt = mo._PB_WO_SCALE_INV
+    method.wkey = mo.SCHEME_FOR[kFp8Static128BlockSym]
+    method.akey = mo.SCHEME_FOR[kFp8Dynamic128Sym]
+    method.input_dtype = method.out_dtype = torch.bfloat16
+    method.marlin_input_dtype = None
+    return method, kernel
+
+
+def _pbwo_scale_inv_layer(method):
+    layer = torch.nn.Module()
+    layer.prefix = "layer"
+    with (
+        patch(
+            "vllm.model_executor.parameter.get_tensor_model_parallel_rank",
+            return_value=0,
+        ),
+        patch(
+            "vllm.model_executor.parameter.get_tensor_model_parallel_world_size",
+            return_value=1,
+        ),
+    ):
+        method.create_weights(
+            layer, 256, [512], 256, 512, torch.bfloat16, weight_loader=Mock()
+        )
+    return layer
+
+
+def test_modelopt_fp8_pb_wo_loads_weight_scale_inv_convention(monkeypatch):
+    """A checkpoint exporting the 2-D weight_scale_inv convention (modelopt
+    +postproc exports, #54126) loads: the sentinel weight_scale is dropped
+    and weight_scale_inv remains the single scale parameter."""
+    method, kernel = _pbwo_scale_inv_method(monkeypatch)
+    layer = _pbwo_scale_inv_layer(method)
+    assert layer.weight_scale_inv.shape == (4, 2)
+
+    scales = torch.rand(4, 2, dtype=torch.float32) * 0.01
+    layer.weight_scale_inv.data.copy_(scales)
+    method.process_weights_after_loading(layer)
+
+    assert not hasattr(layer, "weight_scale")
+    torch.testing.assert_close(layer.weight_scale_inv, scales)
+    kernel.process_weights_after_loading.assert_called_once_with(layer)
+
+    # reload path: refilled through the same name, no re-detection
+    layer.weight_scale_inv.data.copy_(scales * 2)
+    method.process_weights_after_loading(layer)
+    torch.testing.assert_close(layer.weight_scale_inv, scales * 2)
+
+
+def test_modelopt_fp8_pb_wo_keeps_weight_scale_convention(monkeypatch):
+    """The 4-D weight_scale convention keeps working: the never-filled
+    weight_scale_inv alias is ignored."""
+    method, _kernel = _pbwo_scale_inv_method(monkeypatch)
+    layer = _pbwo_scale_inv_layer(method)
+
+    scales = torch.rand(4, 1, 2, 1, dtype=torch.float32) * 0.01
+    layer.weight_scale.data.copy_(scales)
+    method.process_weights_after_loading(layer)
+
+    torch.testing.assert_close(layer.weight_scale, scales.squeeze(1).squeeze(-1))
+    assert not hasattr(layer, "weight_scale_inv")
+
+
+def test_modelopt_fp8_pb_wo_missing_scale_fails_closed(monkeypatch):
+    method, _ = _pbwo_scale_inv_method(monkeypatch)
+    layer = _pbwo_scale_inv_layer(method)
+    with pytest.raises(ValueError, match="no FP8_PB_WO block scale"):
+        method.process_weights_after_loading(layer)
+
+
+def test_modelopt_fp8_pb_wo_both_conventions_fails_closed(monkeypatch):
+    method, _ = _pbwo_scale_inv_method(monkeypatch)
+    layer = _pbwo_scale_inv_layer(method)
+    layer.weight_scale.data.fill_(0.01)
+    layer.weight_scale_inv.data.fill_(0.02)
+    with pytest.raises(ValueError, match="both FP8_PB_WO scale conventions"):
+        method.fmt.post_process(layer)
+
+
 def test_modelopt_fp8_pb_wo_rejects_non_128_input():
     """Input width must still be a multiple of 128 (same as #53132, which only
     pads the output). A partial input block is refused loudly rather than
