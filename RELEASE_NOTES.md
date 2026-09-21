@@ -1,5 +1,39 @@
 # Release Notes
 
+## lvllm-v2.5.2 (2026-09-21)
+
+**Base:** lvllm-v2.5.1 · **Release Type:** patch (Ada support + FP8_PB_WO weights)
+
+### Fixes
+
+- **DeepSeek-V4.x failed engine startup on SM89 (Ada)** — the CuTeDSL
+  dequant-gather / indexer-q kernel picks keyed on "cutlass installed + native
+  fp8" (SM89+), but those kernels emit inline PTX (`cvt.rn.bf16.f16`,
+  `mul.bf16x2`) with an sm_90 ISA floor, so ptxas aborted every Ada host with
+  "requires .target sm_90 or higher". Adds `cutedsl_kernels_supported()`
+  (fp8 gate AND capability major ≥ 9, per device, fail closed) and applies it
+  at all six pick sites; SM89 now falls back to the Triton path already
+  validated on SM80/86. Kernel selection is unchanged on every previously
+  validated config (SM86, SM90+, mixed-arch TP4); verified by gate-value tests
+  on SM86/SM120 (no SM89 hardware on the build host, fallback path static-
+  verified only).
+- **Qwen3.8-Flash-Next FP8 builds** — `FP8_PB_WO` layers now serve with the
+  2-D `weight_scale_inv` convention (upstream #54126 contract), making the
+  W4A16-4o6-FP8 checkpoint work end to end (SM86 TP2 MTP decode 61.8–65.9
+  t/s, accept 3.2–3.5, HTML smoke green).
+
+### Scripts / config
+
+- qwen38 serve scripts point at the W4A16-4o6-FP8 checkpoint.
+
+### Regression
+
+- CuTeDSL gate values re-checked on this tree's 2×3090+2×5060 Ti hosts:
+  per-device selection identical to lvllm-v2.5.1 (3090→Triton, 5060 Ti→CuTeDSL,
+  simulated SM89→Triton). FlashInfer asset unchanged from lvllm-v2.5.1.
+
+---
+
 ## lvllm-v2.5.1 (2026-09-20)
 
 **Base:** lvllm-v2.5.0 · **Release Type:** patch (crash fixes + prefill speed + scheduling)
