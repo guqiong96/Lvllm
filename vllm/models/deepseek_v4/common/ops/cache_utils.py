@@ -41,7 +41,7 @@ from vllm.model_executor.layers.quantization.utils.fp8_emulate import (
 )
 from vllm.platforms import current_platform
 from vllm.triton_utils import tl, triton
-from vllm.utils.import_utils import has_cutedsl
+from vllm.utils.cutedsl_arch import cutedsl_kernels_supported
 from vllm.utils.math_utils import next_power_of_2
 
 
@@ -543,10 +543,11 @@ def dequantize_and_gather_k_cache(
     ``current_platform.is_fp8_fnuz()`` for ``swa_k_cache`` (C++ encoder
     writes FNUZ on gfx942 and OCP on gfx950).
     """
-    if has_cutedsl() and fp8_native_supported():
+    if cutedsl_kernels_supported():
         # lazily import, otherwise some tests fail due to CUDA driver init failure.
-        # SM8x stays on the Triton kernel below: the quack/cutedsl fp8 cvt path
-        # targets Ada+ hardware conversions.
+        # SM8x (incl. SM89) stays on the Triton kernel below: the kernel's
+        # bf16 PTX (cvt.bf16.f16, mul.bf16x2) has an sm_90 ISA floor, which
+        # the fp8-support gate alone does not catch on Ada.
         from vllm.models.deepseek_v4.nvidia.ops.dequant_gather_k_cutedsl import (
             _DEQUANT_GATHER_K_CACHE_CUTEDSL_KERNEL,
         )

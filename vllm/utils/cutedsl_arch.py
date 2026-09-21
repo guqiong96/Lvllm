@@ -20,6 +20,7 @@ the DSL's own detection alone rather than inventing a target.
 from __future__ import annotations
 
 import os
+from functools import lru_cache
 from typing import Any
 
 import torch
@@ -29,6 +30,40 @@ from vllm.logger import init_logger
 logger = init_logger(__name__)
 
 _CUTEDSL_ARCH_ENV = "CUTE_DSL_ARCH"
+
+
+def cutedsl_kernels_supported(device_index: int | None = None) -> bool:
+    """Whether the DeepSeek CuTeDSL kernels can compile for this device.
+
+    Their inline PTX (``cvt.rn.bf16.f16``, ``mul.bf16x2``) has an **sm_90 ISA
+    floor**, so ``fp8_native_supported()`` (SM89+) is not a sufficient proxy:
+    sm_89 passes the fp8 gate yet ptxas rejects every bf16 op the kernel
+    emits. Fail closed when the capability cannot be read (callers keep
+    their Triton fallback). Per-device on purpose: this selects the kernel
+    this rank runs, never KV geometry, so mixed groups stay as validated
+    (strong cards on their CuTeDSL path, weak cards on Triton).
+    """
+    from vllm.model_executor.layers.quantization.utils.fp8_emulate import (
+        fp8_native_supported,
+    )
+    from vllm.utils.import_utils import has_cutedsl
+
+    if not has_cutedsl() or not fp8_native_supported(device_index):
+        return False
+    if device_index is None:
+        if not torch.cuda.is_available():
+            return True
+        device_index = torch.cuda.current_device()
+    return _cutedsl_cap_ok_indexed(device_index)
+
+
+@lru_cache(maxsize=8)
+def _cutedsl_cap_ok_indexed(device_index: int) -> bool:
+    try:
+        major, _ = torch.cuda.get_device_capability(device_index)
+    except Exception:  # pragma: no cover - unreadable device
+        return False
+    return major >= 9
 
 # Set before this module can pin anything: a value we write later must not be
 # mistaken for the user's own override by the next pin() in this process.

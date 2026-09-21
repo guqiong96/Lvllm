@@ -18,7 +18,7 @@ from vllm.model_executor.warmup.jit_warmup_triton_helper import (
 )
 from vllm.platforms import current_platform
 from vllm.triton_utils import tl, triton
-from vllm.utils.import_utils import has_cutedsl
+from vllm.utils.cutedsl_arch import cutedsl_kernels_supported
 
 # MXFP4: 32 elements per block, packed 2 nibbles per byte, ue8m0 block scale.
 MXFP4_BLOCK_SIZE = 32
@@ -636,9 +636,10 @@ def fused_indexer_q_rope_quant(
             dtype=torch.uint8,
             device=index_q.device,
         )
-        if has_cutedsl() and fp8_native_supported():
+        if cutedsl_kernels_supported():
             # lazily import, otherwise some tests fail due to CUDA driver init failure.
-            # SM8x keeps the Triton path (Ada+ targets for the cutedsl kernels).
+            # SM8x (incl. SM89) keeps the Triton path: the kernels' bf16 PTX has
+            # an sm_90 ISA floor, which the fp8 gate alone misses on Ada.
             from vllm.models.deepseek_v4.nvidia.ops.fused_indexer_q_cutedsl import (
                 _INDEXER_Q_MXFP4_KERNEL,
             )
@@ -693,9 +694,10 @@ def fused_indexer_q_rope_quant(
     use_fnuz = fp8_dtype == torch.float8_e4m3fnuz
     fp8_max = 224.0 if use_fnuz else 448.0
     index_q_fp8 = torch.empty_like(index_q, dtype=fp8_dtype)
-    if has_cutedsl() and fp8_native_supported():
+    if cutedsl_kernels_supported():
         # lazily import, otherwise some tests fail due to CUDA driver init failure.
-        # SM8x keeps the Triton path (Ada+ targets for the cutedsl kernels).
+        # SM8x (incl. SM89) keeps the Triton path: the kernels' bf16 PTX has
+        # an sm_90 ISA floor, which the fp8 gate alone misses on Ada.
         from vllm.models.deepseek_v4.nvidia.ops.fused_indexer_q_cutedsl import (
             _INDEXER_Q_FP8_KERNEL,
         )

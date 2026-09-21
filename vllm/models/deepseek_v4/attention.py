@@ -421,7 +421,7 @@ class DeepseekV4Attention(nn.Module, AttentionLayerBase, ABC):
 
                 _COMBINE_TOPK_SWA_INDICES_KERNEL.register_warmup()
 
-            from vllm.utils.import_utils import has_cutedsl
+            from vllm.utils.cutedsl_arch import cutedsl_kernels_supported
 
             _FUSED_Q_KV_RMSNORM_KERNEL.register_warmup()
 
@@ -447,11 +447,7 @@ class DeepseekV4Attention(nn.Module, AttentionLayerBase, ABC):
                     )
 
                     _COMPUTE_GLOBAL_TOPK_INDICES_AND_LENS_KERNEL.register_warmup()
-                    from vllm.model_executor.layers.quantization.utils.fp8_emulate import (  # noqa: E501
-                        fp8_native_supported,
-                    )
-
-                    if has_cutedsl() and fp8_native_supported():
+                    if cutedsl_kernels_supported():
                         from vllm.models.deepseek_v4.nvidia.ops.dequant_gather_k_cutedsl import (  # noqa: E501
                             _DEQUANT_GATHER_K_CACHE_CUTEDSL_KERNEL,
                         )
@@ -945,17 +941,9 @@ class DeepseekV4Indexer(nn.Module):
             "MXFP4" if self.use_fp4_kv else "FP8",
         )
         if vllm_config.kernel_config.enable_jit_warmup:
-            from vllm.utils.import_utils import has_cutedsl
+            from vllm.utils.cutedsl_arch import cutedsl_kernels_supported
 
-            from vllm.model_executor.layers.quantization.utils.fp8_emulate import (
-                fp8_native_supported,
-            )
-
-            if (
-                current_platform.is_cuda()
-                and has_cutedsl()
-                and fp8_native_supported()
-            ):
+            if current_platform.is_cuda() and cutedsl_kernels_supported():
                 from vllm.models.deepseek_v4.nvidia.ops.fused_indexer_q_cutedsl import (  # noqa: E501
                     _INDEXER_Q_FP8_KERNEL,
                     _INDEXER_Q_MXFP4_KERNEL,
@@ -1049,13 +1037,9 @@ class DeepseekV4Indexer(nn.Module):
         ]
 
         if vllm_config.kernel_config.enable_jit_warmup:
-            from vllm.utils.import_utils import has_cutedsl
+            from vllm.utils.cutedsl_arch import cutedsl_kernels_supported
 
-            from vllm.model_executor.layers.quantization.utils.fp8_emulate import (
-                fp8_native_supported,
-            )
-
-            triton_indexer_q = not has_cutedsl() or not fp8_native_supported()
+            triton_indexer_q = not cutedsl_kernels_supported()
             if triton_indexer_q and not current_platform.is_xpu():
                 from vllm.models.deepseek_v4.common.ops.fused_indexer_q import (
                     _FUSED_INDEXER_Q_ROPE_MXFP4_TRITON_KERNEL,
