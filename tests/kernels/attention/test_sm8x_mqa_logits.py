@@ -57,6 +57,31 @@ def test_prefill_triton_matches_torch_reference(M, N):
 
 
 @requires_fp8
+def test_prefill_reuses_provided_logits_buffer():
+    from vllm.models.deepseek_v4.nvidia.ops.sm8x_mqa import (
+        fp8_mqa_logits_sm8x_triton,
+        fp8_mqa_logits_torch,
+    )
+
+    M, N = 256, 300
+    q, (k, scale), w, ks, ke = _make(M, N)
+    fresh = fp8_mqa_logits_sm8x_triton(q, (k, scale), w, ks, ke)
+    buf = torch.full((M, N), float("nan"), device="cuda", dtype=torch.float32)
+    out = fp8_mqa_logits_sm8x_triton(q, (k, scale), w, ks, ke, logits=buf)
+    assert out.data_ptr() == buf.data_ptr()
+    assert torch.equal(out, fresh)
+    with pytest.raises(ValueError):
+        fp8_mqa_logits_sm8x_triton(q, (k, scale), w, ks, ke, logits=buf[:1])
+
+    ref_fresh = fp8_mqa_logits_torch(q, k, scale, w, ks, ke, clean_logits=True)
+    ref_buf = fp8_mqa_logits_torch(
+        q, k, scale, w, ks, ke, clean_logits=True, out=buf
+    )
+    assert ref_buf.data_ptr() == buf.data_ptr()
+    assert torch.equal(ref_buf, ref_fresh)
+
+
+@requires_fp8
 def test_empty_shapes():
     from vllm.models.deepseek_v4.nvidia.ops.sm8x_mqa import (
         fp8_mqa_logits_sm8x_triton,

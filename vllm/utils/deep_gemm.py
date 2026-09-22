@@ -559,6 +559,7 @@ def fp8_fp4_mqa_logits(
     cu_seqlen_ks: torch.Tensor,
     cu_seqlen_ke: torch.Tensor,
     clean_logits: bool,
+    logits_out: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Compute MQA logits for a single sequence without KV paging.
 
@@ -580,13 +581,17 @@ def fp8_fp4_mqa_logits(
         cu_seqlen_ke: End indices (exclusive) for valid K per query
             position, shape [M], dtype int32.
         clean_logits: Whether to clean the unfilled logits into `-inf`.
+        logits_out: Optional pre-allocated [M, N] fp32 output buffer, reused
+            by the SM8x fallback path (bounded workspace; ignored by the
+            DeepGEMM kernels, which allocate internally).
 
     Returns:
         Logits tensor of shape [M, N], dtype `torch.float32`.
     """
     if q[1] is None and use_sm8x_mqa_fallback():
         return _sm8x_mqa_fallbacks().fp8_mqa_logits_sm8x(
-            q[0], kv, weights, cu_seqlen_ks, cu_seqlen_ke, clean_logits
+            q[0], kv, weights, cu_seqlen_ks, cu_seqlen_ke, clean_logits,
+            logits=logits_out,
         )
     _lazy_init()
     if _fp8_fp4_mqa_logits_impl is None:

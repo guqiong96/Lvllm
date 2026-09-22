@@ -46,6 +46,16 @@ RADIX_TOPK_WORKSPACE_SIZE = 1024 * 1024
 # MXFP4 layout: 2 values packed per byte, ue8m0 (1-byte) scale per block of 32.
 MXFP4_BLOCK_SIZE = 32
 
+
+def _indexer_prefill_logits_ws_spec() -> tuple[tuple[int, ...], torch.dtype]:
+    """Flat fp32 workspace spec bounding the prefill logits peak (upstream
+    #56500); mirrors sparse_attn_indexer so SM8x reuses one persistent
+    buffer instead of a fresh per-call [M, N] allocation."""
+    max_logits_elems = max(
+        1, envs.VLLM_SPARSE_INDEXER_MAX_LOGITS_MB * 1024 * 1024 // 4
+    )
+    return ((max_logits_elems,), torch.float32)
+
 # kpool write helper: form pools from the current token batch and compress them
 # into the index K cache via the fused Triton kernel.
 
@@ -298,11 +308,18 @@ def sparse_attn_indexer_kpool(
         values_spec, scales_spec = _gather_workspace_shapes(
             total_seq_lens, head_dim, fp8_dtype, use_fp4_cache
         )
-        current_workspace_manager().get_simultaneous(
+        # SM8x reuses a persistent workspace buffer for the prefill logits,
+        # so its full budget must be reserved (and then locked) during
+        # profiling alongside the buffers held live across the chunk loop.
+        reserve_ws_logits = use_sm8x_mqa_fallback() and not use_fp4_cache
+        ws_specs = [
             values_spec,
             scales_spec,
             ((RADIX_TOPK_WORKSPACE_SIZE,), torch.uint8),
-        )
+        ]
+        if reserve_ws_logits:
+            ws_specs.append(_indexer_prefill_logits_ws_spec())
+        current_workspace_manager().get_simultaneous(*ws_specs)
 
         # Reserve profiler-visible memory for the worst-case decode logits,
         # whose shape is [B * next_n, max_model_len]. This profiling branch
@@ -323,10 +340,15 @@ def sparse_attn_indexer_kpool(
         # float32 logits -> 4 bytes/element; uint8 sentinel so elems == bytes.
         decode_logits_elems = worst_decode_tokens * max_model_len * 4
         prefill_cap_elems = envs.VLLM_SPARSE_INDEXER_MAX_LOGITS_MB * 1024 * 1024
-        max_logits_elems = max(decode_logits_elems, prefill_cap_elems)
-        _ = torch.empty(
-            max_logits_elems, dtype=torch.uint8, device=hidden_states.device
-        )
+        if reserve_ws_logits:
+            # The prefill half is already reserved through the workspace.
+            max_logits_elems = decode_logits_elems
+        else:
+            max_logits_elems = max(decode_logits_elems, prefill_cap_elems)
+        if max_logits_elems > 0:
+            _ = torch.empty(
+                max_logits_elems, dtype=torch.uint8, device=hidden_states.device
+            )
 
         return topk_indices_buffer
     attn_metadata_narrowed = attn_metadata[k_cache_prefix]
@@ -457,10 +479,15 @@ def sparse_attn_indexer_kpool(
         values_spec, scales_spec = _gather_workspace_shapes(
             total_seq_lens, head_dim, fp8_dtype, use_fp4_cache
         )
-        k_quant_full, k_scale_full = workspace_manager.get_simultaneous(
-            values_spec,
-            scales_spec,
-        )
+        # Request the logits buffer in the same simultaneous call so it stays
+        # disjoint from the gather buffers held live across the chunk loop.
+        ws_logits = use_sm8x_mqa_fallback() and not use_fp4_cache
+        buf_specs = [values_spec, scales_spec]
+        if ws_logits:
+            buf_specs.append(_indexer_prefill_logits_ws_spec())
+        bufs = list(workspace_manager.get_simultaneous(*buf_specs))
+        logits_ws = bufs.pop() if ws_logits else None
+        k_quant_full, k_scale_full = bufs
         for chunk in prefill_metadata.chunks if not short_prefill else ():
             k_quant = k_quant_full[: chunk.total_seq_lens]
             k_scale = k_scale_full[: chunk.total_seq_lens]
@@ -520,6 +547,12 @@ def sparse_attn_indexer_kpool(
             else:
                 from vllm.utils.deep_gemm import fp8_fp4_mqa_logits
 
+                logits_out = None
+                if ws_logits:
+                    rows = q_slice.shape[0]
+                    cols = k_quant.shape[0]
+                    if rows * cols <= logits_ws.numel():
+                        logits_out = logits_ws[: rows * cols].view(rows, cols)
                 logits = fp8_fp4_mqa_logits(
                     (q_slice_cast, q_scale_slice),
                     (k_quant_cast, k_scale_cast),
@@ -527,6 +560,7 @@ def sparse_attn_indexer_kpool(
                     chunk.cu_seqlen_ks,
                     chunk.cu_seqlen_ke,
                     clean_logits=False,
+                    logits_out=logits_out,
                 )
             num_rows = logits.shape[0]
 

@@ -537,14 +537,36 @@ _MQA_LOGITS_BN_CANDIDATES = (256, 128)
 _mqa_logits_bn_by_device: dict[int, int] = {}
 
 
+def _prefill_logits_buffer(
+    logits: torch.Tensor | None,
+    shape: tuple[int, int],
+    device: torch.device,
+) -> torch.Tensor:
+    """Reuse a caller-provided buffer (bounded workspace) or allocate."""
+    if logits is not None:
+        if logits.shape == shape and logits.dtype == torch.float32:
+            return logits
+        raise ValueError(
+            f"Expected logits buffer {shape} fp32, got "
+            f"{tuple(logits.shape)}/{logits.dtype}"
+        )
+    return torch.empty(shape, device=device, dtype=torch.float32)
+
+
 def fp8_mqa_logits_sm8x_triton(
     q: torch.Tensor,
     kv: tuple[torch.Tensor, torch.Tensor],
     weights: torch.Tensor,
     cu_seqlen_ks: torch.Tensor,
     cu_seqlen_ke: torch.Tensor,
+    logits: torch.Tensor | None = None,
 ) -> torch.Tensor:
-    """SM80/SM86 Triton non-paged MQA logits (prefill indexer fast path)."""
+    """SM80/SM86 Triton non-paged MQA logits (prefill indexer fast path).
+
+    ``logits`` optionally provides the [num_q, seq_len_kv] fp32 output buffer
+    so callers can reuse a bounded workspace instead of a fresh per-call
+    allocation (upstream #56500 pattern).
+    """
     k_values, k_scales = kv
     num_q, num_heads, head_dim = q.shape
     seq_len_kv = k_values.shape[0]
@@ -552,7 +574,9 @@ def fp8_mqa_logits_sm8x_triton(
     q_u8 = q.view(torch.uint8)
     k_u8 = k_values.view(torch.uint8)
     scale_1d = k_scales.reshape(-1)
-    logits = torch.empty((num_q, seq_len_kv), device=q.device, dtype=torch.float32)
+    logits = _prefill_logits_buffer(
+        logits, (num_q, seq_len_kv), q.device
+    )
     if num_q == 0 or seq_len_kv == 0:
         return logits
 
@@ -621,12 +645,14 @@ def fp8_mqa_logits_torch(
     cu_seqlen_ke: torch.Tensor,
     clean_logits: bool,
     max_score_bytes: int = 64 * 1024 * 1024,
+    out: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Reference MQA logits over an unpaged KV buffer (prefill indexer).
 
     Chunked over heads and keys so the transient ``[H, M, N]`` scores stay
     bounded. sglang has no sm8 non-paged kernel, so prefill runs on this
-    torch path until a Triton prefill kernel is added.
+    torch path until a Triton prefill kernel is added. ``out`` optionally
+    provides the [M, N] fp32 buffer (bounded workspace reuse).
     """
     k_f32 = k_values.float()
     k_f32.mul_(k_scales.reshape(-1, 1).float())
@@ -634,9 +660,10 @@ def fp8_mqa_logits_torch(
 
     seq_len, num_heads, _ = q.shape
     seq_len_kv = k_f32.shape[0]
-    logits = torch.zeros(
-        (seq_len, seq_len_kv), device=q.device, dtype=torch.float32
+    logits = _prefill_logits_buffer(
+        out, (seq_len, seq_len_kv), q.device
     )
+    logits.zero_()
     score_elems_per_head = max(1, seq_len * seq_len_kv)
     max_heads = max_score_bytes // max(1, score_elems_per_head * 4)
     head_chunk_size = max(1, min(8, num_heads, max_heads))
@@ -661,7 +688,7 @@ def fp8_mqa_logits_torch(
         valid = (offsets[None, :] >= cu_seqlen_ks[:, None]) & (
             offsets[None, :] < cu_seqlen_ke[:, None]
         )
-        logits = logits.masked_fill(~valid, float("-inf"))
+        logits.masked_fill_(~valid, float("-inf"))
     return logits
 
 
@@ -672,12 +699,14 @@ def fp8_mqa_logits_sm8x(
     cu_seqlen_ks: torch.Tensor,
     cu_seqlen_ke: torch.Tensor,
     clean_logits: bool = False,
+    logits: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Dispatch non-paged (prefill) MQA logits to the tiled Triton kernel,
     falling back to the chunked torch reference when pre-conditions are
     unmet. The Triton kernel always writes -inf outside each row's
     ``[ks, ke)`` window; every consumer top-k is window-bounded, so this
-    matches the DeepGEMM contract regardless of ``clean_logits``."""
+    matches the DeepGEMM contract regardless of ``clean_logits``.
+    ``logits`` optionally provides the output buffer on both paths."""
     k_values, k_scales = kv
     head_dim = q.shape[2]
     if (
@@ -686,7 +715,7 @@ def fp8_mqa_logits_sm8x(
         and head_dim % 64 == 0
     ):
         return fp8_mqa_logits_sm8x_triton(
-            q, kv, weights, cu_seqlen_ks, cu_seqlen_ke
+            q, kv, weights, cu_seqlen_ks, cu_seqlen_ke, logits
         )
     from vllm.logger import init_logger
 
@@ -706,4 +735,5 @@ def fp8_mqa_logits_sm8x(
         cu_seqlen_ks,
         cu_seqlen_ke,
         clean_logits,
+        out=logits,
     )

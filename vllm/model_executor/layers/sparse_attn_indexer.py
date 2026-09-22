@@ -58,6 +58,16 @@ logger = init_logger(__name__)
 MXFP4_BLOCK_SIZE = 32
 
 
+def _indexer_prefill_logits_ws_spec() -> tuple[tuple[int, ...], torch.dtype]:
+    """Flat fp32 workspace spec bounding the prefill logits peak (upstream
+    #56500). Chunking in the metadata builder keeps every chunk within this
+    budget, so runtime never allocates a fresh [M, N] logits tensor."""
+    max_logits_elems = max(
+        1, envs.VLLM_SPARSE_INDEXER_MAX_LOGITS_MB * 1024 * 1024 // 4
+    )
+    return ((max_logits_elems,), torch.float32)
+
+
 def _assert_cutedsl_dcp_merge_supported(
     logits: torch.Tensor,
     topk_indices: torch.Tensor,
@@ -383,14 +393,22 @@ def sparse_attn_indexer(
                 total_seq_lens, head_dim, fp8_dtype, use_fp4_cache
             )
             profile_specs.extend(gather_spec * 2)
+        # SM8x reuses a persistent workspace buffer for the prefill logits,
+        # so its full budget must be reserved (and then locked) during
+        # profiling. Elsewhere DeepGEMM allocates the logits itself and the
+        # peak is simulated with a dummy tensor instead.
+        reserve_ws_logits = use_sm8x_mqa_fallback() and not use_fp4_cache
+        if reserve_ws_logits:
+            profile_specs.append(_indexer_prefill_logits_ws_spec())
         current_workspace_manager().get_simultaneous(*profile_specs)
 
-        # Dummy allocation to simulate for peak logits tensor memory during inference.
-        # FP8 elements so elements == bytes
-        max_logits_elems = envs.VLLM_SPARSE_INDEXER_MAX_LOGITS_MB * 1024 * 1024
-        _ = torch.empty(
-            max_logits_elems, dtype=torch.uint8, device=hidden_states.device
-        )
+        if not reserve_ws_logits:
+            # Dummy allocation to simulate for peak logits tensor memory
+            # during inference. FP8 elements so elements == bytes
+            max_logits_elems = envs.VLLM_SPARSE_INDEXER_MAX_LOGITS_MB * 1024 * 1024
+            _ = torch.empty(
+                max_logits_elems, dtype=torch.uint8, device=hidden_states.device
+            )
 
         return sparse_attn_indexer_fake(
             hidden_states,
@@ -512,11 +530,20 @@ def sparse_attn_indexer(
                 gather_specs.extend(
                     _gather_workspace_shapes(rows, head_dim, fp8_dtype, use_fp4_cache)
                 )
-        k_quant_full, k_scale_full, *gather_bufs = workspace_manager.get_simultaneous(
+        # The SM8x prefill logits buffer must come from the same
+        # simultaneous request as the gather buffers to stay disjoint
+        # from live views held across the chunk loop.
+        ws_logits = use_sm8x_mqa_fallback() and not use_fp4_cache
+        buf_specs: list[tuple[tuple[int, ...], torch.dtype]] = [
             values_spec,
             scales_spec,
             *gather_specs,
-        )
+        ]
+        if ws_logits:
+            buf_specs.append(_indexer_prefill_logits_ws_spec())
+        bufs = list(workspace_manager.get_simultaneous(*buf_specs))
+        logits_ws = bufs.pop() if ws_logits else None
+        k_quant_full, k_scale_full, *gather_bufs = bufs
         for chunk in prefill_metadata.chunks:
             cu_seqlen_ks = chunk.cu_seqlen_ks
             cu_seqlen_ke = chunk.cu_seqlen_ke
@@ -585,6 +612,12 @@ def sparse_attn_indexer(
                         cu_seqlen_ke,
                     )
                 else:
+                    logits_out = None
+                    if ws_logits:
+                        rows = q_slice.shape[0]
+                        cols = k_quant.shape[0]
+                        if rows * cols <= logits_ws.numel():
+                            logits_out = logits_ws[: rows * cols].view(rows, cols)
                     logits = fp8_fp4_mqa_logits(
                         (q_slice_cast, q_scale_slice),
                         (k_quant_cast, k_scale_cast),
@@ -592,6 +625,7 @@ def sparse_attn_indexer(
                         cu_seqlen_ks,
                         cu_seqlen_ke,
                         clean_logits=False,
+                        logits_out=logits_out,
                     )
                 num_rows = logits.shape[0]
                 if candidate_blocks is not None:
