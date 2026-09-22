@@ -38,7 +38,7 @@ from vllm.utils.deep_gemm import (
     has_deep_gemm,
     use_sm8x_mqa_fallback,
 )
-from vllm.utils.import_utils import has_cutedsl
+from vllm.utils.cutedsl_arch import cutedsl_kernels_supported
 from vllm.utils.torch_utils import (
     LayerNameType,
     _encode_layer_name,
@@ -77,9 +77,10 @@ def _assert_cutedsl_dcp_merge_supported(
     # stable-topk selector); there is no PyTorch fallback. The first cut targets
     # Blackwell/Hopper with index_topk in (512, 1024, 2048) (the selector's radix
     # sizing); the Triton pack itself has no shape/topk constraints.
-    if not has_cutedsl():
+    if not cutedsl_kernels_supported():
         raise RuntimeError(
-            "DCP sparse-indexer merge requires CuteDSL; install it or disable DCP."
+            "DCP sparse-indexer merge requires CuteDSL (SM90+); install it or "
+            "disable DCP."
         )
     if logits.device.type != "cuda":
         raise RuntimeError("DCP sparse-indexer merge requires CUDA tensors.")
@@ -973,7 +974,7 @@ class SparseAttnIndexer(CustomOp):
             )
             _UNPACK_SEQ_TRITON_KERNEL.register_warmup()
 
-            if self.dcp_world_size > 1 and current_platform.is_cuda() and has_cutedsl():
+            if self.dcp_world_size > 1 and current_platform.is_cuda() and cutedsl_kernels_supported():
                 from vllm.model_executor.kernels.attention.dsa.dcp_indexer_cutedsl import (  # noqa: E501
                     _PACK_DCP_TOPK_CANDIDATES_KERNEL,
                     _STABLE_TOPK_FROM_GATHERED_CANDIDATES_KERNEL,
