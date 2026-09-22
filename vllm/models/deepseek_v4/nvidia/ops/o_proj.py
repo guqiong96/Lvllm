@@ -221,7 +221,7 @@ def deep_gemm_fp8_o_proj(
     layer selects the recipe at initialization.
     """
     weight = wo_a.weight
-    from vllm.models.deepseek_v4_1.common.ops.stat_probe import stat_probe_once
+    from vllm.models.deepseek_v41.common.ops.stat_probe import stat_probe_once
 
     stat_probe_once(
         f"attn_o[{getattr(wo_a, 'prefix', id(wo_a))}]", o

@@ -318,7 +318,6 @@ def warmup_qsa_mqa_paged_decode(
     max_num_batched_tokens: int,
 ) -> tuple[tuple[int, int], ...]:
     """Compile every reachable decode specialization without launching it."""
-
     page_size = k_cache.shape[1]
     page_table_width = page_table.shape[1]
     columns = page_table_width * page_size
@@ -441,7 +440,6 @@ def expand_qsa_block_indices(
     out: torch.Tensor,
 ) -> None:
     """Expand compressed blocks and compact the causal tail of the open group."""
-
     assert token_topk % compress_ratio == 0
     block_topk = token_topk // compress_ratio
     output_width = token_topk + compress_ratio - 1
@@ -521,8 +519,8 @@ def qsa_select_paged_decode(
         compress_ratio: Number of logical tokens represented by a cache row.
         decode_query_len: Number of query tokens per request.
         block_indices: Compressed-index output buffer.
-    """
 
+    """
     assert token_topk % compress_ratio == 0
     assert block_indices.shape == (q.shape[0], token_topk // compress_ratio)
     assert decode_query_len > 0 and q.shape[0] % decode_query_len == 0
@@ -608,8 +606,8 @@ def qsa_select_paged_prefill(
         max_query_len: Maximum number of query tokens in one request.
         block_indices: Compressed-index output buffer.
         max_seq_len: Longest context length in the batch this step.
-    """
 
+    """
     assert token_topk % compress_ratio == 0
     assert block_indices.shape == (q.shape[0], token_topk // compress_ratio)
     assert q.dtype == k_cache.dtype, "Q and the compressed K cache must match"

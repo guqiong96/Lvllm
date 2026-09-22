@@ -193,12 +193,9 @@ class CompressedTensorsW4A4Nvfp4MoEMethod(CompressedTensorsMoEMethod):
         set_weight_attrs(w2_input_scale, extra_weight_attrs)
 
     def process_weights_after_loading(self, layer: RoutedExperts) -> None:
-        from vllm.model_executor.layers.fused_moe.layer import RoutedExperts
-        if isinstance(layer, RoutedExperts) and not layer.is_gpu_resident_layer:
+        """Convert NVFP4 MoE weights into kernel format and setup the kernel."""
+        if not layer.is_gpu_resident_layer:
             return
-        """
-        Convert NVFP4 MoE weights into kernel format and setup the kernel.
-        """
         # NOTE(rob): wN_weight_packed -> wN_weight is because ModularKernelMethod
         # requires this naming convention. However, the name change breaks
         # reloading because the state dict no longer matches disk. Once we

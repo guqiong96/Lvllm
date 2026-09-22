@@ -14,9 +14,9 @@ import pytest
 import torch
 
 import vllm.envs as envs
-import vllm.models.deepseek_v4_1.nvidia.flashinfer_sparse as fis
-from vllm.models.deepseek_v4_1.attention import _sm120_paged_block_size
-from vllm.models.deepseek_v4_1.sparse_mla import DeepseekV4SparseMLABackend
+import vllm.models.deepseek_v41.nvidia.flashinfer_sparse as fis
+from vllm.models.deepseek_v41.attention import _sm120_paged_block_size
+from vllm.models.deepseek_v41.sparse_mla import DeepseekV4SparseMLABackend
 from vllm.platforms import current_platform
 from vllm.platforms.interface import DeviceCapability
 from vllm.v1.attention.backend import MultipleOf
