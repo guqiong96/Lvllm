@@ -650,9 +650,12 @@ class ComputeGlobalTopkIndicesAndLensKernel(
             is_valid = local_idx >= 0
 
             block_indices = local_idx // block_size
+            # A stale index past the table width must not be dereferenced:
+            # the masked-off lanes read a neighbouring request's rows (or
+            # fault) without the stride bound (upstream #57388).
             block_numbers = tl.load(
                 block_table_ptr + req_idx * block_table_stride + block_indices,
-                mask=mask & is_valid,
+                mask=mask & is_valid & (block_indices < block_table_stride),
             )
             block_offsets = local_idx % block_size
 
