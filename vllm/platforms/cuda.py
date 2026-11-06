@@ -27,6 +27,7 @@ with contextlib.suppress(ImportError):
 import vllm.envs as envs
 from vllm.logger import init_logger
 from vllm.utils.import_utils import import_pynvml
+from vllm.utils.platform_utils import cuda_get_device_properties
 from vllm.v1.attention.backends.registry import AttentionBackendEnum
 
 from .interface import DeviceCapability, Platform, PlatformEnum, in_wsl
@@ -105,9 +106,10 @@ def _get_backend_priorities(
                 ]
             else:
                 # BF16 KV Cache
-                # Prefer FlashInfer at low head counts (FlashMLA uses padding)
+                # Prefer FA4, then FlashInfer at low head counts (FlashMLA uses padding)
                 if num_heads is not None and num_heads <= 16:
                     sparse_backends = [
+                        AttentionBackendEnum.FLASH_ATTN_MLA_SPARSE_FA4,
                         AttentionBackendEnum.FLASHINFER_MLA_SPARSE,
                         AttentionBackendEnum.FLASHMLA_SPARSE,
                     ]
@@ -299,10 +301,6 @@ class CudaPlatformBase(Platform):
         raise NotImplementedError
 
     @classmethod
-    def log_warnings(cls):
-        pass
-
-    @classmethod
     def is_pin_memory_available(cls) -> bool:
         if in_wsl():
             # WSL1 has no CUDA support, so being on the CUDA platform under
@@ -328,12 +326,6 @@ class CudaPlatformBase(Platform):
     def check_and_update_config(cls, vllm_config: VllmConfig) -> None:
         parallel_config = vllm_config.parallel_config
         model_config = vllm_config.model_config
-
-        if (
-            parallel_config.prefill_context_parallel_size > 1
-            and parallel_config.data_parallel_size > 1
-        ):
-            raise ValueError("PCP does not support data parallelism on CUDA yet.")
 
         if parallel_config.worker_cls == "auto":
             parallel_config.worker_cls = "vllm.v1.worker.gpu_worker.Worker"
@@ -423,33 +415,6 @@ class CudaPlatformBase(Platform):
                 )
 
         return valid_backends_priorities, invalid_reasons
-
-    @classmethod
-    def _get_indexer_block_alignment(cls, vllm_config: VllmConfig) -> int | None:
-        index_kpool = getattr(
-            vllm_config.model_config.hf_text_config, "index_kpool", None
-        )
-        if not index_kpool or index_kpool <= 1:
-            return None
-        from vllm.utils.deep_gemm import PAGED_MQA_PAGE_SIZES
-
-        # kpool paged-MQA indexer: the storage block (block_size /
-        # index_kpool) is virtually split into pool pages, so block_size
-        # must be a multiple of index_kpool times a legal pool page.
-        page = min(PAGED_MQA_PAGE_SIZES)
-        # This is KV geometry the whole TP group must agree on, so anchor it to
-        # the group capability floor, not this rank's device. On a mixed group a
-        # per-rank family(120) answer forks the storage page (32 vs 64) and the
-        # cross-rank KV-spec comparison fails. The largest page only applies when
-        # every device is sm120; a mixed group (floor<12, e.g. +3090) runs the sm8x
-        # Triton indexer path, which wants the smallest page.
-        floor = cls.group_capability_floor()
-        if floor is not None and floor.to_int() // 10 == 12:
-            # On sm120 the DeepGEMM paged-MQA kernel only accepts block_kv
-            # 64 for the fp8 indexer cache, so align to the largest pool
-            # page here to make the page split land on 64 not the min 32.
-            page = max(PAGED_MQA_PAGE_SIZES)
-        return index_kpool * page
 
     @classmethod
     def get_attn_backend_cls(
@@ -838,7 +803,14 @@ class NvmlCudaPlatform(CudaPlatformBase):
     def get_device_total_memory(cls, device_id: int = 0) -> int:
         physical_device_id = cls.device_id_to_physical_device_id(device_id)
         handle = pynvml.nvmlDeviceGetHandleByIndex(physical_device_id)
-        return int(pynvml.nvmlDeviceGetMemoryInfo(handle).total)
+        try:
+            return int(pynvml.nvmlDeviceGetMemoryInfo(handle).total)
+        except pynvml.NVMLError:
+            # Integrated parts (e.g. GB10 / DGX Spark) do not implement the
+            # device-level NVML memory query - nvidia-smi reports [N/A] for
+            # memory.total there. Fall back to the same source
+            # NonNvmlCudaPlatform reads.
+            return int(cuda_get_device_properties(device_id, ("total_memory",))[0])
 
     @classmethod
     @with_nvml_context
@@ -1022,11 +994,12 @@ class NvmlCudaPlatform(CudaPlatformBase):
                 len(set(device_names)) > 1
                 and os.environ.get("CUDA_DEVICE_ORDER") != "PCI_BUS_ID"
             ):
-                logger.warning(
+                logger.warning_once(
                     "Detected different devices in the system: %s. Please"
                     " make sure to set `CUDA_DEVICE_ORDER=PCI_BUS_ID` to "
                     "avoid unexpected behavior.",
                     ", ".join(device_names),
+                    scope="process",
                 )
 
 
@@ -1078,5 +1051,3 @@ finally:
         pynvml.nvmlShutdown()
 
 CudaPlatform = NvmlCudaPlatform if nvml_available else NonNvmlCudaPlatform
-
-CudaPlatform.log_warnings()

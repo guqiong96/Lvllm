@@ -374,4 +374,5 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
             topk_group=layer.topk_group,
             e_score_correction_bias=layer.e_score_correction_bias,
             routed_scaling_factor=layer.routed_scaling_factor,
+            routing_sink=layer.routing_sink,
         )

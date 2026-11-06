@@ -28,6 +28,10 @@ from vllm.models.deepseek_v41.common.ops import (
     compute_global_topk_indices_and_lens,
     dequantize_and_gather_k_cache,
 )
+from vllm.models.deepseek_v41.nvidia.ops.o_proj import (
+    dsv41_o_proj,
+    register_dsv41_o_proj_warmup,
+)
 from vllm.models.deepseek_v41.sparse_mla import (
     DeepseekV4FlashMLABackend,
     DeepseekV4FlashMLAMetadata,
@@ -66,6 +70,10 @@ class DeepseekSparseSWAFlashMLAMetadataBuilder(DeepseekV41SparseSWAMetadataBuild
 
 
 class DeepseekSparseSWAFlashMLABackend(DeepseekSparseSWABackend):
+    @classmethod
+    def supports_pcp(cls) -> bool:
+        return True
+
     @staticmethod
     def get_builder_cls() -> type[DeepseekSparseSWAFlashMLAMetadataBuilder]:
         return DeepseekSparseSWAFlashMLAMetadataBuilder
@@ -84,23 +92,10 @@ class DeepseekV4FlashMLAAttention(DeepseekV4Attention):
         )
         if _is_sm8():
             sm8x_dequant_wo_a_at_load(self.wo_a)
+        register_dsv41_o_proj_warmup(self)
 
     def _o_proj(self, attn_out: torch.Tensor, positions: torch.Tensor) -> torch.Tensor:
-        o = attn_out[:, : self.n_local_heads, :]
-        return deep_gemm_fp8_o_proj(
-            o,
-            positions,
-            self.rotary_emb.cos_sin_cache,
-            self.wo_a,
-            self.wo_b,
-            n_groups=self.n_local_groups,
-            heads_per_group=self.n_local_heads // self.n_local_groups,
-            nope_dim=self.nope_head_dim,
-            rope_dim=self.rope_head_dim,
-            o_lora_rank=self.o_lora_rank,
-            einsum_recipe=self._einsum_recipe,
-            tma_aligned_scales=self._tma_aligned_scales,
-        )
+        return dsv41_o_proj(self, attn_out, positions)
 
     @classmethod
     def get_padded_num_q_heads(cls, num_heads: int) -> int:
@@ -170,6 +165,14 @@ class DeepseekV4FlashMLAAttention(DeepseekV4Attention):
             attn_metadata.get(self.swa_cache_layer.prefix),
         )
         assert swa_metadata is not None
+
+        if self.use_pcp:
+            num_tokens = (
+                swa_metadata.num_decode_tokens + swa_metadata.num_prefill_tokens
+            )
+            output[num_tokens:].zero_()
+            if num_tokens == 0:
+                return
 
         swa_only = self.compress_ratio == 0
         # SWA-only layers (compress_ratio == 0) don't have their own KV cache

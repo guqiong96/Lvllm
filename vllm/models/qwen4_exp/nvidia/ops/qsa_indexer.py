@@ -11,6 +11,7 @@ from vllm.model_executor.warmup.jit_warmup_triton_helper import (
 from vllm.platforms import current_platform
 from vllm.triton_utils import tl, triton
 from vllm.v1.worker.workspace import current_workspace_manager
+from vllm.utils.math_utils import round_up
 
 _TOPK_WORKSPACE_BYTES = 1024 * 1024
 _DECODE_BLOCK_N = 64
@@ -384,6 +385,7 @@ def _prefill_logits(
     page_table: torch.Tensor,
     query_start_loc: torch.Tensor,
     visible_blocks: torch.Tensor,
+    logits_workspace: torch.Tensor,
     max_query_len: int,
     logits: torch.Tensor,
     query_offset: int,
@@ -393,6 +395,8 @@ def _prefill_logits(
     assert visible_blocks.shape == (q.shape[0],)
     assert 0 <= query_offset <= query_offset + num_queries <= q.shape[0]
     assert 0 < logits_width <= page_table.shape[1] * k_cache.shape[1]
+    assert logits_workspace.is_contiguous()
+    assert logits_workspace.numel() >= num_queries * logits_width
 
     # tuned on GB300
     if k_cache.dtype == torch.float8_e4m3fn:
@@ -615,7 +619,7 @@ def qsa_select_paged_prefill(
     # No row scores beyond cdiv(max_seq_len, compress_ratio) compressed
     # columns. Round up to 64 to keep the logits row stride
     # cooperative_topk-compatible.
-    logits_width = triton.cdiv(triton.cdiv(max_seq_len, compress_ratio), 64) * 64
+    logits_width = round_up(triton.cdiv(max_seq_len, compress_ratio), 64)
     logits_width = min(max(64, logits_width), page_table.shape[1] * k_cache.shape[1])
 
     # chunk the inputs to keep temp logits below VLLM_SPARSE_INDEXER_MAX_LOGITS_MB
@@ -634,6 +638,7 @@ def qsa_select_paged_prefill(
             page_table,
             query_start_loc,
             visible_blocks,
+            logits_workspace,
             max_query_len,
             logits,
             query_offset=query_start,

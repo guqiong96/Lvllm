@@ -25,7 +25,7 @@ from vllm.logger import init_logger
 from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
 from vllm.platforms import current_platform
 from vllm.triton_utils import HAS_TRITON, tl, triton
-from vllm.utils.math_utils import cdiv
+from vllm.utils.math_utils import cdiv, round_up
 from vllm.v1.attention.backend import (
     AttentionBackend,
     AttentionCGSupport,
@@ -130,7 +130,9 @@ def circular_qsa_slot_mapping(
         valid = (requests >= 0) & (requests < block_table.shape[0]) & (positions >= 0)
         safe_requests = requests.clamp(0, block_table.shape[0] - 1)
         physical_blocks = block_table[safe_requests, 0].long()
-        valid &= physical_blocks >= 0
+        # Dummy and padding requests own no ring and sit on the null block,
+        # which must never be written.
+        valid &= physical_blocks > 0
         slots = physical_blocks * compressor_state_size + positions.remainder(
             compressor_state_size
         )
@@ -291,7 +293,8 @@ def _build_qsa_metadata_kernel(
             mask=valid,
             other=-1,
         )
-        valid &= physical_block >= 0
+        # Dummy and padding requests own no ring and sit on the null block.
+        valid &= physical_block > 0
         slot = physical_block * circular_buffer_size + (
             logical_position % circular_buffer_size
         )
@@ -858,9 +861,7 @@ class QSAKeyStateCache(_QSAStateCache):
         key_head_size = int(kwargs.pop("head_size"))
         self.key_head_size = key_head_size
         self.cache_rope_positions = bool(cache_rope_positions)
-        self.rope_position_offset = (
-            (key_head_size + self._BF16_PER_INT64 - 1) // self._BF16_PER_INT64
-        ) * self._BF16_PER_INT64
+        self.rope_position_offset = round_up(key_head_size, self._BF16_PER_INT64)
         storage_head_size = key_head_size
         if self.cache_rope_positions:
             storage_head_size = self.rope_position_offset + (
@@ -868,15 +869,18 @@ class QSAKeyStateCache(_QSAStateCache):
             )
         super().__init__(head_size=storage_head_size, **kwargs)
 
-    def bind_kv_cache(self, kv_cache: torch.Tensor) -> None:
-        super().bind_kv_cache(kv_cache)
-        qsa_cache = self.kv_cache
-        self.key_cache = qsa_cache[..., : self.key_head_size]
-        if self.cache_rope_positions:
-            position_tail = qsa_cache[..., self.rope_position_offset :]
-            self.rope_position_cache = position_tail.view(torch.int64)
-        else:
-            self.rope_position_cache = None
+    # Derived on access so `kv_cache` stays the only reference to the bound
+    # storage: clearing it (e.g. after CUDA graph memory profiling) must free
+    # the cache, or the freed block stays pinned in the allocator.
+    @property
+    def key_cache(self) -> torch.Tensor:
+        return self.kv_cache[..., : self.key_head_size]
+
+    @property
+    def rope_position_cache(self) -> torch.Tensor | None:
+        if not self.cache_rope_positions:
+            return None
+        return self.kv_cache[..., self.rope_position_offset :].view(torch.int64)
 
     def get_kv_cache_spec(self, vllm_config: VllmConfig) -> KVCacheSpec:
         num_spec = vllm_config.num_speculative_tokens
