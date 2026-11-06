@@ -9,6 +9,7 @@ import contextlib
 import functools
 import importlib
 import os
+import shutil
 from collections.abc import Callable
 from enum import Enum
 from typing import Any, NoReturn
@@ -109,13 +110,45 @@ class DeepGemmQuantScaleFMT(Enum):
         return cached
 
 
+_DEFAULT_CUDA_HOME = "/usr/local/cuda"
+
+
+def _deep_gemm_nvcc_path() -> str | None:
+    """Return the nvcc DeepGEMM's JIT would run, or None if it is missing.
+
+    Mirrors ``deep_jit::CUDA::find_cuda_toolkit()``, which DeepGEMM runs on
+    the first use of any kernel and which asserts when the toolkit is missing.
+    """
+    cuda_home = os.environ.get("CUDA_HOME") or os.environ.get("CUDA_PATH")
+    if not cuda_home:
+        nvcc = shutil.which("nvcc")
+        cuda_home = (
+            os.path.dirname(os.path.dirname(nvcc)) if nvcc else _DEFAULT_CUDA_HOME
+        )
+    if not os.path.exists(cuda_home):
+        return None
+    nvcc = os.environ.get(
+        "DG_JIT_NVCC_COMPILER", os.environ.get("DJ_JIT_NVCC_COMPILER")
+    ) or os.path.join(cuda_home, "bin", "nvcc")
+    return shutil.which(nvcc)
+
+
 @functools.cache
 def is_deep_gemm_supported() -> bool:
     """Return `True` if DeepGEMM is supported on the current platform.
     Currently, only Hopper and Blackwell GPUs are supported.
     """
     is_supported_arch = current_platform.support_deep_gemm()
-    return is_supported_arch and envs.VLLM_USE_DEEP_GEMM and has_deep_gemm()
+    if not (is_supported_arch and envs.VLLM_USE_DEEP_GEMM and has_deep_gemm()):
+        return False
+    if _deep_gemm_nvcc_path() is None:
+        logger.warning_once(
+            "DeepGEMM kernels are disabled: DeepGEMM JIT-compiles its kernels "
+            "with nvcc, which is missing (CUDA_HOME, CUDA_PATH, PATH or "
+            "/usr/local/cuda). Set CUDA_HOME to a CUDA toolkit to enable them."
+        )
+        return False
+    return True
 
 
 @functools.cache
@@ -637,8 +670,9 @@ def transform_sf_into_required_layout(*args, **kwargs):
 def mqa_logits_use_mx_scales() -> bool:
     """Whether the MQA logits kernels take only MX-scaled inputs.
 
-    On SM100 they need MXFP8/MXFP4 Q and K with packed UE8M0 scales and BF16
-    weights, and return BF16 logits. FP8 indexer K caches then store each
+    On SM100 they need MXFP8/MXFP4 Q and K with packed UE8M0 scales, and the
+    head weights pick the reduction: FP32 weights reduce in FP32, BF16 weights
+    in BF16 and emit BF16 logits. FP8 indexer K caches then store each
     token's power-of-two scale as four equal UE8M0 bytes instead of an fp32.
     """
     return current_platform.is_cuda() and current_platform.is_device_capability_family(
@@ -653,13 +687,18 @@ _unit_mx_scales: dict[torch.device, list[torch.Tensor]] = {}
 
 
 def mqa_logits_mx_inputs(
-    q: torch.Tensor, q_scale: torch.Tensor | None, weights: torch.Tensor
+    q: torch.Tensor,
+    q_scale: torch.Tensor | None,
+    weights: torch.Tensor,
+    logits_dtype: torch.dtype,
 ) -> tuple[torch.Tensor | None, torch.Tensor]:
     """Adapt indexer Q scales and weights to the SM100 MQA logits kernels.
 
     FP8 Q folds its per-(token, head) power-of-two scale into ``weights``, so
     it is passed with unit MX scales, which is exact since relu commutes with
-    a positive scale. Returns ``(q_scale, weights)`` unchanged off SM100.
+    a positive scale. ``weights`` are cast to ``logits_dtype``, so BF16 logits
+    reduce in BF16 and FP32 logits in FP32. Returns ``(q_scale, weights)``
+    unchanged off SM100.
     """
     if not mqa_logits_use_mx_scales():
         return q_scale, weights
@@ -672,7 +711,7 @@ def mqa_logits_mx_inputs(
                 torch.full((size,), _UNIT_UE8M0_X4, dtype=torch.int32, device=q.device)
             )
         q_scale = bufs[-1][:numel].view(q.shape[:-1])
-    return q_scale, weights.to(torch.bfloat16)
+    return q_scale, weights.to(logits_dtype)
 
 
 def fp8_fp4_mqa_logits(
@@ -684,6 +723,7 @@ def fp8_fp4_mqa_logits(
     max_seqlen_k: int,
     clean_logits: bool = False,
     logits_out: torch.Tensor | None = None,
+    logits_dtype: torch.dtype = torch.float32,
 ) -> torch.Tensor:
     """Compute MQA logits for a single sequence without KV paging.
 
@@ -697,7 +737,8 @@ def fp8_fp4_mqa_logits(
             to D/2 bytes for MXFP4) and q_scale int32 [M, H] or None.
         kv: Tuple ``(k_values, k_scales)`` of shape [N, D] and [N]; k_scales
             is int32 packed UE8M0 with MX scales, fp32 otherwise.
-        weights: Tensor of shape [M, H], bf16 on SM100 and fp32 elsewhere.
+        weights: Tensor of shape [M, H], fp32, or bf16 on SM100 with bf16
+            ``logits_dtype``.
         cu_seqlen_ks: Start indices (inclusive) for valid K per query
             position, shape [M], dtype int32.
         cu_seqlen_ke: End indices (exclusive) for valid K per query
@@ -708,11 +749,12 @@ def fp8_fp4_mqa_logits(
         logits_out: Optional pre-allocated [M, N] fp32 output buffer, reused
             by the SM8x fallback path (bounded workspace; ignored by the
             DeepGEMM kernels, which allocate internally).
+        logits_dtype: Output dtype, fp32 or bf16.
 
     Returns:
         Compressed logits of shape [M, max_seqlen_k]: row ``i`` holds K
         positions ``[cu_seqlen_ks[i], cu_seqlen_ke[i])`` starting at column
-        zero, and the tail is not cleaned. bf16 on SM100, fp32 elsewhere.
+        zero, and the tail is not cleaned.
 
     """
     if q[1] is None and use_sm8x_mqa_fallback():
@@ -730,6 +772,7 @@ def fp8_fp4_mqa_logits(
         cu_seqlen_ks,
         cu_seqlen_ke,
         max_seqlen_k,
+        logits_dtype=logits_dtype,
     )
 
 
@@ -802,6 +845,7 @@ def fp8_fp4_paged_mqa_logits(
     block_tables: torch.Tensor,
     schedule_metadata: torch.Tensor,
     max_model_len: int,
+    logits_dtype: torch.dtype = torch.float32,
     indices: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Compute MQA logits using a paged KV-cache.
@@ -819,8 +863,8 @@ def fp8_fp4_paged_mqa_logits(
             (D/2+4 for MXFP4), dtype `torch.uint8`; the last 4 bytes per
             (block, pos) hold the int32 packed UE8M0 scales with MX scales,
             or the fp32 dequant scale otherwise.
-        weights: Tensor of shape [B * next_n, H], bf16 on SM100 and fp32
-            elsewhere.
+        weights: Tensor of shape [B * next_n, H], fp32, or bf16 on SM100
+            with bf16 ``logits_dtype``.
         context_lens: Tensor of shape [B], dtype int32; effective context length
             for each batch element.
         block_tables: Tensor of shape [B, max_blocks], dtype int32; maps logical
@@ -828,11 +872,12 @@ def fp8_fp4_paged_mqa_logits(
         schedule_metadata: Returned by `get_paged_mqa_logits_metadata`;
             used to distribute work across SMs.
         max_model_len: Maximum sequence length used to size the logits output.
+        logits_dtype: Output dtype, fp32 or bf16.
         indices: Optional request index for each varlen row.
 
     Returns:
         Logits tensor of shape [B * next_n, max_model_len]; columns past each
-        row's context length are not cleaned. bf16 on SM100, fp32 elsewhere.
+        row's context length are not cleaned.
 
     """
     if q[1] is None and use_triton_paged_mqa():
@@ -866,6 +911,7 @@ def fp8_fp4_paged_mqa_logits(
         block_tables,
         schedule_metadata,
         max_model_len,
+        logits_dtype=logits_dtype,
         **kwargs,
     )
 

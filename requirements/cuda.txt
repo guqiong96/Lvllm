@@ -14,17 +14,17 @@ PyNvVideoCodec==2.0.4
 # flashinfer-cubin is not on PyPI since 0.6.14; setup.py excludes it from
 # install_requires so the published wheel does not carry an unresolvable pin
 --extra-index-url https://flashinfer.ai/whl/
-# 0.6.18 predates flashinfer#5075 (sm120 sparse-MLA NaN-safe gathers) and no
-# 0.7.0 exists on PyPI; ship the built wheel as an asset of Lvllm release
-# lvllm-v2.5.2 (same bytes as the lvllm-v2.5.0/v2.5.1 assets; source:
-# flashinfer main @ 24c30bdd).
-flashinfer-python @ https://github.com/guqiong96/Lvllm/releases/download/lvllm-v2.5.2/flashinfer_python-0.7.0-py3-none-any.whl
+# 0.7.2.post1 is the first official release containing flashinfer#5075 (sm120
+# sparse-MLA NaN-safe gathers); it supersedes the lvllm-v2.5.x custom-wheel
+# asset (flashinfer main @ 24c30bdd) that used to be pinned here.
+flashinfer-python==0.7.2.post1
 # flashinfer-cubin deliberately NOT required: sparse MLA JIT-compiles from
-# source on first serve (nvcc required); the nightly cubin package predates
-# #5075 and must stay out.
+# source on first serve (nvcc required); the cubin package must stay out.
 apache-tvm-ffi==0.1.11
 tilelang==0.1.12
-nvidia-cudnn-frontend>=1.19.1
+# >=1.31.0 keeps execution plans alive for the CUDA graphs recorded from them
+# (NVIDIA/cudnn-frontend#1195); older versions can replay an unloaded kernel.
+nvidia-cudnn-frontend>=1.31.0
 # Required for LLM_NVTX_SCOPES_FOR_PROFILING=1
 nvtx==0.2.15
 # Required for faster safetensors model loading
@@ -39,5 +39,5 @@ quack-kernels==0.6.5  # Required by MSA
 tokenspeed-mla==2.0.3; platform_system == "Linux"
 
 # Humming kernels for quantization gemm
-humming-kernels[cu13]==0.1.17
+humming-kernels[cu13]==0.1.19
 lk_moe==2.4.2

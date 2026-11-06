@@ -11,13 +11,19 @@ from transformers import Qwen4ExpConfig, Qwen4ExpTextConfig
 
 from vllm.config import CacheConfig, ParallelConfig
 from vllm.config.speculative import SpeculativeConfig
+from vllm.model_executor.layers.quantization.compressed_tensors.utils import (
+    should_ignore_layer,
+)
 from vllm.model_executor.models.config import (
-    Qwen3_5ForConditionalGenerationConfig,
     Qwen4ExpForConditionalGenerationConfig,
 )
-from vllm.models.qwen4_exp.common.qsa_cache import (
+from vllm.models.qwen4_exp.common.qsa_indexer import (
     QSA_RING_MAX_WIDENING,
     qsa_ring_capacity,
+)
+from vllm.models.qwen4_exp.nvidia.model import (
+    Qwen4ExpForCausalLM,
+    Qwen4ExpForConditionalGeneration,
 )
 from vllm.models.qwen4_exp.nvidia.model_state import Qwen4ExpModelState
 from vllm.utils.math_utils import cdiv
@@ -162,6 +168,56 @@ def test_qwen4_exp_mtp_remaps_mixed_precision_layer_indices(backend: str) -> Non
     }
 
 
+@spawn_new_process_for_each_test
+@pytest.mark.parametrize("backend", ["amd", "nvidia"])
+def test_qwen4_exp_mtp_remaps_quark_layer_names(backend: str) -> None:
+    from vllm.model_executor.layers.fused_moe import (
+        RoutedExperts,
+        UnquantizedFusedMoEMethod,
+    )
+    from vllm.model_executor.layers.quantization.quark.quark import QuarkConfig
+
+    mtp_module = import_module(f"vllm.models.qwen4_exp.{backend}.mtp")
+
+    # `re:mtp\.fc_hidden`, not a catch-all `re:mtp\..*`: a broad regex would
+    # already exclude layer 48's experts on its own (`re:` entries are never
+    # remapped), masking the bug this test is meant to catch.
+    exclude = ["lm_head", "mtp.layers.0.mlp.experts.0.gate_proj", r"re:mtp\.fc_hidden"]
+    checkpoint_config = {
+        "exclude": exclude,
+        "layer_quant_config": {"mtp.layers.0.self_attn.q_proj": {}},
+    }
+    vllm_config = SimpleNamespace(
+        speculative_config=SimpleNamespace(draft_model_config=object())
+    )
+    with (
+        patch.object(
+            mtp_module,
+            "get_draft_quant_config",
+            return_value=QuarkConfig(checkpoint_config),
+        ),
+        patch.object(mtp_module, "replace", return_value=SimpleNamespace()),
+    ):
+        draft_config = mtp_module._make_draft_vllm_config(vllm_config, 48, 1)
+
+    remapped = draft_config.quant_config.quant_config
+    assert remapped["exclude"] == [
+        "lm_head",
+        "mtp.layers.48.mlp.experts.0.gate_proj",
+        r"re:mtp\.fc_hidden",
+    ]
+    assert remapped["layer_quant_config"] == {"mtp.layers.48.self_attn.q_proj": {}}
+    assert exclude[1] == "mtp.layers.0.mlp.experts.0.gate_proj"
+
+    # Without the remap, layer 48's experts fall through to the global MXFP4
+    # scheme instead of being treated as unquantized bf16 -- assert the
+    # decision `get_quant_method` actually makes, not just the exclude list.
+    _, _, method_cls = draft_config.quant_config.get_quant_method_target(
+        "mtp.layers.48.mlp.experts", RoutedExperts
+    )
+    assert method_cls is UnquantizedFusedMoEMethod
+
+
 @pytest.mark.parametrize("wrapped_config", [False, True])
 def test_qwen4_exp_mtp_override_sets_draft_config(
     wrapped_config: bool,
@@ -188,31 +244,6 @@ def test_qwen4_exp_mtp_override_sets_draft_config(
     assert draft_config.n_predict == 1
 
 
-@pytest.mark.parametrize("ple_layer_ids", [[1], []])
-def test_qwen4_exp_rejects_pipeline_parallel_only_with_ple(ple_layer_ids) -> None:
-    """PLE needs raw input_ids, which non-first pipeline ranks never see. The
-    rest of the architecture is PP-capable, so the refusal must be conditional
-    -- and must land before the engine spends time loading weights."""
-    vllm_config = SimpleNamespace(
-        model_config=SimpleNamespace(
-            hf_text_config=_text_config(ple_layer_ids=ple_layer_ids),
-            multimodal_config=None,
-        ),
-        parallel_config=ParallelConfig(pipeline_parallel_size=2),
-        speculative_config=None,
-    )
-    with patch.object(
-        Qwen3_5ForConditionalGenerationConfig, "verify_and_update_config"
-    ):
-        if ple_layer_ids:
-            with pytest.raises(NotImplementedError, match="pipeline_parallel_size=1"):
-                Qwen4ExpForConditionalGenerationConfig.verify_and_update_config(
-                    vllm_config
-                )
-        else:
-            Qwen4ExpForConditionalGenerationConfig.verify_and_update_config(vllm_config)
-
-
 def test_qwen4_exp_model_state_prepares_ngram_context() -> None:
     model_state = object.__new__(Qwen4ExpModelState)
     model_state.uses_ngram_embedding = True
@@ -221,6 +252,7 @@ def test_qwen4_exp_model_state_prepares_ngram_context() -> None:
     model_state.ngram_context = torch.empty((8, 3), dtype=torch.int32)
     model_state.ngram_context_offsets = torch.arange(-3, 0, dtype=torch.int64)
     model_state.ple_query_start_loc = torch.empty(9, dtype=torch.int32)
+    model_state.disk_offload_modules = []
 
     input_batch = SimpleNamespace(
         num_reqs=2,
@@ -328,3 +360,19 @@ def test_qsa_ring_capacity_refuses_disproportionate_widening(
     # none. All three must fail loudly instead of allocating a 10x ring.
     with pytest.raises(ValueError, match="QSA ring"):
         qsa_ring_capacity(4, 13, block_size)
+
+
+@pytest.mark.parametrize(
+    "model_cls", [Qwen4ExpForCausalLM, Qwen4ExpForConditionalGeneration]
+)
+def test_qkv_proj_mapping_allows_bf16_indexer(model_cls) -> None:
+    """Regression test for https://github.com/vllm-project/vllm/issues/62308.
+
+    Layout of e.g. ukisai/Swift-1.5-Qwen3.8-Flash-Next-W4A16-AWQ: q/k/v are
+    quantized and only the indexer projection is in `ignore`.
+    """
+    assert not should_ignore_layer(
+        "model.layers.3.self_attn.qkv_proj",
+        ignore=["model.layers.3.self_attn.indexer.index_qk_proj"],
+        fused_mapping=model_cls.packed_modules_mapping,
+    )

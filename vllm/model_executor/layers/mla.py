@@ -83,6 +83,7 @@ class MultiHeadLatentAttentionWrapper(PluggableLayer):
         non_causal_multi_token_decode: bool = False,
         allow_short_prefill_indexer_scoring_skip: bool = False,
         fuse_qkv_rmsnorm: bool = False,
+        shardq_eligible: bool = False,
     ) -> None:
         super().__init__()
         self.hidden_size = hidden_size
@@ -143,6 +144,7 @@ class MultiHeadLatentAttentionWrapper(PluggableLayer):
             index_group_builder=mla_modules.index_group_builder,
             non_causal_multi_token_decode=non_causal_multi_token_decode,
             attn_backend=mla_modules.attn_backend,
+            shardq_eligible=shardq_eligible,
         )
         indexer_op = getattr(self.indexer, "indexer_op", None)
         if indexer_op is not None and hasattr(
