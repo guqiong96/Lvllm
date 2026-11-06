@@ -172,6 +172,18 @@ class LKMoEEnvs:
     LK_GPU_PREFILL_MIN_TOKENS = EnvInt(0)
     LK_GPU_PREFILL_ENGINE = EnvStr("cutlass")
     LK_GPU_PREFILL_SUB_M = EnvInt(0)
+    # -1 = auto (default): largest wave whose deq blocks plus whole tail
+    # staging layers still fit the borrow slab, clamped to E; 0 = single
+    # shot; >0 = explicit cap. Waves run inside each SUB_M pass.
+    LK_GPU_PREFILL_WAVE_EXPERTS = EnvInt(-1)
+    # CUTLASS act slice window in slot rows (act VRAM decoupling): 0
+    # (default) = one window per pass (classic full layout, bitwise); >0 =
+    # the four act regions (reordered input / f32 D / GU / down-out) hold
+    # one window and reorder->gemm->fuse->down->sum pipelines per window
+    # inside each SUB_M pass. Ignored by triton.
+    LK_GPU_PREFILL_D_SLOTS = EnvInt(0)
+    # Triton staging-ring depth (not a lookahead): 1 = serialized copy/gemm;
+    # 2 = ping-pong overlap. Ignored by the cutlass engine.
     LK_GPU_PREFETCH_WINDOW = EnvInt(1)
     LK_PP_DEBUG = EnvBool(False)
 
@@ -182,6 +194,12 @@ class LKMoEEnvs:
     LK_POOL_DECODE = EnvStr(None)
     LK_POOL_LOG = EnvInt(0)
     LK_ROUTE_PROBE = EnvBool(False)
+    # Pool-decode determinism (lk_moe pool_set_det_split): publish the claimed
+    # batch and make the GPU half stream-wait on that batch's copy fence
+    # before reading slots.
+    LK_POOL_DET_SPLIT = EnvBool(False)
+    # Diagnostic: log the frozen split (claim/ready/snapshot) per pool layer.
+    LK_POOL_SPLIT_PROBE = EnvBool(False)
 
     # Draft verify / mailbox / misc.
     LK_VERIFY_RESIDENT = EnvInt(0)
@@ -189,12 +207,19 @@ class LKMoEEnvs:
     LK_HF_MBOX = EnvInt(1)
     LK_GPU_RESERVE_GB = EnvFloat(0.0)
 
+    # Note: LK_THREADS and the debug knobs (LK_OMP, LK_SDE, LK_NV_PF*,
+    # LK_BIGM_*, LK_POOL_POP, LK_POOL_STAGE, LK_DECODE_TS, ...) are read
+    # DIRECTLY by the lk_moe C++ runtime; the launch scripts set them in the
+    # environment and no python helper mirrors them. LK_THREAD_BINDING (the
+    # NUMA_NODE binding mode, matching the lsglang launch convention) is also
+    # consumed by the C++ pool; it is declared above only so the snapshot
+    # documents it.
+
 
 envs = LKMoEEnvs()
 
 migrate_lk_env_vars()
 
-_gpu_prefill_min_tokens_override: int | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -214,6 +239,8 @@ class LKMoEConfig:
     prefill_min_tokens: int
     prefill_engine: str
     prefill_sub_m: int
+    prefill_wave_experts: int
+    prefill_d_slots: int
     prefetch_window: int
     prefill_debug: bool
     pool_slots: int
@@ -241,14 +268,23 @@ class LKMoEConfig:
 
     @property
     def prefill_engine_choice(self) -> str:
-        return "cutlass" if self.prefill_engine.strip().lower() == "cutlass" else "triton"
+        # Same rule as lsglang (2026-10-23): only an exact "triton" opts out;
+        # unset and unrecognized values both select cutlass.
+        return "triton" if self.prefill_engine.strip().lower() == "triton" else "cutlass"
 
 
 def _pool_decode_default() -> bool | None:
     value = envs.LK_POOL_DECODE.get()
     if value is None:
         return None
-    return EnvBool(False).parse(value)
+    try:
+        return EnvBool(False).parse(value)
+    except ValueError as exc:
+        warnings.warn(
+            f'Invalid value for LK_POOL_DECODE: {exc}, falling back to the '
+            'pool-tier default'
+        )
+        return None
 
 
 def get_lk_moe_config() -> LKMoEConfig:
@@ -272,6 +308,8 @@ def get_lk_moe_config() -> LKMoEConfig:
         prefill_min_tokens=get_gpu_prefill_min_tokens(),
         prefill_engine=envs.LK_GPU_PREFILL_ENGINE.get(),
         prefill_sub_m=envs.LK_GPU_PREFILL_SUB_M.get(),
+        prefill_wave_experts=envs.LK_GPU_PREFILL_WAVE_EXPERTS.get(),
+        prefill_d_slots=envs.LK_GPU_PREFILL_D_SLOTS.get(),
         prefetch_window=envs.LK_GPU_PREFETCH_WINDOW.get(),
         prefill_debug=envs.LK_PP_DEBUG.get(),
         pool_slots=envs.LK_POOL_SLOTS.get(),
@@ -288,7 +326,7 @@ def get_lk_moe_config() -> LKMoEConfig:
 
 
 @contextmanager
-def lk_pool_pump_parked():
+def park_lk_moe_expert_pool():
     """Park lk_moe's expert-pool pump around CUDA-graph launches.
 
     The pump issues cudaMemcpyAsync from its own thread; overlapping that with
@@ -314,6 +352,30 @@ def lk_pool_pump_parked():
         resume()
 
 
+# Compat alias: lsglang's canonical name is park_lk_moe_expert_pool.
+lk_pool_pump_parked = park_lk_moe_expert_pool
+
+
+def wait_lk_moe_pool_fences(stream_ptr: int) -> None:
+    """Attach the expert-pool copy fences to ``stream_ptr`` (pre-replay).
+
+    With the deterministic split on, ``publish_snapshot`` publishes CLAIMED
+    slots as soon as the pump's batch fence event is recorded, while the
+    copies may still be in flight on the pump stream.  A graph replay that
+    reads those slots must therefore stream-wait on the recorded fence
+    first; ``pool_wait_all_fences`` does exactly nothing unless det_split
+    is active.  Old lk_moe builds without the hook simply keep the
+    pre-feature behavior (same contract as lsglang).
+    """
+    if not is_lk_pool_enabled():
+        return
+    import lk_moe
+
+    wait = getattr(lk_moe, "pool_wait_all_fences", None)
+    if wait is not None:
+        wait(stream_ptr)
+
+
 def is_lk_moe_feature_enabled() -> bool:
     return get_lk_moe_config().enabled
 
@@ -323,8 +385,9 @@ def is_numa_interleave_enabled() -> bool:
 
 
 def get_gpu_prefill_min_tokens() -> int:
-    if _gpu_prefill_min_tokens_override is not None:
-        return _gpu_prefill_min_tokens_override
+    # Dual knob (same doctrine as lsglang): default 0 = tier off, pure CPU
+    # prefill; >0 both enables the tier and sets the batch gate. Forwarded to
+    # lk_moe via cfg; lk_moe itself never reads the env.
     return envs.LK_GPU_PREFILL_MIN_TOKENS.get()
 
 
@@ -338,6 +401,14 @@ def get_gpu_prefill_engine() -> str:
 
 def get_gpu_prefetch_window() -> int:
     return envs.LK_GPU_PREFETCH_WINDOW.get()
+
+
+def get_prefill_wave_experts() -> int:
+    return get_lk_moe_config().prefill_wave_experts
+
+
+def get_prefill_d_slots() -> int:
+    return get_lk_moe_config().prefill_d_slots
 
 
 def get_super_chunk_size() -> int:
@@ -397,6 +468,17 @@ def is_lk_pool_decode_enabled() -> bool:
     return config.pool_enabled
 
 
+def is_lk_pool_det_split_enabled() -> bool:
+    """Publish deterministic split + fence-wait in the GPU half (LK_POOL_DET_SPLIT)."""
+    config = get_lk_moe_config()
+    return config.enabled and envs.LK_POOL_DET_SPLIT.get()
+
+
+def lk_pool_split_probe_enabled() -> bool:
+    """Diagnostic split census logging (LK_POOL_SPLIT_PROBE)."""
+    return get_lk_moe_config().enabled and envs.LK_POOL_SPLIT_PROBE.get()
+
+
 def lk_route_probe_enabled() -> bool:
     config = get_lk_moe_config()
     return config.pool_enabled and config.route_probe
@@ -408,25 +490,6 @@ def is_lk_prefill_debug() -> bool:
 
 def enabled_layerwise_load() -> bool:
     return envs.LK_MOE_LAYERWISE_LOAD.get()
-
-
-def disable_lk_moe_gpu_prefill() -> int:
-    """Temporarily force the GPU-prefill tier off; returns the old value."""
-    global _gpu_prefill_min_tokens_override
-    origin = get_gpu_prefill_min_tokens()
-    _gpu_prefill_min_tokens_override = 0
-    return origin
-
-
-def enable_lk_moe_gpu_prefill(value: int) -> int:
-    global _gpu_prefill_min_tokens_override
-    _gpu_prefill_min_tokens_override = value
-    return value
-
-
-def reset_lk_moe_gpu_prefill_override() -> None:
-    global _gpu_prefill_min_tokens_override
-    _gpu_prefill_min_tokens_override = None
 
 
 def get_model_type_from_layer_name(layer_name: str) -> str:
@@ -565,7 +628,8 @@ def fill_lk_moe_config(cfg: Any, layer_name: str | None = None) -> Any:
             cfg.layer_id = extract_layer_index(layer_name)
         except ValueError:
             cfg.layer_id = 0
-        cfg.pool = bool(is_pool or is_prefill)
+        # No membership flag on cfg: pool_slots>0 + a cache/prefill half is
+        # the single derivation of pool membership.
         cfg.pool_cache = bool(is_pool)
         cfg.prefill_gpu = bool(is_prefill)
         cfg.use_gpu_prefill = bool(
@@ -582,7 +646,13 @@ def fill_lk_moe_config(cfg: Any, layer_name: str | None = None) -> Any:
     cfg.hf_mbox = config.hf_mbox
     cfg.prefill_min_tokens = config.prefill_min_tokens
     cfg.prefill_window = config.prefetch_window
+    cfg.prefill_wave_experts = config.prefill_wave_experts
+    cfg.prefill_d_slots = config.prefill_d_slots
     cfg.super_batch_size = config.super_chunk_size
     cfg.prefill_dbg = config.prefill_debug
     cfg.route_probe = lk_route_probe_enabled()
+    # pool_member_layers (slab sizing) is derived per-instance by the layer
+    # builders (non-resident main-layer count), same doctrine as lsglang's
+    # _fill_lk_cfg; it overrides the 0 default set here.
+    cfg.pool_member_layers = 0
     return cfg

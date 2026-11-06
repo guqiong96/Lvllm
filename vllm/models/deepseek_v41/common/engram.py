@@ -696,7 +696,8 @@ def _engram_lookup_kernel(
         values = tl.load(
             weight + local[:, None] * DIM + cols[None, :],
             mask=owned[:, None],
-            other=0,
+            # float `other`: Triton 3.8 rejects casting an int default to fp8e4nv.
+            other=0.0,
         )
         scale = tl.load(
             scales + local[:, None] * (DIM // QUANT_BLOCK) + scale_cols[None, :],

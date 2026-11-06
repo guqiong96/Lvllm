@@ -358,5 +358,10 @@ class CUDAGraphWrapper:
         # Sync offloader before replay - ensures any external dependencies
         # from pre-capture prefetches are satisfied.
         get_offloader().sync_prev_onload()
-        entry.cudagraph.replay()
+        # lk_moe's pool pump issues cudaMemcpyAsync from its own thread; overlap
+        # with cuGraphLaunch deadlocks in libcuda on P2P-patched drivers.
+        from vllm.utils.lk_moe_env import park_lk_moe_expert_pool
+
+        with park_lk_moe_expert_pool():
+            entry.cudagraph.replay()
         return entry.output

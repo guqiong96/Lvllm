@@ -19,6 +19,7 @@ from vllm.forward_context import (
     ForwardContext,
     get_forward_context,
     is_forward_context_available,
+    is_model_capture_mode,
 )
 from vllm.logger import init_logger
 from vllm.model_executor.layers.fused_moe.activation import MoEActivation
@@ -632,7 +633,7 @@ class MoERunner(MoERunnerInterface):
                     router_logits=router_logits,
                     input_ids=input_ids,
                 )
-            elif torch.cuda.is_current_stream_capturing():
+            elif torch.cuda.is_current_stream_capturing() or is_model_capture_mode():
                 fused_out = self.routed_experts._cpu_decode(
                     hidden_states,
                     topk_weights, 
@@ -660,7 +661,7 @@ class MoERunner(MoERunnerInterface):
                     shared_experts=self._shared_experts,
                     shared_experts_input=shared_experts_input,
                 )
-            elif torch.cuda.is_current_stream_capturing():
+            elif torch.cuda.is_current_stream_capturing() or is_model_capture_mode():
                 fused_out = self.routed_experts._cpu_decode(
                     hidden_states,
                     topk_weights, 

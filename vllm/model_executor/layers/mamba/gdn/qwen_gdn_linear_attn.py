@@ -70,6 +70,7 @@ from vllm.third_party.flash_linear_attention.ops import (
 )
 from vllm.third_party.flash_linear_attention.ops.chunk import l2norm_fwd
 from vllm.third_party.flash_linear_attention.ops.utils import FLA_CHUNK_SIZE
+from vllm.utils.lk_moe_env import get_super_chunk_size
 from vllm.utils.math_utils import cdiv
 from vllm.utils.torch_utils import (
     LayerNameType,
@@ -692,8 +693,12 @@ class QwenGatedDeltaNetAttention(GatedDeltaNetAttention):
         ):
             self._checkpoint_alignment = FLASHINFER_GDN_CHECKPOINT_ALIGNMENT
             self._vllm_config = vllm_config
-            self._max_num_batched_tokens = (
-                vllm_config.scheduler_config.max_num_batched_tokens
+            # The exporter's checkpoint grid must cover the largest single
+            # prefill step, which a super-chunk forward raises to the CAP
+            # (LK_GPU_PREFILL_SUB_M).
+            self._max_num_batched_tokens = max(
+                vllm_config.scheduler_config.max_num_batched_tokens,
+                get_super_chunk_size(),
             )
             self._checkpoint_exporter = MambaPrefillCheckpointExporter(
                 state_len=self.conv_kernel_size - 1

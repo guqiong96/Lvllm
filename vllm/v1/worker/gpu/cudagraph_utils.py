@@ -31,7 +31,11 @@ from vllm.distributed.parallel_state import (
     graph_capture,
     is_global_first_rank,
 )
-from vllm.forward_context import BatchDescriptor, set_forward_context
+from vllm.forward_context import (
+    BatchDescriptor,
+    model_capture_mode,
+    set_forward_context,
+)
 from vllm.logger import init_logger
 from vllm.model_executor.models.interfaces import requires_raw_input_tokens
 from vllm.model_executor.offloader.base import get_offloader
@@ -437,7 +441,7 @@ class CudaGraphManager:
             progress_bar_desc: Description shown on the capture progress bar.
 
         """
-        with graph_capture(device=self.device), ExitStack() as stack:
+        with model_capture_mode(), graph_capture(device=self.device), ExitStack() as stack:
             if self.ubatch_runner is not None:
                 # Join parked threads on failure to avoid blocking later captures.
                 stack.callback(self.ubatch_runner.abort_pending_run)
@@ -565,7 +569,19 @@ class CudaGraphManager:
         # cannot see. Without this, replay could overwrite static buffers
         # while those copies are still in flight.
         get_offloader().sync_prev_onload()
-        self.graphs[desc].replay()
+        # lk_moe's pool pump issues cudaMemcpyAsync from its own thread; overlap
+        # with cuGraphLaunch deadlocks in libcuda on P2P-patched drivers.
+        from vllm.utils.lk_moe_env import (
+            park_lk_moe_expert_pool,
+            wait_lk_moe_pool_fences,
+        )
+
+        # With the deterministic split on, slots published from CLAIMED state
+        # may still have copies in flight; the replay must stream-wait on the
+        # recorded fences first (no-op unless det_split is active).
+        wait_lk_moe_pool_fences(torch.cuda.current_stream().cuda_stream)
+        with park_lk_moe_expert_pool():
+            self.graphs[desc].replay()
 
     def init_breakable_cg_runner(
         self, model: nn.Module, key_fn: Callable[..., Hashable] | None = None

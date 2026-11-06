@@ -431,5 +431,8 @@ class BreakableCUDAGraphWrapper:
         # dependencies from pre-capture prefetches are satisfied.
         get_offloader().sync_prev_onload()
         assert entry.capture is not None
-        entry.capture.replay()
+        from vllm.utils.lk_moe_env import park_lk_moe_expert_pool
+
+        with park_lk_moe_expert_pool():
+            entry.capture.replay()
         return entry.output

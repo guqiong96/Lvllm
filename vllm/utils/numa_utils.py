@@ -481,14 +481,14 @@ def configure_subprocess(
 ):
     """Temporarily replace the multiprocessing executable with a numactl wrapper."""
     parallel_config = vllm_config.parallel_config
-    from vllm.envs import is_lk_moe_feature_enabled, is_numa_interleave_enabled
+    from vllm.utils.lk_moe_env import is_lk_moe_feature_enabled, is_numa_interleave_enabled
     
     # Check if NUMA interleave override should take precedence
     if is_lk_moe_feature_enabled() and is_numa_interleave_enabled():  
         numactl_args = "--interleave=all"
         logger.info(
-            "Enabling NUMA interleave override when LVLLM_MOE_NUMA_ENABLED=1 "
-            "and LVLLM_ENABLE_NUMA_INTERLEAVE=1"
+            "Enabling NUMA interleave override when LK_MOE_HYBRID_ENABLED=1 "
+            "and LK_NUMA_INTERLEAVE=1"
         )
     else:
         # Original logic

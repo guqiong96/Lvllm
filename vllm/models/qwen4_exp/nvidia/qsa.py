@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
+from dataclasses import replace
 from typing import ClassVar, cast
 
 import torch
@@ -335,6 +336,88 @@ class Qwen4ExpQSAFlashAttentionImpl(FlashAttentionImpl):
         return output
 
 
+def _super_chunk_bounds(num_tokens: int, inner: int):
+    """Token-axis ``[lo, hi)`` ranges cut at multiples of the inner size.
+    Same rule as SGLang's ``compute_super_chunk_token_bounds``."""
+    for lo in range(0, num_tokens, inner):
+        yield lo, min(lo + inner, num_tokens)
+
+
+def _super_chunk_child_metadata(
+    metadata: dict,
+    *,
+    layer_name: str,
+    raw_prefix: str,
+    comp_prefix: str,
+    lo: int,
+    hi: int,
+) -> dict:
+    """Row-sliced metadata views for one super-chunk pass — the counterpart
+    of SGLang's ``build_super_chunk_children``. Only token-axis tensors and
+    the per-request ``(query_start_loc, seq_lens)`` pair change; block
+    tables, cache references and the step-wide ``k_work_metadata`` rows are
+    shared. ``seq_lens`` is trimmed by the rows this pass has not reached
+    yet, so the FA causal alignment and the visible-compressed-block bound
+    (mirror of ``_build_qsa_metadata_torch``) never see future tokens.
+    Groups that end past ``hi`` may get an early, wrong ``k_work`` write
+    here, but the pass owning their final token rewrites the same slot
+    before any row's ``visible_blocks`` can read it, and groups ending past
+    the step end are absent from ``k_work`` by construction (floor-div).
+    """
+    main = metadata[layer_name]
+    rows = hi - lo
+    num_reqs = main.query_start_loc.shape[0] - 1
+    qsl = main.query_start_loc[: num_reqs + 1]
+    qsl_child = qsl.clamp(lo, hi) - lo
+    seq_child = main.seq_lens - (qsl[1:] - hi).clamp_min_(0).to(
+        main.seq_lens.dtype
+    )
+
+    def slice_side(side: QSAForwardMetadata) -> QSAForwardMetadata:
+        decode_rows = min(max(side.num_decode_tokens - lo, 0), rows)
+        decode_query_len = side.decode_query_len if decode_rows else 0
+        num_decodes = (
+            -(-decode_rows // decode_query_len) if decode_query_len else 0
+        )
+        logical = side.logical_positions[lo:hi]
+        token_child = side.token_to_req[lo:hi]
+        # min((pos+1)//r, seq//r) == min(pos+1, seq)//r for floor division.
+        visible = (
+            torch.minimum(
+                logical + 1,
+                seq_child.index_select(0, token_child.long()),
+            )
+            // side.compress_ratio
+        ).clamp_min_(0).to(torch.int32)
+        return replace(
+            side,
+            slot_mapping=side.slot_mapping[lo:hi],
+            seq_lens=seq_child,
+            query_start_loc=qsl_child.to(side.query_start_loc.dtype),
+            token_to_req=token_child,
+            logical_positions=logical,
+            visible_blocks=visible,
+            num_actual_tokens=rows,
+            num_decodes=num_decodes,
+            num_decode_tokens=decode_rows,
+            num_prefills=num_reqs - num_decodes,
+            num_prefill_tokens=rows - decode_rows,
+            decode_query_len=decode_query_len,
+        )
+
+    child = dict(metadata)
+    child[layer_name] = replace(
+        main,
+        num_actual_tokens=rows,
+        query_start_loc=qsl_child.to(main.query_start_loc.dtype),
+        seq_lens=seq_child,
+        slot_mapping=main.slot_mapping[lo:hi],
+    )
+    child[raw_prefix] = slice_side(metadata[raw_prefix])
+    child[comp_prefix] = slice_side(metadata[comp_prefix])
+    return child
+
+
 class Qwen4ExpQSAAttention(Qwen3NextAttention, AttentionLayerBase):
     """Merged Qwen full-attention owner with a QSA index side branch."""
 
@@ -517,6 +600,12 @@ class Qwen4ExpQSAAttention(Qwen3NextAttention, AttentionLayerBase):
             del self.indexer.index_qk_proj
 
         max_tokens = vllm_config.scheduler_config.max_num_batched_tokens
+        # Inner bound of the super-chunk loop: the forward may carry up to
+        # LK_GPU_PREFILL_SUB_M tokens, but every row-indexed buffer below is
+        # sized by max_num_batched_tokens because _run_qsa serialises such a
+        # step into sub-chunk passes of that width (SGLang's super_chunk
+        # wrapper with inner_size = chunked_prefill_size, same doctrine).
+        self._super_chunk_inner = max_tokens
         # PACKED selection buffer: the trailing column holds each row's
         # valid-entry count (written by the expand kernel) — never a token
         # index; the sparse attention kernel reads it as its loop bound.
@@ -633,6 +722,24 @@ class Qwen4ExpQSAAttention(Qwen3NextAttention, AttentionLayerBase):
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
     ) -> torch.Tensor:
+        num_tokens = hidden_states.shape[0]
+        if num_tokens > self._super_chunk_inner:
+            attn_output = self._forward_attn_super_chunk(
+                positions, hidden_states, num_tokens
+            )
+        else:
+            attn_output = self._forward_attn(positions, hidden_states)
+        flat_output = attn_output.view(num_tokens, -1)
+        output, _ = self.o_proj(flat_output)
+        return output
+
+    def _forward_attn(
+        self,
+        positions: torch.Tensor,
+        hidden_states: torch.Tensor,
+        attn_out: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        rows = hidden_states.shape[0]
         qkv, _ = self.qkv_proj(hidden_states)
         if self.fuse_indexer_projection:
             qkv, projected_qk = qkv.split(
@@ -640,30 +747,75 @@ class Qwen4ExpQSAAttention(Qwen3NextAttention, AttentionLayerBase):
             )
         else:
             projected_qk, _ = self.indexer.index_qk_proj(hidden_states)
-        num_tokens = hidden_states.shape[0]
         if not self.use_fused_qsa_prepare:
             q, k, v, gate = self._project_qkv_gate(qkv, positions)
             assert gate is not None
-            query = q.view(num_tokens, self.num_heads, self.head_dim)
-            key = k.view(num_tokens, self.num_kv_heads, self.head_dim)
-            value = v.view(num_tokens, self.num_kv_heads, self.head_dim)
+            query = q.view(rows, self.num_heads, self.head_dim)
+            key = k.view(rows, self.num_kv_heads, self.head_dim)
+            value = v.view(rows, self.num_kv_heads, self.head_dim)
         else:
             # Norm/RoPE/gate and the K/V cache write happen inside _run_qsa.
             query = key = value = gate = None
-        attn_output = qkv.new_empty(num_tokens, self.num_heads, self.head_dim)
+        if attn_out is None:
+            attn_out = qkv.new_empty(rows, self.num_heads, self.head_dim)
         self._run_qsa(
             projected_qk,
             positions,
             query,
             key,
             value,
-            attn_output,
+            attn_out,
             gate,
             qkv,
         )
-        flat_output = attn_output.view(num_tokens, -1)
-        output, _ = self.o_proj(flat_output)
-        return output
+        return attn_out
+
+    @eager_break_during_capture
+    def _forward_attn_super_chunk(
+        self,
+        positions: torch.Tensor,
+        hidden_states: torch.Tensor,
+        num_tokens: int,
+    ) -> torch.Tensor:
+        """Serial sub-chunk passes of ``_forward_attn`` over the token axis —
+        the SGLang super-chunk wrapper's loop at model level. Everything
+        outside this attention stage (GDN layers, hyper-connections, MoE
+        with the full CAP batch through lk_moe) still runs once for the
+        whole forward."""
+        metadata = get_forward_context().attn_metadata
+        list_wrapped = isinstance(metadata, list)
+        md0 = metadata[0] if list_wrapped else metadata
+        if not isinstance(md0, dict):
+            # Dummy/profile forwards without built metadata: the single
+            # path's zero-and-return branch stays responsible.
+            return self._forward_attn(positions, hidden_states)
+        raw_prefix = self.indexer.raw_key_cache.prefix
+        comp_prefix = self.indexer.compressed_key_cache.prefix
+        attn_output = hidden_states.new_empty(
+            num_tokens, self.num_heads, self.head_dim
+        )
+        ctx = get_forward_context()
+        outer = ctx.attn_metadata
+        try:
+            for lo, hi in _super_chunk_bounds(num_tokens, self._super_chunk_inner):
+                child = _super_chunk_child_metadata(
+                    md0,
+                    layer_name=self.layer_name,
+                    raw_prefix=raw_prefix,
+                    comp_prefix=comp_prefix,
+                    lo=lo,
+                    hi=hi,
+                )
+                ctx.attn_metadata = [child] if list_wrapped else child
+                self._forward_attn(
+                    positions[..., lo:hi],
+                    hidden_states[lo:hi],
+                    attn_out=attn_output[lo:hi],
+                )
+        finally:
+            ctx.attn_metadata = outer
+        return attn_output
+
 
 
 __all__ = [

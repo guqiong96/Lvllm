@@ -513,6 +513,12 @@ class GPUModelRunner(
         self.dcp_world_size = self.parallel_config.decode_context_parallel_size
         self.dcp_rank = 0 if self.dcp_world_size <= 1 else get_dcp_group().rank_in_group
         self.max_num_tokens = scheduler_config.max_num_batched_tokens
+        # A super-chunk forward carries up to LK_GPU_PREFILL_SUB_M tokens in
+        # one step, so every max_num_tokens-sized buffer must cover it; the
+        # components themselves loop at max_num_batched_tokens inside.
+        from vllm.utils.lk_moe_env import get_super_chunk_size
+
+        self.max_num_tokens = max(self.max_num_tokens, get_super_chunk_size())
         self.max_num_reqs = scheduler_config.max_num_seqs
 
         # Broadcast PP output for external_launcher (torchrun)
@@ -2229,7 +2235,7 @@ class GPUModelRunner(
         if self.lora_config:
             assert (
                 np.sum(num_sampled_tokens)
-                <= self.vllm_config.scheduler_config.max_num_batched_tokens
+                <= self.max_num_tokens
             )
             self.set_active_loras(
                 self.input_batch, num_scheduled_tokens, num_sampled_tokens
@@ -3932,6 +3938,19 @@ class GPUModelRunner(
         return bool(self.discard_request_mask.np[:num_reqs].all())
 
     @torch.inference_mode()
+    def _lk_prefill_step(self) -> bool:
+        """True when this step still has prompt tokens (a prefill chunk)."""
+        ib = self.input_batch
+        n = int(getattr(ib, "num_reqs", 0))
+        if n <= 0:
+            return False
+        return bool(
+            (
+                ib.num_computed_tokens_cpu_tensor[:n]
+                < ib.num_prompt_tokens_cpu_tensor[:n]
+            ).any()
+        )
+
     def execute_model(
         self,
         scheduler_output: "SchedulerOutput",
@@ -4180,7 +4199,21 @@ class GPUModelRunner(
                 ubatch_slices_padded,
             )
         is_padding = self._prepare_padding_mask(num_tokens_unpadded, num_tokens_padded)
+        # lk_moe borrow window: one prefill forward = one frozen chunk, so
+        # staging rows stay valid across every MoE layer of the step.
+        lk_chunk_ctx = nullcontext()
+        if self._lk_prefill_step():
+            from vllm.utils.lk_moe_env import (
+                is_lk_moe_use_gpu_prefill,
+                is_lk_pool_enabled,
+            )
+
+            if is_lk_moe_use_gpu_prefill() and is_lk_pool_enabled():
+                from lk_moe.prefill_cutlass import frozen_chunk
+
+                lk_chunk_ctx = frozen_chunk()
         with (
+            lk_chunk_ctx,
             set_forward_context(
                 attn_metadata,
                 self.vllm_config,

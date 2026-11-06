@@ -129,6 +129,7 @@ On a **mixed-arch host** add `FLASHINFER_CUDA_ARCH_LIST="<all ranks>"` (e.g. `"8
 ## Install
 
 ```bash
+pip install torchaudio triton torchvision torch==2.14.0
 pip install https://github.com/guqiong96/Lvllm/releases/download/lvllm-v2.5.2/lvllm-2.5.2-cp312-cp312-manylinux_2_34_x86_64.whl
 # deps (incl. the bundled FlashInfer wheel with the SM120 sparse-MLA fix) resolve automatically
 ```

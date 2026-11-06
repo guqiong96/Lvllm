@@ -5,17 +5,23 @@
 # (gated to cap>=90), so no fp4_gemm collective; sparse MLA must fall to the
 # sm8x Triton path (sm8x_sparse_mla_enabled, floor==8).
 CUDA_DEVICE_ORDER=PCI_BUS_ID \
+GLIBC_TUNABLES=glibc.malloc.thp_enabled=0 \
+GLOO_SOCKET_IFNAME=lo NCCL_SOCKET_IFNAME=lo \
 CUDA_VISIBLE_DEVICES=0,3 \
-FLASHINFER_DISABLE_VERSION_CHECK=1 \
-VLLM_USE_V2_MODEL_RUNNER=1 \
-LVLLM_MOE_NUMA_ENABLED=1 \
+LK_MOE_HYBRID_ENABLED=1 \
 LK_THREADS=48 \
 OMP_NUM_THREADS=1 \
-LK_THREAD_BINDING=CPU_CORE \
-LVLLM_GPU_PREFETCH_WINDOW=1 \
-LVLLM_GPU_PREFILL_MIN_BATCH_SIZE=0 \
-LVLLM_ENABLE_NUMA_INTERLEAVE=1 \
+LK_THREAD_BINDING=NUMA_NODE \
+LK_GPU_PREFETCH_WINDOW=1 \
+LK_GPU_PREFILL_MIN_TOKENS=1024 \
+LK_GPU_PREFILL_ENGINE=cutlass \
+LK_GPU_PREFILL_SUB_M=8192 \
+LK_NUMA_INTERLEAVE=1 \
 LK_POWER_SAVING=1 \
+LK_GPU_RESIDENT_MOE_LAYERS="" \
+LK_POOL_SLOTS=12 \
+FLASHINFER_DISABLE_VERSION_CHECK=1 \
+VLLM_USE_V2_MODEL_RUNNER=1 \
 vllm serve ~/Models/GLM-5.3-Flash-NVFP4 \
   --served-model-name GLM-5.3-Flash \
   --host 0.0.0.0 --port 8070 \
@@ -28,5 +34,4 @@ vllm serve ~/Models/GLM-5.3-Flash-NVFP4 \
   --kv-cache-dtype bfloat16 \
   --compilation-config '{"mode":"VLLM_COMPILE","cudagraph_mode":"FULL_DECODE_ONLY"}' \
   --enable-prefix-caching \
-  --enable-chunked-prefill \
-  --disable-custom-all-reduce
+  --enable-chunked-prefill

@@ -31,6 +31,7 @@ from vllm.logger import init_logger
 from vllm.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
 from vllm.multimodal.encoder_budget import MultiModalBudget
 from vllm.multimodal.utils import get_mm_features_in_window
+from vllm.utils.lk_moe_env import get_super_chunk_size
 from vllm.utils.math_utils import cdiv
 from vllm.v1.core.encoder_cache_manager import (
     EncoderCacheManager,
@@ -140,6 +141,20 @@ class Scheduler(SchedulerInterface):
             if self.scheduler_config.max_num_scheduled_tokens is not None
             else self.scheduler_config.max_num_batched_tokens
         )
+        # Super-chunk: LK_GPU_PREFILL_SUB_M raises the forward-length cap,
+        # mirroring SGLang's scheduler (chunked_prefill_size =
+        # max(chunked_prefill_size, get_super_chunk_size())). All other
+        # components keep looping at max_num_batched_tokens inside it.
+        self.super_chunk_size = get_super_chunk_size()
+        if self.super_chunk_size > 0:
+            self.max_num_scheduled_tokens = max(
+                self.max_num_scheduled_tokens, self.super_chunk_size
+            )
+            logger.info(
+                "Super-chunk prefill: CAP=%d, inner=%d.",
+                self.max_num_scheduled_tokens,
+                self.scheduler_config.max_num_batched_tokens,
+            )
         self.adaptive_long_prefill_threshold = (
             self.scheduler_config.long_prefill_token_threshold_adaptive
         )
@@ -665,7 +680,9 @@ class Scheduler(SchedulerInterface):
         token_budget = self.max_num_scheduled_tokens
         spec = self.vllm_config.speculative_config
         draft_slots = spec.max_num_new_slots_for_drafting if spec is not None else 0
-        input_budget = self.scheduler_config.max_num_batched_tokens
+        input_budget = max(
+            self.scheduler_config.max_num_batched_tokens, self.super_chunk_size
+        )
         if self._pause_state == PauseState.PAUSED_ALL:
             # Do not schedule any requests when paused.
             token_budget = 0

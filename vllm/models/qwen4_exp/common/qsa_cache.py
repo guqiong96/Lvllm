@@ -25,6 +25,7 @@ from vllm.logger import init_logger
 from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
 from vllm.platforms import current_platform
 from vllm.triton_utils import HAS_TRITON, tl, triton
+from vllm.utils.lk_moe_env import get_super_chunk_size
 from vllm.utils.math_utils import cdiv, round_up
 from vllm.v1.attention.backend import (
     AttentionBackend,
@@ -624,7 +625,13 @@ class QSAMetadataBuilder(AttentionMetadataBuilder[QSAForwardMetadata]):
         else:
             self.compress_ratio = 1
         self.storage_block_size = kv_cache_spec.num_states
-        max_tokens = vllm_config.scheduler_config.max_num_batched_tokens
+        # Token-axis buffers cover the largest step a super-chunk forward
+        # can schedule (LK_GPU_PREFILL_SUB_M), not just
+        # max_num_batched_tokens; the QSA layer slices these per sub-chunk.
+        max_tokens = max(
+            vllm_config.scheduler_config.max_num_batched_tokens,
+            get_super_chunk_size(),
+        )
         self.token_to_req_buffer = torch.empty(
             max_tokens, dtype=torch.int32, device=device
         )

@@ -19,6 +19,7 @@ from vllm.model_executor.layers.mamba.mamba_utils import (
     is_conv_state_dim_first,
 )
 from vllm.models.common.ops.sequence_parallel import sp_all_gather, sp_shard
+from vllm.utils.lk_moe_env import get_super_chunk_size
 from vllm.v1.attention.backends.registry import MambaAttentionBackendEnum
 from vllm.v1.attention.backends.short_conv_attn import (
     PleShortConvAttentionBackend,
@@ -98,7 +99,13 @@ class Qwen4ExpPLELayer(nn.Module, MambaBase):
             config,
             int(config.ple_embed_dim),
             self.ple_dense_layer_id,
-            vllm_config.scheduler_config.max_num_batched_tokens,
+            # The pinned ngram-prefetch staging holds one row per token of
+            # the largest scheduled step; a super-chunk forward raises that
+            # from max_num_batched_tokens to the CAP (LK_GPU_PREFILL_SUB_M).
+            max(
+                vllm_config.scheduler_config.max_num_batched_tokens,
+                get_super_chunk_size(),
+            ),
             data_parallel_rank=vllm_config.parallel_config.data_parallel_rank,
             prefix=f"{prefix}.ple_embedding",
             quant_config=quant_config,

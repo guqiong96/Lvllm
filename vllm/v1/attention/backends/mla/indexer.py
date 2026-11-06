@@ -1475,7 +1475,14 @@ class DeepseekV32IndexerMetadataBuilder(AttentionMetadataBuilder):
 
         compressed_slot_mapping = slot_mapping
         indexer_block_table = block_table
-        kernel_block_size = self.kernel_block_size or self.kv_cache_spec.block_size
+        # Upstream moved the kernel block size into the builder's kv_cache_spec
+        # (copy_with_new_block_size); the old set_kernel_block_size hook is
+        # gone. Keep the attribute read as an override for forks that still set
+        # it, otherwise the spec already carries the kernel size.
+        kernel_block_size = (
+            getattr(self, "kernel_block_size", None)
+            or self.kv_cache_spec.block_size
+        )
         if self.kv_cache_spec.block_size % kernel_block_size != 0:
             raise ValueError(
                 "Indexer kernel block size must divide the storage block size: "

@@ -25,6 +25,28 @@ forward_start_time: float = 0
 batchsize_logging_interval: float = envs.VLLM_LOG_BATCHSIZE_INTERVAL
 batchsize_forward_time: defaultdict = defaultdict(list)
 
+# True while CUDA graphs are being captured, including the pre-capture warmup
+# passes (which run with ``cudagraph_runtime_mode=NONE`` and therefore are not
+# detected by ``torch.cuda.is_current_stream_capturing()``).  Model code that
+# has a graph-unsafe path (e.g. host copies in the lk_moe CPU-prefill tier)
+# must consult this in addition to ``is_current_stream_capturing()``.
+_model_capture_mode: bool = False
+
+
+def is_model_capture_mode() -> bool:
+    return _model_capture_mode
+
+
+@contextmanager
+def model_capture_mode():
+    global _model_capture_mode
+    prev = _model_capture_mode
+    _model_capture_mode = True
+    try:
+        yield
+    finally:
+        _model_capture_mode = prev
+
 
 @dataclass(frozen=True)
 class BatchDescriptor:

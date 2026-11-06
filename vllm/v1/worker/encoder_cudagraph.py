@@ -325,8 +325,11 @@ class EncoderCudaGraphManager:
             output_buffer = torch.empty_like(output)
 
         graph = torch.cuda.CUDAGraph()
+        from vllm.utils.lk_moe_env import park_lk_moe_expert_pool
+
         with (
             torch.inference_mode(),
+            park_lk_moe_expert_pool(),
             torch.cuda.graph(graph, pool=self.graph_pool, stream=current_stream()),
         ):
             output = self.model.encoder_cudagraph_forward({**values}, path=path)
@@ -451,7 +454,10 @@ class EncoderCudaGraphManager:
                 )
                 padding_logic(buf, src)
 
-        graph_meta.graph.replay()
+        from vllm.utils.lk_moe_env import park_lk_moe_expert_pool
+
+        with park_lk_moe_expert_pool():
+            graph_meta.graph.replay()
 
         self.graph_hits += num_items
         return graph_meta.output_buffer

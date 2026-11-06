@@ -2597,7 +2597,9 @@ class _DropInputScale(FormatScheme):
     """
 
     def extra_weights(self, layer, shapes, ctx, wl) -> None:
-        data = torch.full((shapes.num_partitions,), torch.nan)
+        data = torch.full(
+            (shapes.num_partitions,), torch.nan, dtype=torch.float32
+        )
         layer.register_parameter(
             "input_scale", PerTensorScaleParameter(data=data, weight_loader=wl)
         )

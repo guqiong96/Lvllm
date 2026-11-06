@@ -463,8 +463,17 @@ class ParallelEngramEmbedding(BaseParallelEngramEmbedding):
         # keep their mmap alive through reference counting, so filling later
         # is safe; the page cache just gets dropped first.
         self._pending_host_fills: list[tuple[torch.nn.Parameter, torch.Tensor]] = []
-        super().__init__(num_embeddings, dim, head_sizes, block_size)
-        if cpu_offload:
+        # The base class owns cpu_offload/dp_shared_memory too; forward them so
+        # its __init__ cannot clobber the values resolved above back to False.
+        super().__init__(
+            num_embeddings,
+            dim,
+            head_sizes,
+            block_size,
+            cpu_offload=cpu_offload,
+            dp_shared_memory=dp_shared_memory,
+        )
+        if cpu_offload and not hasattr(self.weight, "dummy_weight_value"):
             # Constant dummy values avoid randomizing huge CPU lookup tables.
             set_weight_attrs(self.weight, {"dummy_weight_value": 1.0})
             # The ue8m0 encoding of scale 1.0 is exponent byte 127.
@@ -704,16 +713,15 @@ class Engram(BaseEngram):
         hash_ids.record_stream(stream)
         with torch.cuda.stream(stream):
             self.embed_tokens.lookup(hash_ids, rows, background=True)
+        # The base class completes a prefetch through this event; record it on
+        # the same stream so the wait below only covers this layer's lookup.
+        assert self._prefetch_done is not None
+        self._prefetch_done.record(stream)
 
     @eager_break_during_capture
-    def _finish_prefetch(self, stream: torch.cuda.Stream) -> None:
-        torch.cuda.current_stream().wait_stream(stream)
+    def _finish_prefetch(self, event: torch.cuda.Event) -> None:
+        torch.cuda.current_stream().wait_event(event)
 
     def _ready_rows(self, num_tokens: int) -> torch.Tensor:
-        if self._prefetch_stream is not None:
-            self._finish_prefetch(self._prefetch_stream)
-        if self.embed_tokens.dp_size > 1:
-            slot = engram_gathered_num_tokens()
-            staged = self.staged_rows[: slot * self.embed_tokens.dp_size]
-            return _gather_engram_rows(staged, num_tokens)
+        # The base class waits on _prefetch_done and performs the DP gather.
         return super()._ready_rows(num_tokens)

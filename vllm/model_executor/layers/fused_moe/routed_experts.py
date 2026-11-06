@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+import os
 from collections.abc import Callable, Iterable
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Literal, cast, overload
@@ -40,12 +41,48 @@ if TYPE_CHECKING:
 logger = init_logger(__name__)
 
 from vllm.utils.platform_utils import is_pin_memory_available
-from vllm.envs import is_lk_moe_feature_enabled, is_lk_moe_cpu_layer, is_lk_moe_gpu_resident_layer, is_lk_moe_gpu_prefill_layer, get_gpu_prefetch_window, get_gpu_prefill_min_batch_size, is_lk_moe_use_gpu_prefill, is_in_profile_run
+from vllm.utils.lk_moe_env import (
+    fill_lk_moe_config,
+    get_gpu_prefill_engine,
+    get_gpu_prefill_min_batch_size,
+    get_super_chunk_size,
+    get_verify_resident,
+    is_lk_moe_cpu_layer,
+    is_lk_moe_feature_enabled,
+    is_lk_moe_gpu_prefill_layer,
+    is_lk_moe_gpu_resident_layer,
+    is_lk_moe_use_gpu_prefill,
+    is_lk_pool_decode_enabled,
+    is_lk_pool_det_split_enabled,
+    is_lk_pool_enabled,
+    is_lk_pool_layer,
+    lk_pool_split_probe_enabled,
+)
 if is_lk_moe_feature_enabled():
     import  lk_moe  
+    import triton
+    from lk_moe._hybrid_gemv_kernel import (
+        gather_rows, slot_table_fill, moe_gateup, reduce_gate, moe_down,
+        reduce_down)
     logger.info("lk_moe module is available, lk::MOE implementation will be used")
 else:
-    logger.error("Failed to import lk_moe module or LVLLM_MOE_NUMA_ENABLED is not set to 1, lk::MOE implementation will not be available")
+    logger.error("Failed to import lk_moe module or LK_MOE_HYBRID_ENABLED is not set to 1, lk::MOE implementation will not be available")
+
+# Pool-decode determinism: publish the claimed batch and make the GPU half
+# stream-wait on that batch's copy fence before reading slots (same contract as
+# the sglang integration). The knobs live in the central registry.
+_LK_POOL_DET_SPLIT = bool(
+    is_lk_moe_feature_enabled() and is_lk_pool_det_split_enabled()
+)
+_LK_POOL_SPLIT_PROBE = bool(
+    is_lk_moe_feature_enabled() and lk_pool_split_probe_enabled()
+)
+_LK_POOL_PROBE_N = 0
+if is_lk_moe_feature_enabled():
+    try:
+        lk_moe.pool_set_det_split(_LK_POOL_DET_SPLIT)
+    except Exception:
+        pass
 
 
 def _index_expert_mapping(
@@ -89,6 +126,10 @@ class RoutedExperts(PluggableLayer):
 
     # Hash-routing table, owned by the gate.
     hash_indices_table: torch.Tensor | None = None
+
+    # Verify-batch row multiplier (NEXTN draft rows per real token) agreed
+    # across pool layers at init; single source of truth for decode sizing.
+    _pool_verify_rows_mult = 1
 
     def __init__(
         self,
@@ -185,19 +226,49 @@ class RoutedExperts(PluggableLayer):
         self.ep_rank = self.ep_group.rank_in_group
         
         self.max_num_seqs = self._get_max_num_seqs(vllm_config)
+        # Slab sizing: one contiguous pool allocation per weight type.
+        # Members = non-resident layers; the pool tier off means zero rows.
+        self.pool_member_layers = 0
+        if is_lk_pool_enabled() and vllm_config.model_config is not None:
+            n_layers = int(getattr(vllm_config.model_config.hf_config,
+                                   "num_hidden_layers", 0))
+            self.pool_member_layers = sum(
+                1 for i in range(n_layers)
+                if not is_lk_moe_gpu_resident_layer(i))
         
         self.is_gpu_resident_layer = is_lk_moe_gpu_resident_layer(self.layer_name) 
         self.is_gpu_prefill_layer = is_lk_moe_gpu_prefill_layer(self.layer_name)
         self.is_cpu_layer = is_lk_moe_cpu_layer(self.layer_name)
+        # Expert-pool decode GPU half (main layers only; draft stays CPU).
+        self.is_pool_layer = is_lk_pool_layer(self.layer_name)
+        self.pool_decode = is_lk_pool_decode_enabled() and self.is_pool_layer
+        self._pool_layer_info = None
+        self._gpu_prefill_driver = None
+        self.max_running_requests = max(1, vllm_config.scheduler_config.max_num_seqs)
+        spec_config = vllm_config.speculative_config
+        self.speculative_num_draft_tokens = (
+            1 + int(spec_config.num_speculative_tokens)
+            if spec_config is not None
+            and int(spec_config.num_speculative_tokens or 0) > 0
+            else 1
+        )
         if get_gpu_prefill_min_batch_size() > vllm_config.scheduler_config.max_num_batched_tokens:
             logger.error(
                 f"gpu_prefill_min_batch_size ({get_gpu_prefill_min_batch_size()}) "
                 f"must be less than or equal to max_num_batched_tokens "
                 f"({vllm_config.scheduler_config.max_num_batched_tokens})"
             )
-        self.max_num_batched_tokens = vllm_config.scheduler_config.max_num_batched_tokens
+        self.max_num_batched_tokens = max(
+            vllm_config.scheduler_config.max_num_batched_tokens,
+            get_super_chunk_size(),
+        )
         self.max_num_group_batch_size = self.get_max_num_group_batch_size()
         self.use_gpu_prefill = is_lk_moe_use_gpu_prefill()
+        if self.use_gpu_prefill and get_gpu_prefill_engine() != "cutlass":
+            raise RuntimeError(
+                "lk_moe: LK_GPU_PREFILL_ENGINE="
+                f"{get_gpu_prefill_engine()!r} has no driver in lvllm "
+                "(only 'cutlass' is implemented)")
          
         from vllm.model_executor.layers.fused_moe.config import MoEActivation
         
@@ -1516,15 +1587,25 @@ class RoutedExperts(PluggableLayer):
             ForwardContext,
             get_forward_context,
             is_forward_context_available,
+            is_model_capture_mode,
         )
         from vllm.config import CUDAGraphMode
+        if is_model_capture_mode():
+            return False
         forward_context = get_forward_context()
         if (hasattr(forward_context, 'cudagraph_runtime_mode') and 
             forward_context.cudagraph_runtime_mode != CUDAGraphMode.NONE):
             return False
         if torch.cuda.is_current_stream_capturing():
             return False
-        return self.is_gpu_prefill_layer and hidden_states.size(0) >= get_gpu_prefill_min_batch_size()     
+        # Same gate as lsglang's should_prefill_gpu: the driver (or its
+        # absence) was decided once at init; a gpu-prefill layer whose probe
+        # failed keeps the CPU baseline.
+        return (
+            self.is_gpu_prefill_layer
+            and self._gpu_prefill_driver is not None
+            and hidden_states.size(0) >= get_gpu_prefill_min_batch_size()
+        )
     
     def _zero_tensor(self, tensor: torch.Tensor):
         if tensor is not None:
@@ -1580,12 +1661,18 @@ class RoutedExperts(PluggableLayer):
                     return
                 
                 self._initialize_cuda_graph_buffers()
+                lk = getattr(self, "lk_moe", None)
+                if lk is not None:
+                    from lk_moe.prefill_cutlass import register_instance
+
+                    register_instance(lk)
                 logger.info(f"Initialized lk_moe with {self.local_num_experts} experts for layer {self.layer_name} [" + 
                 ("CPU" if not self.is_gpu_resident_layer else "GPU") + "]")
-        except Exception as e:
-            logger.error(f"Failed to initialize lk_moe: {e}") 
-            self.lk_moe = None
-            self.lk_moe_config = None
+        except Exception:
+            # Same doctrine as lsglang: a broken lk_moe init is a broken
+            # boot, not a layer that silently degrades to the wrong tier.
+            logger.exception("lk_moe init failed for layer %s", self.layer_name)
+            raise
             
     def clean_weights_after_loading(self): 
         if self.is_gpu_resident_layer:
@@ -1679,6 +1766,8 @@ class RoutedExperts(PluggableLayer):
         if self.swiglu_limit is not None:
             self.lk_moe_config.swiglu_limit = self.swiglu_limit
         self.lk_moe_config.use_gpu_prefill = self.use_gpu_prefill
+        fill_lk_moe_config(self.lk_moe_config, self.layer_name)
+        self.lk_moe_config.pool_member_layers = self.pool_member_layers
 
         # no global scale
         if self.params_dtype == torch.bfloat16:
@@ -1762,6 +1851,8 @@ class RoutedExperts(PluggableLayer):
         if self.swiglu_limit is not None:
             self.lk_moe_config.swiglu_limit = self.swiglu_limit
         self.lk_moe_config.use_gpu_prefill = self.use_gpu_prefill
+        fill_lk_moe_config(self.lk_moe_config, self.layer_name)
+        self.lk_moe_config.pool_member_layers = self.pool_member_layers
 
         # no global scale
         if self.params_dtype == torch.bfloat16:
@@ -1814,6 +1905,8 @@ class RoutedExperts(PluggableLayer):
         if self.swiglu_limit is not None:
             self.lk_moe_config.swiglu_limit = self.swiglu_limit
         self.lk_moe_config.use_gpu_prefill = self.use_gpu_prefill
+        fill_lk_moe_config(self.lk_moe_config, self.layer_name)
+        self.lk_moe_config.pool_member_layers = self.pool_member_layers
         
         # no scale
         if self.params_dtype == torch.bfloat16:
@@ -1888,6 +1981,8 @@ class RoutedExperts(PluggableLayer):
         if self.swiglu_limit is not None:
             self.lk_moe_config.swiglu_limit = self.swiglu_limit
         self.lk_moe_config.use_gpu_prefill = self.use_gpu_prefill
+        fill_lk_moe_config(self.lk_moe_config, self.layer_name)
+        self.lk_moe_config.pool_member_layers = self.pool_member_layers
         
          
         if self.params_dtype == torch.bfloat16:
@@ -1959,6 +2054,8 @@ class RoutedExperts(PluggableLayer):
         if self.swiglu_limit is not None:
             self.lk_moe_config.swiglu_limit = self.swiglu_limit
         self.lk_moe_config.use_gpu_prefill = self.use_gpu_prefill
+        fill_lk_moe_config(self.lk_moe_config, self.layer_name)
+        self.lk_moe_config.pool_member_layers = self.pool_member_layers
 
         # no global scale
         if self.params_dtype == torch.bfloat16:
@@ -2006,20 +2103,256 @@ class RoutedExperts(PluggableLayer):
                 dtype=torch.float32,
                 requires_grad=False
             ).contiguous()
-                 
+
+        self._init_pool()
+
+    def _init_pool(self):
+        if not (self.is_pool_layer or self.is_gpu_prefill_layer):
+            return
+        self._gpu_prefill_driver = None
+        if self.is_gpu_prefill_layer:
+            # Engine selector (LK_GPU_PREFILL_ENGINE, default cutlass): a GPU-
+            # prefill layer that cannot go GPU is a broken boot, not a CPU
+            # layer -- probe failure raises and the boot dies with it (same
+            # doctrine as lsglang).
+            if get_gpu_prefill_engine() == "cutlass":
+                from lk_moe.prefill_cutlass import CutlassPrefill
+                drv = CutlassPrefill.probe(self.lk_moe)
+                if drv is None:
+                    raise RuntimeError(
+                        f"GPU-prefill layer {self.layer_name}: cutlass engine "
+                        f"probe failed (build lacks gpu_prefill or arena not "
+                        f"initialised -- check cfg.use_gpu_prefill)")
+                self._gpu_prefill_driver = drv
+        self._pool_layer_info = None
+        self.lk_moe.pool_gpu_report(False)
+        if self.pool_decode:
+            self._init_pool_decode()
+
+    def _init_pool_decode(self):
+        info = self.lk_moe.pool_layer_info()
+        gds = self.lk_moe.pool_gds()
+        if not gds.get("pool_decode_on", 0):
+            logger.warning(
+                "pool_decode on but lk_moe declined for layer %s "
+                "(master/membership/format/view)", self.layer_name)
+            return
+        caps = (info or {}).get("kernel_caps")
+        if not caps:
+            logger.warning(
+                "pool_decode on but no kernel_caps for layer %s format",
+                self.layer_name)
+            return
+        cfg = self.lk_moe.cfg
+        H, I, k = cfg.hidden_size, cfg.intermediate_size, cfg.top_k
+        SG = caps["scale_group"]
+        SB = caps["stride_n"]
+        PK = caps["packed_k_per_iter"]
+        ITERS = 16
+        NB_GATEUP, NB_DOWN = I // SB, H // SB
+        total_iters = (H // PK) // ITERS
+        NGK = next(cand for cand in (16, 8, 4, 2, 1)
+                   if total_iters % cand == 0
+                   and k * NB_GATEUP * cand <= 2048)
+        KS = total_iters // NGK
+        # Sized ONCE from the concurrency limit: every decode batch is covered
+        # by construction, no runtime growth path.
+        cap = max(1, self.max_running_requests)
+        rpt0 = self.speculative_num_draft_tokens
+        mult = rpt0 if (get_verify_resident() and rpt0 > 1) else 1
+        RoutedExperts._pool_verify_rows_mult = max(
+            RoutedExperts._pool_verify_rows_mult, mult)
+        rows = cap * k * RoutedExperts._pool_verify_rows_mult
+        dev = torch.cuda.current_device()
+        if not hasattr(RoutedExperts, "pool_hbuf"):
+            RoutedExperts._pool_k = k
+            RoutedExperts._pool_decode_cap = cap
+            RoutedExperts.pool_hbuf = torch.zeros(
+                (rows, 2 * I), dtype=torch.float32, device=dev)
+            RoutedExperts.pool_gout = torch.zeros(
+                (cap * RoutedExperts._pool_verify_rows_mult, H),
+                dtype=torch.float32, device=dev)
+            RoutedExperts.pool_slot_tab = torch.full(
+                (rows,), -1, dtype=torch.int32, device=dev)
+            RoutedExperts.pool_gathered_ids = torch.zeros(
+                (rows,), dtype=torch.int32, device=dev)
+            RoutedExperts.pool_gathered_weights = torch.zeros(
+                (rows,), dtype=torch.float32, device=dev)
+            RoutedExperts.pool_stream = torch.cuda.Stream()
+        if (not hasattr(RoutedExperts, "pool_hpart")
+                or RoutedExperts.pool_hpart.shape != (NGK, rows, 2 * I)):
+            RoutedExperts.pool_hpart = torch.zeros(
+                (NGK, rows, 2 * I), dtype=torch.float32, device=dev)
+            RoutedExperts.pool_gout_part = torch.zeros(
+                (rows, H), dtype=torch.float32, device=dev)
+        self._pool_layer_info = dict(
+            layer=info["layer"],
+            snapshot_addr=info["snapshot_addr"],
+            weight_addr=info["weight_addr"], scale_addr=info["scale_addr"],
+            slot_bytes=info["slot_weight_bytes"],
+            slot_scale_bytes=info["slot_scale_bytes"],
+            gateup_gds=gds["gateup_global_scale_addr"],
+            down_gds=gds["down_global_scale_addr"],
+            H=H, I=I, k=k, NB_GATEUP=NB_GATEUP, NB_DOWN=NB_DOWN,
+            NGK=NGK, KS=KS, ITERS=ITERS, **caps,
+        )
+        self.lk_moe.pool_gpu_report(True)
+        logger.info(
+            "lk_moe pool decode: layer %s H=%d I=%d k=%d cap=%d format=%s "
+            "scale_group=%d stride_n=%d rows=%d",
+            self.layer_name, H, I, k, cap, caps.get("format"), SG, SB, rows)
+
+    def _pool_decode_launch(self, hidden_states, topk_ids, topk_weights,
+                            real_tokens=None, rows_per_token=1):
+        global _LK_POOL_PROBE_N
+        geo = self._pool_layer_info
+        if (_LK_POOL_SPLIT_PROBE
+                and not torch.cuda.is_current_stream_capturing()
+                and topk_ids.numel() <= 32):
+            try:
+                ids = topk_ids.flatten().tolist()
+                layer = geo["layer"]
+                claim = [lk_moe.pool_slot(layer, e) for e in ids]
+                ready = [lk_moe.pool_ready_slot(layer, e) for e in ids]
+                snap = [lk_moe.pool_snapshot_slot(layer, e) for e in ids]
+                _LK_POOL_PROBE_N += 1
+                logger.warning(
+                    "[splitprobe] seq=%d L=%d n=%d claim=%d ready=%d snap=%d "
+                    "ids=%s snapslots=%s",
+                    _LK_POOL_PROBE_N, layer, len(ids),
+                    sum(s >= 0 for s in claim), sum(s >= 0 for s in ready),
+                    sum(s >= 0 for s in snap), ids, snap,
+                )
+            except Exception as e:
+                logger.warning("[splitprobe] error %r", e)
+        H, I, k = geo["H"], geo["I"], geo["k"]
+        SG, PK = geo["scale_group"], geo["packed_k_per_iter"]
+        SSZ = int(geo.get("scale_size", 1))
+        real_tokens = hidden_states.size(0) if real_tokens is None else real_tokens
+        n_slots = real_tokens * k
+        hpart, hbuf, gout = (
+            RoutedExperts.pool_hpart, RoutedExperts.pool_hbuf,
+            RoutedExperts.pool_gout)
+        gout_part = RoutedExperts.pool_gout_part
+        slot_tab = RoutedExperts.pool_slot_tab
+        side_stream = RoutedExperts.pool_stream
+        all_rows = (rows_per_token > 1
+                    and RoutedExperts._pool_verify_rows_mult > 1)
+        if rows_per_token > 1 and not all_rows:
+            gathered_ids = RoutedExperts.pool_gathered_ids[:n_slots]
+            gathered_weights = RoutedExperts.pool_gathered_weights[:n_slots]
+        elif all_rows:
+            # row-major slot space: every batch row (real AND draft) gets its
+            # own k slots; kernels see rows_per_token == 1 addressing.
+            n_slots = real_tokens * rows_per_token * k
+            gathered_ids, gathered_weights = topk_ids, topk_weights
+            real_tokens = real_tokens * rows_per_token   # reduce works per row
+            rows_per_token = 1
+        else:
+            gathered_ids, gathered_weights = topk_ids, topk_weights
+        side_stream.wait_stream(torch.cuda.current_stream())
+        if _LK_POOL_DET_SPLIT:
+            try:
+                lk_moe.pool_wait_fence(
+                    geo["layer"], side_stream.cuda_stream)
+            except Exception:
+                pass
+        with torch.cuda.stream(side_stream):
+            if rows_per_token > 1:
+                gather_rows[(triton.cdiv(n_slots, 128),)](
+                    topk_ids, topk_weights, gathered_ids, gathered_weights,
+                    k, rows_per_token, n_slots,
+                    BLOCK=triton.next_power_of_2(n_slots))
+            # ONE volatile gather of the mapped snapshot into a device table:
+            # per-program host reads were the whole speed regression.
+            slot_table_fill[(1,)](
+                gathered_ids, geo["snapshot_addr"], slot_tab, n_slots,
+                BLOCK=triton.next_power_of_2(n_slots))
+            gout_part.zero_()
+            moe_gateup[(n_slots, geo["NB_GATEUP"], geo["NGK"])](
+                gathered_ids, slot_tab,
+                geo["weight_addr"][0], geo["scale_addr"][0],
+                geo["weight_addr"][1], geo["scale_addr"][1], geo["gateup_gds"],
+                hpart, hidden_states, n_slots, k, rows_per_token,
+                GDS_COLS=2 if geo["has_gate"] else 1,
+                NCOL=I, K_PER_BLOCK=H // PK, SCALE_GROUPS_BLK=H // SG,
+                SLOT_BYTES=geo["slot_bytes"][0],
+                SLOT_SCALE_BYTES=geo["slot_scale_bytes"][0],
+                HIDDEN=H, ITERS=geo["ITERS"], SCALE_GROUP=SG,
+                FORMAT=geo["format"], FORMAT_PACKED_K=PK, SCALE_SIZE=SSZ,
+                HAS_GATE=geo["has_gate"], ACTIVATION=geo["activation"],
+                ALPHA=geo["swiglu_alpha"], LIMIT=geo["swiglu_limit"],
+                KS=geo["KS"], NGK=geo["NGK"])
+            reduce_gate[(triton.cdiv(n_slots * 2 * I, 1024),)](
+                hpart, hbuf, n_slots * 2 * I, NGK=geo["NGK"], BLOCK=1024)
+            moe_down[(n_slots, geo["NB_DOWN"])](
+                gathered_ids, slot_tab, gathered_weights,
+                geo["weight_addr"][2], geo["scale_addr"][2], geo["down_gds"],
+                hbuf, gout_part, n_slots,
+                NCOL=H, N_PARTIAL=I, K_PER_BLOCK=I // PK,
+                SCALE_GROUPS_BLK=I // SG,
+                SLOT_BYTES=geo["slot_bytes"][2],
+                SLOT_SCALE_BYTES=geo["slot_scale_bytes"][2],
+                ITERS=geo["ITERS"], SCALE_GROUP=SG,
+                FORMAT=geo["format"], FORMAT_PACKED_K=PK, SCALE_SIZE=SSZ,
+                HAS_GATE=geo["has_gate"], ACTIVATION=geo["activation"],
+                ALPHA=geo["swiglu_alpha"], LIMIT=geo["swiglu_limit"])
+            reduce_down[(triton.cdiv(H, 1024),)](
+                gout_part, gout[:real_tokens], slot_tab, HIDDEN=H,
+                SLOTS_PER_TOKEN=k, BATCH=real_tokens, BLOCK=1024,
+                RESIDENT_ONLY=1)
+        # fence for worker copies: record the pool stream's progress so no
+        # inbound H2D lands before these gemvs finish reading their slots.
+        self.lk_moe.pool_record_aux(RoutedExperts.pool_stream.cuda_stream)
+
     def _cpu_decode(self, hidden_states, topk_weights, topk_ids):
+        bs = hidden_states.size(0)
+        draft_tokens = self.speculative_num_draft_tokens
+        rows_per_token = (draft_tokens
+                          if (draft_tokens > 1 and bs % draft_tokens == 0)
+                          else 1)
+        real_tokens = bs // rows_per_token
+
+        covered = (self._pool_layer_info is not None
+                   and real_tokens <= RoutedExperts._pool_decode_cap)
+
+        if covered:
+            self.lk_moe.pool_gpu_report(True)
+            self._pool_decode_launch(hidden_states, topk_ids, topk_weights,
+                                     real_tokens=real_tokens,
+                                     rows_per_token=rows_per_token)
+        else:
+            self.lk_moe.pool_gpu_report(False)
+
         stream_ptr = torch.cuda.current_stream().cuda_stream
         self.lk_moe.cpu_decode(
             stream_ptr,
-            hidden_states.size(0),
+            bs,
             self.top_k,
             hidden_states.data_ptr(),
             topk_ids.data_ptr(),
             topk_weights.data_ptr(),
-            RoutedExperts.output_gpu.data_ptr()
+            RoutedExperts.output_gpu.data_ptr(),
+            real_tokens=real_tokens,
+            rows_per_token=rows_per_token,
         )
-        
-        output = RoutedExperts.output_gpu[:hidden_states.size(0)]
+
+        if covered:
+            torch.cuda.current_stream().wait_stream(RoutedExperts.pool_stream)
+            if rows_per_token == 1:
+                RoutedExperts.output_gpu[:real_tokens].add_(
+                    RoutedExperts.pool_gout[:real_tokens])
+            elif RoutedExperts._pool_verify_rows_mult > 1:
+                n_rows = real_tokens * rows_per_token
+                RoutedExperts.output_gpu[:n_rows].add_(
+                    RoutedExperts.pool_gout[:n_rows])
+            else:
+                for tok in range(real_tokens):
+                    real_row = tok * rows_per_token
+                    RoutedExperts.output_gpu[real_row:real_row + 1].add_(
+                        RoutedExperts.pool_gout[tok:tok + 1])
+
+        output = RoutedExperts.output_gpu[:bs]
         if self.check_nan_in_output:
             torch.nan_to_num(output, nan=0.0, out=output)
         return output.to(hidden_states.dtype)
@@ -2052,20 +2385,18 @@ class RoutedExperts(PluggableLayer):
         return output_gpu
 
     def _gpu_prefill(self, hidden_states, topk_weights, topk_ids):
-        output = torch.empty_like(hidden_states) 
-        self.lk_moe.gpu_prefill(
-            hidden_states.data_ptr(),
-            output.data_ptr(),
-            topk_ids.data_ptr(),
-            topk_weights.data_ptr(),
-            hidden_states.size(0),
-            topk_ids.size(1),
-            torch.cuda.current_stream().cuda_stream,
-        ) 
+        # The cutlass engine runs through lk_moe's PrefillDriver contract
+        # (same as lsglang): the fp32 weighted sum accumulates in the static
+        # arena (booked via get_device_mem_usage) and rounds once here; the
+        # driver also walks token blocks above the arena cap.
+        ev, gout = self._gpu_prefill_driver.prefill_gpu(
+            hidden_states, topk_ids, topk_weights)
+        torch.cuda.current_stream().wait_event(ev)
+        out = gout.to(hidden_states.dtype)
         if self.check_nan_in_output:
-            bad_mask = torch.isnan(output) | torch.isinf(output)
+            bad_mask = torch.isnan(out) | torch.isinf(out)
             if bad_mask.any():
-                output.masked_fill_(bad_mask, 0.0)
-        return output
+                out.masked_fill_(bad_mask, 0.0)
+        return out
 # Mark the RoutedExperts weight_loader as supporting MoE-specific parameters
 RoutedExperts.weight_loader.supports_moe_loading = True  # type: ignore[attr-defined]
